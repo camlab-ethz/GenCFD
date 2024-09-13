@@ -255,7 +255,7 @@ class ClassifierFreeHybrid:
   ) -> DenoiseFn:
     """Constructs denoise function with classifier free guidance."""
 
-    def _guided_denoise(x: Tensor, sigma: Tensor, cond: TensorMapping) -> Tensor:
+    def _guided_denoise(x: Tensor, sigma: Tensor, cond: TensorMapping, y: Tensor = None) -> Tensor:
       masked_cond = {
           k: (
               v  # pylint: disable=g-long-ternary
@@ -272,3 +272,5 @@ class ClassifierFreeHybrid:
       return denoised
 
     return _guided_denoise
+  
+  

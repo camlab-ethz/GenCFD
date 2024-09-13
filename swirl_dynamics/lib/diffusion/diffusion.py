@@ -21,7 +21,7 @@ import torch as th
 import numpy as np
 
 Tensor = th.Tensor
-Numeric = Union[bool, int, float, np.ndarray, th.tensor]
+Numeric = Union[bool, int, float, np.ndarray, th.Tensor]
 ScheduleFn = Callable[[Numeric], Numeric]
 
 MIN_DIFFUSION_TIME = 0.0
@@ -54,15 +54,15 @@ class InvertibleSchedule:
 
 def sigma2logsnr(sigma: InvertibleSchedule) -> InvertibleSchedule:
   """Converts a sigma schedule to a logsnr schedule."""
-  forward = lambda t: -2 * th.log(th.Tensor(sigma(t)))
-  inverse = lambda logsnr: sigma.inverse(th.exp(-logsnr / 2))
+  forward = lambda t: -2 * th.log(th.as_tensor(sigma(t)))
+  inverse = lambda logsnr: sigma.inverse(th.exp(th.as_tensor(-logsnr / 2)))
   return InvertibleSchedule(forward, inverse)
 
 
 def logsnr2sigma(logsnr: InvertibleSchedule) -> InvertibleSchedule:
   """Converts a logsnr schedule to a sigma schedule."""
-  forward = lambda t: th.exp(-logsnr(t) / 2)
-  inverse = lambda sigma: logsnr.inverse(-2 * th.log(th.Tensor(sigma)))
+  forward = lambda t: th.exp(th.as_tensor(-logsnr(t) / 2))
+  inverse = lambda sigma: logsnr.inverse(-2 * th.log(th.as_tensor(sigma)))
   return InvertibleSchedule(forward, inverse)
 
 
@@ -116,8 +116,8 @@ class Diffusion:
     Returns:
       A variance preserving diffusion scheme.
     """
-    var = th.square(th.tensor(data_std))
-    scale = lambda t: th.sqrt(var / (var + th.square(sigma(t))))
+    var = th.square(th.as_tensor(data_std))
+    scale = lambda t: th.sqrt(var / (var + th.square(th.as_tensor(sigma(t)))))
     return cls(scale=scale, sigma=sigma)
 
   @classmethod
@@ -138,8 +138,8 @@ class Diffusion:
     Returns:
       A variance exploding diffusion scheme.
     """
-    scaled_forward = lambda t: sigma(t) * data_std
-    scaled_inverse = lambda y: sigma.inverse(y / data_std)
+    scaled_forward = lambda t: th.as_tensor(sigma(t)) * data_std
+    scaled_inverse = lambda y: th.as_tensor(sigma.inverse(y / data_std))
     scaled_sigma = InvertibleSchedule(scaled_forward, scaled_inverse)
     return cls(scale=th.ones_like, sigma=scaled_sigma)
 
@@ -196,17 +196,19 @@ def tangent_noise_schedule(
   Returns:
     A tangent noise schedule.
   """
-  if not -np.pi / 2 < start < end < np.pi / 2:
+  if not -th.pi / 2 < start < end < th.pi / 2:
     raise ValueError("Must have -pi/2 < `start` < `end` < pi/2.")
-
+  
   in_rescale = _linear_rescale(
       in_min=0.0, in_max=MAX_DIFFUSION_TIME, out_min=start, out_max=end
   )
   out_rescale = _linear_rescale(
       in_min=np.tan(start), in_max=np.tan(end), out_min=0.0, out_max=clip_max
   )
-  sigma = lambda t: out_rescale(th.tan(th.Tensor(in_rescale(t))))
-  inverse = lambda y: in_rescale.inverse(th.arctan(th.Tensor(out_rescale.inverse(y))))
+  
+  sigma = lambda t: out_rescale(th.tan(th.as_tensor(in_rescale(t))))
+  inverse = lambda y: in_rescale.inverse(th.arctan(th.as_tensor(out_rescale.inverse(y)))) 
+                     
   return InvertibleSchedule(sigma, inverse)
 
 
@@ -247,10 +249,12 @@ def power_noise_schedule(
   out_rescale = _linear_rescale(
       in_min=start**p, in_max=end**p, out_min=0.0, out_max=clip_max
   )
-  sigma = lambda t: out_rescale(th.pow(th.tensor(in_rescale(t)), p))
+
+  sigma = lambda t: out_rescale(th.pow(th.as_tensor(in_rescale(t)), p)) 
   inverse = lambda y: in_rescale.inverse(  # pylint:disable=g-long-lambda
-      th.pow(out_rescale.inverse(y), 1 / p)
-  )
+      th.pow(th.as_tensor(out_rescale.inverse(y)), 1 / p)
+      )
+  
   return InvertibleSchedule(sigma, inverse)
 
 
@@ -289,9 +293,10 @@ def exponential_noise_schedule(
   out_rescale = _linear_rescale(
       in_min=base**start, in_max=base**end, out_min=0.0, out_max=clip_max
   )
-  sigma = lambda t: out_rescale(th.pow(th.tensor(base), in_rescale(t)))
+
+  sigma = lambda t: out_rescale(th.pow(th.as_tensor(base), in_rescale(t)))
   inverse = lambda y: in_rescale.inverse(  # pylint:disable=g-long-lambda
-      th.log(out_rescale.inverse(y)) / th.log(th.tensor(base))
+      th.log(th.as_tensor(out_rescale.inverse(y))) / th.log(th.as_tensor(base))
   )
   return InvertibleSchedule(sigma, inverse)
 
@@ -316,7 +321,9 @@ def _uniform_samples(
   """Generates samples from uniform distribution on [0, 1]."""
   if uniform_grid:
     s0 = th.rand((), generator=rng).to(th.float32)
-    grid = th.linspace(0, 1, np.prod(shape)).to(th.float32)
+    num_elements = int(np.prod(shape))
+    step_size = 1 / num_elements
+    grid = th.linspace(0, 1 - step_size, num_elements).to(th.float32)
     samples = th.remainder(grid + s0, 1).reshape(shape)
   else:
     samples = th.rand(shape, generator=rng).to(th.float32)
@@ -330,7 +337,8 @@ def log_uniform_sampling(
 
   def _noise_sampling(rng: th.Generator, shape: tuple[int, ...]) -> Tensor:
     samples = _uniform_samples(rng, shape, uniform_grid)
-    log_min, log_max = th.log(th.tensor(clip_min)), th.log(scheme.sigma_max)
+    log_min = th.log(th.as_tensor(clip_min, dtype=samples.dtype, device=samples.device))
+    log_max = th.log(th.as_tensor(scheme.sigma_max, dtype=samples.dtype, device=samples.device))
     samples = (log_max - log_min) * samples + log_min
     return th.exp(samples)
 
@@ -346,7 +354,7 @@ def time_uniform_sampling(
     samples = _uniform_samples(rng, shape, uniform_grid)
     min_t = scheme.sigma.inverse(clip_min)
     samples = (MAX_DIFFUSION_TIME - min_t) * samples + min_t
-    return th.tensor(scheme.sigma(samples), dtype=th.float32)
+    return th.as_tensor(scheme.sigma(samples))
 
   return _noise_sampling
 
@@ -374,9 +382,7 @@ def normal_sampling(
   """
 
   def _noise_sampler(rng: th.Generator, shape: tuple[int, ...]) -> Tensor:
-    mean = th.zeros(size=shape, dtype=th.float32)
-    std = th.ones(size=shape, dtype=th.float32)
-    log_sigma = th.normal(mean=mean, std=std, generator=rng).to(th.float32)
+    log_sigma = th.normal(mean=0, std=1, size=shape, generator=rng).to(th.float32)
     log_sigma = p_mean + p_std * log_sigma
     return th.clamp(th.exp(log_sigma), min=clip_min, max=scheme.sigma_max)
 
@@ -390,12 +396,12 @@ def normal_sampling(
 
 class NoiseLossWeighting(Protocol):
 
-  def __call__(self, sigma: th.tensor) -> Tensor:
+  def __call__(self, sigma: Tensor) -> Tensor:
     """Returns weights of the input noise levels in the loss function."""
     ...
 
 
-def inverse_squared_weighting(sigma: th.tensor) -> Tensor:
+def inverse_squared_weighting(sigma: Tensor) -> Tensor:
   return 1 / th.square(sigma)
 
 
@@ -412,7 +418,7 @@ def edm_weighting(data_std: float = 1.0) -> NoiseLossWeighting:
     The weighting function.
   """
 
-  def _weight_fn(sigma: th.tensor) -> Tensor:
+  def _weight_fn(sigma: Tensor) -> Tensor:
     return (th.square(th.tensor(data_std)) + th.square(sigma)) / th.square(
         data_std * sigma
     )
