@@ -90,31 +90,22 @@ class InfillFromSlices:
     ) -> Tensor:
       def constraint(xt: Tensor) -> tuple[Tensor, Tensor]:
         denoised = denoise_fn(xt, sigma, cond)
-        denoised = denoised.requires_grad_(True)
         error = th.sum(
             (denoised[self.slices] - guidance_inputs['observed_slices']) ** 2
         )
-        print(f"x slice shape: {x[self.slices].shape}")
-        print(f"denoised slice shape: {denoised[self.slices].shape}")
-        print(f"Observed slices shape: {guidance_inputs['observed_slices'].shape}")
-        print(f"error.requires_grad: {error.requires_grad}")
+
         return error, denoised
 
       x = x.requires_grad_(True)
-      print(f"x.requires_grad: {x.requires_grad}")  # Debugging
       error, denoised = constraint(x)
 
-      print(f"error.requires_grad: {error.requires_grad}")  # Debugging
-      print(f"error.grad_fn: {error.grad_fn}")  # Debugging
-      print(f"x.grad_fn: {x.grad_fn}")
-
-      constraint_grad = grad(error, x, retain_graph=True, allow_unused=True)[0]
+      constraint_grad = grad(error, x, retain_graph=True)[0]
       # Rescale based on the fraction of values being conditioned.
       cond_fraction = th.prod(th.tensor(x[self.slices].shape)) / th.prod(
           th.tensor(x.shape)
       )
       guide_strength = self.guide_strength / cond_fraction
-      denoised -= guide_strength * constraint_grad
+      denoised = denoised - guide_strength * constraint_grad
       denoised[self.slices] = guidance_inputs["observed_slices"]
       return denoised
 
@@ -185,23 +176,20 @@ class InterlockingFrames:
 
       def constraint(xt: Tensor) -> tuple[Tensor, Tensor]:
         denoised = denoise_fn(xt, sigma, cond)
-        denoised = denoised.requires_grad_(True)
-        return (
-            th.sum(
-                (
-                    denoised[:, 1:, :self.overlap_length]
-                    - denoised[:, :-1, -self.overlap_length:]
-                )
-                ** 2
-            ),
-            denoised,
+        error = th.sum(
+          (
+            denoised[:, 1:, :self.overlap_length]
+            - denoised [:, :-1, -self.overlap_length:]
+          )
+          ** 2
         )
+        return error, denoised
 
       x = x.requires_grad_(True)
       error, denoised = constraint(x)
     
       constraint_grad = grad(error, x, retain_graph=True, allow_unused=True)[0]
-      denoised -= self.guide_strength * constraint_grad
+      denoised = denoised - self.guide_strength * constraint_grad
 
       # Interchanging information at each side of the interface.
       if self.style not in ['average', 'swap']:
@@ -278,8 +266,9 @@ class ClassifierFreeHybrid:
           for k, v in cond.items()
       }
       uncond_denoised = denoise_fn(x, sigma, masked_cond)
-      return (1 + self.guidance_strength) * denoise_fn(
-          x, sigma, cond
-      ) - self.guidance_strength * uncond_denoised
+      denoised = (1 + self.guidance_strength) * denoise_fn(
+        x, sigma, cond) - self.guidance_strength * uncond_denoised
+      
+      return denoised
 
     return _guided_denoise

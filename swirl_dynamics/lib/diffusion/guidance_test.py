@@ -41,7 +41,8 @@ class GuidanceTransformsTest(unittest.TestCase):
 
         def _dummy_denoiser(x, sigma, cond=None):
           del sigma, cond
-          return th.ones_like(x)
+          # return th.ones_like(x)
+          return x
 
         guided_denoiser = superresolve(
             _dummy_denoiser, {"observed_slices": th.tensor(0.0)}
@@ -51,9 +52,9 @@ class GuidanceTransformsTest(unittest.TestCase):
         self.assertEqual(denoised.shape, test_dim)
         self.assertEqual(guided_elements.shape, guide_shape)
 
-        expected = np.ones(test_dim)
+        expected = th.ones(test_dim)
         expected[superresolve.slices] = 0.0
-        np.testing.assert_allclose(denoised, expected)
+        th.testing.assert_close(denoised, expected)
 
 
   def test_classifier_free_hybrid(self):
@@ -78,7 +79,7 @@ class GuidanceTransformsTest(unittest.TestCase):
           del sigma
           out = th.ones_like(x)
           for v in cond.values():
-            out += v
+            out = out + v
           return out
 
         guided_denoiser = cf_hybrid(_dummy_denoiser, {})
@@ -101,7 +102,7 @@ class GuidanceTransformsTest(unittest.TestCase):
 
         def _dummy_denoiser(x, sigma, cond=None):
           del sigma, cond
-          return th.ones_like(x)
+          return x
 
         guided_denoiser = interlock(_dummy_denoiser)
         denoised = guided_denoiser(th.ones(test_dim, requires_grad=True), th.tensor(0.1), None)
