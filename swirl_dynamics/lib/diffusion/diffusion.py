@@ -424,3 +424,42 @@ def edm_weighting(data_std: float = 1.0) -> NoiseLossWeighting:
     )
 
   return _weight_fn
+
+
+def likelihood_weighting(self, data_std: float = 1.0, scheme: Diffusion = None) -> NoiseLossWeighting:
+        """
+        Weighting proposed by Song et al. (https://arxiv.org/abs/2101.09258).
+
+        Args:
+            data_std: the standard deviation of the data.
+            scheme: the diffusion scheme
+
+        Returns:
+            the weighting function.
+        """
+
+        def _weight_fn(sigma: Tensor) -> Tensor:
+            t = scheme.sigma.inverse(sigma)
+            s = scheme.scale(t)  # scaling factor s
+
+            def vmap_dsquare_dt(f: ScheduleFn) -> ScheduleFn:
+                """
+                Returns d/dt (f(t))^2 = 2ḟ(t)f(t) given f(t).
+                """
+
+                def grad_fn(t: Tensor) -> Tensor:
+                    t.requires_grad_(True)
+                    f_t = f(t)
+                    f_square = th.square(f_t)  # f(t)^2
+                    grad_f_square = th.autograd.grad(f_square.sum(), t, create_graph=True)[0]
+                    return grad_f_square
+
+                # Assuming `t` is a batched tensor
+                return grad_fn
+
+            dsquare_sigma_dt = vmap_dsquare_dt(scheme.sigma)(t)  # dsigma^2/dt using vmap_dsquare_dt
+            lambda_ = dsquare_sigma_dt * th.square(s)  # Lambda (loss weighting)
+
+            return lambda_
+
+        return _weight_fn
