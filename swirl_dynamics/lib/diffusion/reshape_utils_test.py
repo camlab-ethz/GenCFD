@@ -13,91 +13,102 @@
 # limitations under the License.
 
 """Tests for the reshape utilities used in the ViViT-based models."""
-from absl.testing import absltest
-from absl.testing import parameterized
-import jax
-
-from swirl_dynamics.lib.diffusion import reshape_utils
+import unittest
+import torch as th
+import reshape_utils
 
 
-class ReshapeTest(parameterized.TestCase):
+class ReshapeTest(unittest.TestCase):
 
-  @parameterized.parameters(
+  def test_2d_to_1d_reshape_output_shape(self):
+    test_cases = [
       ((2, 4, 8, 3), 1),
       ((2, 8, 8, 3), 1),
       ((2, 8, 8, 3), 2),
-  )
-  def test_2d_to_1d_reshape_output_shape(self, shape, axis):
-    batch_size, height, width, channel = shape
+    ]
+    for shape, axis in test_cases:
+      with self.subTest(shape=shape, axis=axis):
+        batch_size, height, width, channel = shape
 
-    x = jax.random.normal(jax.random.PRNGKey(0), shape)
+        x = th.randn(shape)
 
-    new_batch = (batch_size * width) if axis == 1 else (batch_size * height)
-    new_token = height if axis == 1 else width
+        new_batch = (batch_size * width) if axis == 1 else (batch_size * height)
+        new_token = height if axis == 1 else width
 
-    out = reshape_utils.reshape_2d_to_1d_factorized(x, axis=axis)
+        out = reshape_utils.reshape_2d_to_1d_factorized(x, axis=axis)
 
-    self.assertEqual(out.shape, (new_batch, new_token, channel))
+        self.assertEqual(out.shape, (new_batch, new_token, channel))
 
-  @parameterized.parameters(
+
+  def test_3d_to_1d_reshape_output_shape(self):
+    test_cases = [
       ((2, 4, 8, 2, 3), 1),
       ((2, 2, 8, 3, 1), 3),
       ((2, 8, 2, 8, 3), 2),
       ((2, 2, 8, 3, 1), 3),
       ((2, 8, 2, 8, 3), 1),
-  )
-  def test_3d_to_1d_reshape_output_shape(self, shape, axis):
-    batch_size, time, height, width, channel = shape
+    ]
+    for shape, axis in test_cases:
+      with self.subTest(shape=shape, axis=axis):
+        batch_size, time, height, width, channel = shape
 
-    x = jax.random.normal(jax.random.PRNGKey(0), shape)
+        x = th.randn(shape)
 
-    new_batch = {'1': batch_size * height * width,
-                 '2': batch_size * time * width,
-                 '3': batch_size * time * height}
-    new_token = {'1': time,
-                 '2': height,
-                 '3': width}
+        new_batch = {'1': batch_size * height * width,
+                    '2': batch_size * time * width,
+                    '3': batch_size * time * height}
+        new_token = {'1': time,
+                    '2': height,
+                    '3': width}
 
-    out = reshape_utils.reshape_3d_to_1d_factorized(x, axis=axis)
+        out = reshape_utils.reshape_3d_to_1d_factorized(x, axis=axis)
 
-    self.assertEqual(
-        out.shape, (new_batch[f'{axis}'], new_token[f'{axis}'], channel)
-    )
+        self.assertEqual(
+            out.shape, (new_batch[f'{axis}'], new_token[f'{axis}'], channel)
+        )
 
-  @parameterized.parameters(
+
+  def test_indentity_cycle_reshape_2d(self):
+
+    test_cases = [
       ((2, 4, 8, 3), 1),
       ((2, 2, 8, 3), 1),
       ((2, 8, 4, 3), 2),
-  )
-  def test_indentity_cycle_reshape_2d(self, shape, axis):
+    ]
 
-    x = jax.random.normal(jax.random.PRNGKey(0), shape)
+    for shape, axis in test_cases:
+      with self.subTest(shape=shape, axis=axis):
 
-    out_reshaped = reshape_utils.reshape_2d_to_1d_factorized(x, axis=axis)
-    out_identity = reshape_utils.reshape_to_2d_factorized(
-        out_reshaped, axis=axis, two_d_shape=shape
-    )
+        x = th.randn(shape)
 
-    self.assertEqual(out_identity.tolist(), x.tolist())
+        out_reshaped = reshape_utils.reshape_2d_to_1d_factorized(x, axis=axis)
+        out_identity = reshape_utils.reshape_to_2d_factorized(
+            out_reshaped, axis=axis, two_d_shape=shape
+        )
 
-  @parameterized.parameters(
+        self.assertEqual(out_identity.tolist(), x.tolist())
+
+
+  def test_indentity_cycle_reshape_3d(self):
+    test_cases = [
       ((2, 4, 8, 2, 3), 1),
       ((2, 2, 8, 3, 1), 3),
       ((2, 8, 2, 8, 3), 2),
       ((2, 2, 8, 3, 1), 3),
       ((2, 8, 2, 8, 3), 1),
-  )
-  def test_indentity_cycle_reshape_3d(self, shape, axis):
+    ]
 
-    x = jax.random.normal(jax.random.PRNGKey(0), shape)
+    for shape, axis in test_cases:
+      with self.subTest(shape=shape, axis=axis):
+        x = th.randn(shape)
 
-    out_reshaped = reshape_utils.reshape_3d_to_1d_factorized(x, axis=axis)
-    out_identity = reshape_utils.reshape_to_3d_factorized(
-        out_reshaped, axis=axis, three_d_shape=shape
-    )
+        out_reshaped = reshape_utils.reshape_3d_to_1d_factorized(x, axis=axis)
+        out_identity = reshape_utils.reshape_to_3d_factorized(
+            out_reshaped, axis=axis, three_d_shape=shape
+        )
 
-    self.assertEqual(out_identity.tolist(), x.tolist())
+        self.assertEqual(out_identity.tolist(), x.tolist())
 
 
 if __name__ == '__main__':
-  absltest.main()
+  unittest.main()

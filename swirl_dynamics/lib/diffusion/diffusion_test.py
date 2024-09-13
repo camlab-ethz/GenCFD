@@ -12,201 +12,241 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from absl.testing import absltest
-from absl.testing import parameterized
-import jax
-import jax.numpy as jnp
+import unittest
+from unittest import mock
+import torch as th
 import numpy as np
-from swirl_dynamics.lib.diffusion import diffusion
+import diffusion
 
 
-class DiffusionTest(parameterized.TestCase):
+class DiffusionTest(unittest.TestCase):
 
-  @parameterized.parameters((50.0, 0.0, 1.5), (100.0, -1.5, 1.5))
-  def test_tangent_noise_schedule(self, clip_max, start, end):
-    sigma = diffusion.tangent_noise_schedule(clip_max, start, end)
-    self.assertAlmostEqual(sigma(1.0), clip_max, places=3)
-    self.assertAlmostEqual(sigma(0.0), 0, places=8)
+  def test_tangent_noise_schedule(self):
+    test_cases = [(50.0, 0.0, 1.5), (100.0, -1.5, 1.5)]
+    for clip_max, start, end in test_cases:
+      with self.subTest(clip_max=clip_max, start=start, end=end):
+        sigma = diffusion.tangent_noise_schedule(clip_max, start, end)
+        self.assertAlmostEqual(sigma(1.0), clip_max, places=3)
+        self.assertAlmostEqual(sigma(0.0), 0, places=8)
 
-    test_points = np.random.default_rng(1234).uniform(0.05, 1.0, size=(10,))
-    np.testing.assert_allclose(
-        sigma.inverse(sigma(test_points)), test_points, rtol=1e-5
-    )
+        test_points = np.random.default_rng(1234).uniform(0.05, 1.0, size=(10,))
+        # test_points = th.rand(10) * 0.95 + 0.05
+        th.testing.assert_close(
+            sigma.inverse(sigma(test_points)), test_points, rtol=1e-5, atol=1e-8
+        )
 
-  @parameterized.parameters((1.0, 0.0), (-2.0, 0.0), (0.0, 2.0))
-  def test_tangent_schedule_invalid_start_end_points(self, start, end):
-    with self.assertRaises(ValueError):
-      diffusion.tangent_noise_schedule(100.0, start, end)
+  def test_tangent_schedule_invalid_start_end_points(self):
+    test_cases = [(1.0, 0.0), (-2.0, 0.0), (0.0, 2.0)]
+    for start, end in test_cases:
+      with self.subTest(start=start, end=end):
+        with self.assertRaises(ValueError):
+          diffusion.tangent_noise_schedule(100.0, start, end)
 
-  @parameterized.parameters(
+
+  def test_power_noise_schedule(self):
+    test_cases = [
       {"clip_max": 50.0, "p": 1.0, "start": 0.0, "end": 1.0},
       {"clip_max": 100.0, "p": 2.0, "start": 0.0, "end": 1.0},
       {"clip_max": 100.0, "p": 0.5, "start": 2.0, "end": 100.0},
-  )
-  def test_power_noise_schedule(self, clip_max, p, start, end):
-    sigma = diffusion.power_noise_schedule(clip_max, p, start, end)
-    self.assertAlmostEqual(sigma(1.0), clip_max, places=3)
-    self.assertEqual(sigma(0.0), 0)
+    ]
+    for case in test_cases:
+      with self.subTest(clip_max=case["clip_max"], p=case["p"], 
+                        start=case["start"], end=case["end"]):
+        sigma = diffusion.power_noise_schedule(case["clip_max"], case["p"], 
+                                               case["start"], case["end"])
+        self.assertAlmostEqual(sigma(1.0), case["clip_max"], places=3)
+        self.assertEqual(sigma(0.0), 0)
 
-    test_points = np.random.default_rng(2345).uniform(0.05, 1.0, size=(10,))
-    np.testing.assert_allclose(
-        sigma.inverse(sigma(test_points)), test_points, rtol=1e-5
-    )
+        # test_points = th.rand(10) * 0.95 + 0.05
+        test_points = np.random.default_rng(2345).uniform(0.05, 1.0, size=(10,))
+        th.testing.assert_close(
+            sigma.inverse(sigma(test_points)), test_points, rtol=1e-5, atol=1e-8
+        )
 
-  @parameterized.parameters((0.0, 0.0, 1.0), (1.0, -2.0, 0.0), (1.0, 2.0, 0.0))
-  def test_power_schedule_invalid_start_end_points(self, p, start, end):
-    with self.assertRaises(ValueError):
-      diffusion.power_noise_schedule(100.0, p, start, end)
 
-  @parameterized.parameters(
+  def test_power_schedule_invalid_start_end_points(self):
+    test_cases = [(0.0, 0.0, 1.0), (1.0, -2.0, 0.0), (1.0, 2.0, 0.0)]
+    for p, start, end in test_cases:
+      with self.subTest(p=p, start=start, end=end):
+        with self.assertRaises(ValueError):
+          diffusion.power_noise_schedule(100.0, p, start, end)
+
+
+  def test_exponential_noise_schedule(self):
+    test_cases = [
       {"clip_max": 50.0, "base": 2.0, "start": 0.0, "end": 5.0},
       {"clip_max": 100.0, "base": 3.0, "start": -1.0, "end": 5.0},
-  )
-  def test_exponential_noise_schedule(self, clip_max, base, start, end):
-    sigma = diffusion.exponential_noise_schedule(clip_max, base, start, end)
-    self.assertAlmostEqual(sigma(1.0), clip_max, places=3)
-    self.assertEqual(sigma(0.0), 0)
+    ]
+    for case in test_cases:
+      with self.subTest(clip_max=case["clip_max"], base=case["base"], 
+                        start=case["start"], end=case["end"]):
+        sigma = diffusion.exponential_noise_schedule(case["clip_max"], case["base"], 
+                                                     case["start"], case["end"])
+        self.assertAlmostEqual(sigma(1.0), case["clip_max"], places=3)
+        self.assertEqual(sigma(0.0), 0)
 
-    test_points = np.random.default_rng(2345).uniform(0.05, 1.0, size=(10,))
-    np.testing.assert_allclose(
-        sigma.inverse(sigma(test_points)), test_points, rtol=1e-5
-    )
+        test_points = th.rand(10) * 0.95 + 0.05
+        th.testing.assert_close(
+            sigma.inverse(sigma(test_points)), test_points, rtol=1e-5, atol=1e-8
+        )
 
-  @parameterized.parameters((1.0, 0.0, 1.0), (2.0, 2.0, 0.0))
-  def test_exponential_schedule_invalid_start_end_points(
-      self, base, start, end
-  ):
-    with self.assertRaises(ValueError):
-      diffusion.exponential_noise_schedule(100.0, base, start, end)
-
-  @parameterized.parameters(
-      diffusion.tangent_noise_schedule, diffusion.power_noise_schedule
-  )
-  def test_logsnr_and_sigma_transforms(self, schedule):
-    sigma = schedule(clip_max=100.0)
-    logsnr = diffusion.sigma2logsnr(sigma)
-    self.assertTrue(jnp.isinf(logsnr(0.0)))
-    self.assertAlmostEqual(logsnr(1.0), -2 * np.log(100), places=3)
-
-    sigma2 = diffusion.logsnr2sigma(logsnr)
-    test_points = np.random.default_rng(345).uniform(0.05, 1.0, size=(10,))
-    np.testing.assert_allclose(
-        sigma(test_points), sigma2(test_points), rtol=1e-5
-    )
-    np.testing.assert_allclose(
-        test_points, sigma2.inverse(sigma(test_points)), rtol=1e-5
-    )
-
-  @parameterized.product(data_std=(1.0, 2.0))
-  def test_create_vp(self, data_std):
-    sigma = diffusion.tangent_noise_schedule()
-    scheme = diffusion.Diffusion.create_variance_preserving(sigma, data_std)
-    test_points = np.random.default_rng(678).uniform(0.01, 1.0, size=(10,))
-    # verify that variance is indeed preserved
-    variance = np.square(scheme.scale(test_points)) * (
-        np.square(data_std) + np.square(scheme.sigma(test_points))
-    )
-    np.testing.assert_allclose(variance, np.square(data_std), rtol=1e-5)
-    # verify the inverse is correct
-    np.testing.assert_allclose(
-        scheme.sigma.inverse(scheme.sigma(test_points)), test_points, rtol=1e-5
-    )
-
-  @parameterized.product(data_std=(1.0, 2.0))
-  def test_create_ve(self, data_std):
-    sigma = diffusion.tangent_noise_schedule()
-    scheme = diffusion.Diffusion.create_variance_exploding(sigma, data_std)
-    test_points = np.random.default_rng(678).uniform(0.01, 1.0, size=(10,))
-    np.testing.assert_allclose(scheme.scale(test_points), 1.0)
-    # verify that variance is scaled by data_std
-    np.testing.assert_allclose(
-        scheme.sigma(test_points), sigma(test_points) * data_std, rtol=1e-5
-    )
-    # verify the inverse is correct
-    np.testing.assert_allclose(
-        scheme.sigma.inverse(scheme.sigma(test_points)), test_points, rtol=1e-5
-    )
+  def test_exponential_schedule_invalid_start_end_points(self):
+    test_cases = [(1.0, 0.0, 1.0), (2.0, 2.0, 0.0)]
+    for base, start, end in test_cases:
+      with self.subTest(base=base, start=start, end=end):
+        with self.assertRaises(ValueError):
+          diffusion.exponential_noise_schedule(100.0, base, start, end)
 
 
-class NoiseLevelSamplingTest(parameterized.TestCase):
+  def test_logsnr_and_sigma_transforms(self):
+    schedules = [diffusion.tangent_noise_schedule, diffusion.power_noise_schedule]
+    for schedule in schedules:
+      with self.subTest(schedule=schedule):
+        sigma = schedule(clip_max=100.0)
+        logsnr = diffusion.sigma2logsnr(sigma)
+        self.assertTrue(th.isinf(logsnr(th.tensor(0.0))))
+        self.assertAlmostEqual(logsnr(1.0), -2 * th.log(th.tensor([100])), places=3)
 
-  @parameterized.parameters(((4,), True), ((2, 2), False))
-  def test_uniform_samples(self, sample_shape, uniform_grid):
-    samples = diffusion._uniform_samples(
-        jax.random.PRNGKey(0), sample_shape, uniform_grid=uniform_grid
-    )
-    self.assertEqual(samples.shape, sample_shape)
-    if uniform_grid:
-      self.assertAlmostEqual(np.std(np.diff(np.sort(samples.flatten()))), 0.0)
+        sigma2 = diffusion.logsnr2sigma(logsnr)
+        test_points = np.random.default_rng(345).uniform(0.05, 1.0, size=(10,))
+        # test_points = th.rand(10) * 0.95 + 0.05
+        th.testing.assert_close(
+            sigma(test_points), sigma2(test_points), rtol=1e-5, atol=1e-8
+        )
+        th.testing.assert_close(
+            test_points, sigma2.inverse(sigma(test_points)), rtol=1e-5, atol=1e-8
+        )
 
-  @parameterized.product(uniform_grid=(True, False))
-  def test_log_uniform_sampling(self, uniform_grid):
+
+  def test_create_vp(self):
+    data_std_vals = [1.0, 2.0]
+    for data_std in data_std_vals:
+      with self.subTest(data_std=data_std):
+        sigma = diffusion.tangent_noise_schedule()
+        scheme = diffusion.Diffusion.create_variance_preserving(sigma, data_std)
+        test_points = np.random.default_rng(678).uniform(0.01, 1.0, size=(10,))
+        # test_points = th.rand(10) * 0.99 + 0.01
+        # verify that variance is indeed preserved
+        variance = th.square(scheme.scale(test_points)) * (
+            th.square(th.tensor(data_std)) + th.square(scheme.sigma(test_points))
+        )
+        th.testing.assert_close(variance, th.tensor([data_std**2]), rtol=1e-5, atol=1e-8)
+        # verify the inverse is correct
+        th.testing.assert_close(
+            scheme.sigma.inverse(scheme.sigma(test_points)), test_points, rtol=1e-5, atol=1e-8
+        )
+
+
+  def test_create_ve(self):
+    data_std_vals = [1.0, 2.0]
+    for data_std in data_std_vals:
+      with self.subTest(data_std=data_std):
+        sigma = diffusion.tangent_noise_schedule()
+        scheme = diffusion.Diffusion.create_variance_exploding(sigma, data_std)
+        # test_points = th.rand(10) * 0.99 + 0.01
+        test_points = np.random.default_rng(678).uniform(0.01, 1.0, size=(10,))
+        th.testing.assert_close(scheme.scale(test_points), th.tensor(1.0))
+        # verify that variance is scaled by data_std
+        th.testing.assert_close(
+            scheme.sigma(test_points), sigma(test_points) * data_std, rtol=1e-5, atol=1e-8
+        )
+        # verify the inverse is correct
+        th.testing.assert_close(
+            scheme.sigma.inverse(scheme.sigma(test_points)), test_points, rtol=1e-5,atol=1e-8
+        )
+
+
+class NoiseLevelSamplingTest(unittest.TestCase):
+
+  def test_uniform_samples(self):
+    test_cases = [((4,), True), ((2, 2), False)]
+    for sample_shape, uniform_grid in test_cases:
+      with self.subTest(sample_shape=sample_shape, uniform_grid=uniform_grid):
+        samples = diffusion._uniform_samples(
+            th.manual_seed(0), sample_shape, uniform_grid=uniform_grid
+        )
+        self.assertEqual(samples.shape, sample_shape)
+        if uniform_grid:
+          self.assertAlmostEqual(th.std(th.diff(th.sort(samples.flatten()))).item(), 0.0)
+
+  def test_log_uniform_sampling(self):
+    uniform_grid_vals = [True, False]
     sample_shape = (25,)
     clip_min = 0.1
-    scheme = absltest.mock.Mock(spec=diffusion.Diffusion)
+    scheme = mock.Mock(spec=diffusion.Diffusion)
     scheme.sigma_max = 100.0
-    noise_sampling = diffusion.log_uniform_sampling(
-        scheme, clip_min, uniform_grid
-    )
-    samples = noise_sampling(jax.random.PRNGKey(1), sample_shape)
-    self.assertEqual(samples.shape, sample_shape)
-    self.assertGreaterEqual(np.min(samples), clip_min)
-    self.assertLessEqual(np.max(samples), scheme.sigma_max)
-    if uniform_grid:
-      self.assertAlmostEqual(
-          np.std(np.diff(np.sort(np.log(samples)))), 0.0, places=5
-      )
 
-  @parameterized.product(uniform_grid=(True, False))
-  def test_time_uniform(self, uniform_grid):
+    for uniform_grid in uniform_grid_vals:
+      with self.subTest(uniform_grid=uniform_grid):
+        noise_sampling = diffusion.log_uniform_sampling(
+            scheme, clip_min, uniform_grid
+        )
+        samples = noise_sampling(th.manual_seed(1), sample_shape)
+        self.assertEqual(samples.shape, sample_shape)
+        self.assertGreaterEqual(th.min(samples).item(), clip_min)
+        self.assertLessEqual(th.max(samples).item(), scheme.sigma_max)
+        if uniform_grid:
+          self.assertAlmostEqual(
+              th.std(th.diff(th.sort(th.log(samples)))).item(), 0.0, places=5
+          )
+
+
+  def test_time_uniform(self):
+    uniform_grid_vals = [True, False]
     sample_shape = (25,)
     clip_min = 0.1
     scheme = diffusion.Diffusion.create_variance_exploding(
         diffusion.tangent_noise_schedule()
     )
-    noise_sampling = diffusion.time_uniform_sampling(
-        scheme, clip_min, uniform_grid
-    )
-    samples = noise_sampling(jax.random.PRNGKey(0), sample_shape)
-    self.assertEqual(samples.shape, sample_shape)
-    self.assertGreaterEqual(np.min(samples), clip_min)
-    self.assertLessEqual(np.max(samples), scheme.sigma_max)
-    if uniform_grid:
-      self.assertAlmostEqual(
-          np.std(np.diff(np.sort(scheme.sigma.inverse(samples)))), 0.0, places=5
-      )
+
+    for uniform_grid in uniform_grid_vals:
+      with self.subTest(uniform_grid=uniform_grid):
+        noise_sampling = diffusion.time_uniform_sampling(
+            scheme, clip_min, uniform_grid
+        )
+        samples = noise_sampling(th.manual_seed(0), sample_shape)
+        self.assertEqual(samples.shape, sample_shape)
+        self.assertGreaterEqual(th.min(samples).item(), clip_min)
+        self.assertLessEqual(th.max(samples).item(), scheme.sigma_max)
+        if uniform_grid:
+          self.assertAlmostEqual(
+              th.std(th.diff(th.sort(scheme.sigma.inverse(samples)))).item(), 0.0, places=5
+          )
 
   def test_edm_schedule(self):
     sample_shape = (20000,)
     p_mean, p_std = -1.2, 1.2
-    scheme = absltest.mock.Mock(spec=diffusion.Diffusion)
+    scheme = mock.Mock(spec=diffusion.Diffusion)
     scheme.sigma_max = 100.0
     noise_sampling = diffusion.normal_sampling(
         scheme=scheme, p_mean=p_mean, p_std=p_std
     )
-    samples = noise_sampling(jax.random.PRNGKey(1), sample_shape)
+    samples = noise_sampling(th.manual_seed(1), sample_shape)
     self.assertEqual(samples.shape, sample_shape)
-    self.assertAlmostEqual(np.mean(np.log(samples)), p_mean, places=2)
-    self.assertAlmostEqual(np.std(np.log(samples)), p_std, places=2)
+    self.assertAlmostEqual(th.mean(th.log(samples)).item(), p_mean, places=2)
+    self.assertAlmostEqual(th.std(th.log(samples)).item(), p_std, places=2)
 
 
-class NoiseLossWeightingTest(parameterized.TestCase):
+class NoiseLossWeightingTest(unittest.TestCase):
 
-  @parameterized.parameters(
-      (4.0, 0.0625), (np.asarray([1.0, 0.5]), np.asarray([1.0, 4]))
-  )
-  def test_inverse_sigma_squared_schedule(self, sigma, expected_res):
-    res = diffusion.inverse_squared_weighting(sigma)
-    self.assertTrue(np.allclose(res, expected_res))
+  def test_inverse_sigma_squared_schedule(self):
+    test_cases = [(4.0, 0.0625), (np.asarray([1.0, 0.5]), np.asarray([1.0, 4]))]
+    for sigma, expected_res in test_cases:
+      with self.subTest(sigma=sigma, expected_res=expected_res):
+        res = diffusion.inverse_squared_weighting(sigma)
+        self.assertTrue(th.allclose(res, expected_res))
 
-  @parameterized.parameters(
+
+  def test_edm_weighting(self):
+    test_cases = [
       (2.0, 4.0, 0.3125),
       (4.0, np.asarray([1.0, 8.0]), np.asarray([1.0625, 0.078125])),
-  )
-  def test_edm_weighting(self, sigma_data, sigma, expected_res):
-    res = diffusion.edm_weighting(sigma_data)(sigma)
-    self.assertTrue(np.allclose(res, expected_res))
+    ]
+    for sigma_data, sigma, expected_res in test_cases:
+      with self.subTest(sigma_data=sigma_data, sigma=sigma, expected_res=expected_res):
+        res = diffusion.edm_weighting(sigma_data)(sigma)
+        self.assertTrue(np.allclose(res, expected_res))
 
 
 if __name__ == "__main__":
-  absltest.main()
+  unittest.main()

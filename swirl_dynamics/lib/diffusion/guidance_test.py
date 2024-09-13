@@ -12,83 +12,101 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from absl.testing import absltest
-from absl.testing import parameterized
-import jax.numpy as jnp
+import torch as th
 import numpy as np
-from swirl_dynamics.lib.diffusion import guidance
+import unittest
+import guidance
 
 
-class GuidanceTransformsTest(parameterized.TestCase):
+class GuidanceTransformsTest(unittest.TestCase):
 
-  @parameterized.parameters(
+  def test_super_resolution(self):
+    test_cases = [
       {"test_dim": (4, 16), "ds_ratios": (None, 8), "guide_shape": (4, 2)},
       {
           "test_dim": (4, 16, 16),
           "ds_ratios": (None, 3, 2),
           "guide_shape": (4, 6, 8),
       },
-  )
-  def test_super_resolution(self, test_dim, ds_ratios, guide_shape):
-    superresolve = guidance.InfillFromSlices(
-        slices=tuple(slice(None, None, r) for r in ds_ratios),
-    )
+    ]
+    for case in test_cases:
+      with self.subTest(case=case):
+        test_dim = case["test_dim"]
+        ds_ratios = case["ds_ratios"]
+        guide_shape = case["guide_shape"]
 
-    def _dummy_denoiser(x, sigma, cond=None):
-      del sigma, cond
-      return jnp.ones_like(x)
+        superresolve = guidance.InfillFromSlices(
+            slices=tuple(slice(None, None, r) for r in ds_ratios),
+        )
 
-    guided_denoiser = superresolve(
-        _dummy_denoiser, {"observed_slices": jnp.array(0.0)}
-    )
-    denoised = guided_denoiser(jnp.ones(test_dim), jnp.array(0.1), None)
-    guided_elements = denoised[superresolve.slices]
-    self.assertEqual(denoised.shape, test_dim)
-    self.assertEqual(guided_elements.shape, guide_shape)
+        def _dummy_denoiser(x, sigma, cond=None):
+          del sigma, cond
+          return th.ones_like(x)
 
-    expected = np.ones(test_dim)
-    expected[superresolve.slices] = 0.0
-    np.testing.assert_allclose(denoised, expected)
+        guided_denoiser = superresolve(
+            _dummy_denoiser, {"observed_slices": th.tensor(0.0)}
+        )
+        denoised = guided_denoiser(th.ones(test_dim, requires_grad=True), th.tensor(0.1), None)
+        guided_elements = denoised[superresolve.slices]
+        self.assertEqual(denoised.shape, test_dim)
+        self.assertEqual(guided_elements.shape, guide_shape)
 
-  @parameterized.parameters(
+        expected = np.ones(test_dim)
+        expected[superresolve.slices] = 0.0
+        np.testing.assert_allclose(denoised, expected)
+
+
+  def test_classifier_free_hybrid(self):
+    test_cases = [
       {"mask_keys": None, "mask_value": 0, "expected": 13},
       {"mask_keys": None, "mask_value": 1, "expected": 12},
       {"mask_keys": ("0", "1", "2"), "mask_value": 0, "expected": 11.6},
-  )
-  def test_classifier_free_hybrid(self, mask_keys, mask_value, expected):
-    cf_hybrid = guidance.ClassifierFreeHybrid(
-        guidance_strength=0.2,
-        cond_mask_keys=mask_keys,
-        cond_mask_value=mask_value,
-    )
+    ]
+    for case in test_cases:
+      with self.subTest(case=case):
+        mask_keys = case["mask_keys"]
+        mask_value = case["mask_value"]
+        expected = case["expected"]
 
-    def _dummy_denoiser(x, sigma, cond):
-      del sigma
-      out = jnp.ones_like(x)
-      for v in cond.values():
-        out += v
-      return out
+        cf_hybrid = guidance.ClassifierFreeHybrid(
+            guidance_strength=0.2,
+            cond_mask_keys=mask_keys,
+            cond_mask_value=mask_value,
+        )
 
-    guided_denoiser = cf_hybrid(_dummy_denoiser, {})
-    cond = {str(v): jnp.array(v) for v in range(5)}
-    denoised = guided_denoiser(jnp.array(0), jnp.array(0.1), cond)
-    self.assertAlmostEqual(denoised, expected, places=5)
+        def _dummy_denoiser(x, sigma, cond):
+          del sigma
+          out = th.ones_like(x)
+          for v in cond.values():
+            out += v
+          return out
 
-  @parameterized.parameters(
+        guided_denoiser = cf_hybrid(_dummy_denoiser, {})
+        cond = {str(v): th.tensor(v) for v in range(5)}
+        denoised = guided_denoiser(th.tensor(0.0), th.tensor(0.1), cond)
+        self.assertAlmostEqual(denoised.item(), expected, places=5)
+
+
+  def test_frame_interlocking(self):
+    test_cases = [
       {"test_dim": (1, 2, 4, 4, 4, 1), "style": "swap"},
       {"test_dim": (1, 2, 4, 4, 4, 1), "style": "average"},
-  )
-  def test_frame_interlocking(self, test_dim, style):
-    interlock = guidance.InterlockingFrames(style=style)
+    ]
+    for case in test_cases:
+      with self.subTest(case=case):
+        test_dim = case["test_dim"]
+        style = case["style"]
 
-    def _dummy_denoiser(x, sigma, cond=None):
-      del sigma, cond
-      return jnp.ones_like(x)
+        interlock = guidance.InterlockingFrames(style=style)
 
-    guided_denoiser = interlock(_dummy_denoiser)
-    denoised = guided_denoiser(jnp.ones(test_dim), jnp.array(0.1), None)
+        def _dummy_denoiser(x, sigma, cond=None):
+          del sigma, cond
+          return th.ones_like(x)
 
-    self.assertEqual(denoised.shape, test_dim)
+        guided_denoiser = interlock(_dummy_denoiser)
+        denoised = guided_denoiser(th.ones(test_dim, requires_grad=True), th.tensor(0.1), None)
+
+        self.assertEqual(denoised.shape, test_dim)
 
 if __name__ == "__main__":
-  absltest.main()
+  unittest.main()

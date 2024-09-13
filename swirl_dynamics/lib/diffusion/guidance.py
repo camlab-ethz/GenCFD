@@ -14,17 +14,15 @@
 
 """Modules for guidance transforms for denoising functions."""
 
-from collections.abc import Callable, Mapping, Sequence
-from typing import Any, Literal, Protocol
+from typing import Any, Callable, Dict, Sequence, Literal, Protocol
 
-import flax
-import jax
-import jax.numpy as jnp
+import torch as th
+from torch.autograd import grad
 
-Array = jax.Array
+Tensor = th.Tensor
 PyTree = Any
-ArrayMapping = Mapping[str, Array]
-DenoiseFn = Callable[[Array, Array, ArrayMapping | None], Array]
+TensorMapping = Dict[str, Tensor]
+DenoiseFn = Callable[[Tensor, Tensor, TensorMapping | None], Tensor]
 
 
 class Transform(Protocol):
@@ -37,7 +35,7 @@ class Transform(Protocol):
   """
 
   def __call__(
-      self, denoise_fn: DenoiseFn, guidance_inputs: ArrayMapping
+      self, denoise_fn: DenoiseFn, guidance_inputs: TensorMapping
   ) -> DenoiseFn:
     """Constructs a guided denoising function.
 
@@ -54,7 +52,6 @@ class Transform(Protocol):
     ...
 
 
-@flax.struct.dataclass
 class InfillFromSlices:
   """N-dimensional infilling guided by known values on slices.
 
@@ -68,10 +65,10 @@ class InfillFromSlices:
     # Post-process a trained denoiser function via function composition.
     # The `observed_slices` arg must have compatible shape such that
     # `image[slices] = observed_slices` would not raise errors.
-    guided_denoiser = sr_guidance(denoiser, {"observed_slices": jnp.array(0.0)})
+    guided_denoiser = sr_guidance(denoiser, {"observed_slices": jnp.Tensor(0.0)})
 
     # Run guided denoiser the same way as a normal one
-    denoised = guided_denoiser(noised, sigma=jnp.array(0.1), cond=None)
+    denoised = guided_denoiser(noised, sigma=jnp.Tensor(0.1), cond=None)
 
   Attributes:
     slices: The slices of the input to guide denoising (i.e. the rest is being
@@ -79,38 +76,51 @@ class InfillFromSlices:
     guide_strength: The strength of the guidance relative to the raw denoiser.
       It will be rescaled based on the fraction of values being conditioned.
   """
-
-  slices: tuple[slice, ...]
-  guide_strength: float = 0.5
+  def __init__(self, slices: tuple[slice, ...], guide_strength: float = 0.5):
+    self.slices = slices
+    self.guide_strength = guide_strength
 
   def __call__(
-      self, denoise_fn: DenoiseFn, guidance_inputs: ArrayMapping
+      self, denoise_fn: DenoiseFn, guidance_inputs: TensorMapping
   ) -> DenoiseFn:
     """Constructs denoise function guided by values on specified slices."""
 
     def _guided_denoise(
-        x: Array, sigma: Array, cond: ArrayMapping | None = None
-    ) -> Array:
-      def constraint(xt: Array) -> tuple[Array, Array]:
+        x: Tensor, sigma: Tensor, cond: TensorMapping | None = None
+    ) -> Tensor:
+      def constraint(xt: Tensor) -> tuple[Tensor, Tensor]:
         denoised = denoise_fn(xt, sigma, cond)
-        error = jnp.sum(
+        denoised = denoised.requires_grad_(True)
+        error = th.sum(
             (denoised[self.slices] - guidance_inputs['observed_slices']) ** 2
         )
+        print(f"x slice shape: {x[self.slices].shape}")
+        print(f"denoised slice shape: {denoised[self.slices].shape}")
+        print(f"Observed slices shape: {guidance_inputs['observed_slices'].shape}")
+        print(f"error.requires_grad: {error.requires_grad}")
         return error, denoised
 
-      constraint_grad, denoised = jax.grad(constraint, has_aux=True)(x)
+      x = x.requires_grad_(True)
+      print(f"x.requires_grad: {x.requires_grad}")  # Debugging
+      error, denoised = constraint(x)
+
+      print(f"error.requires_grad: {error.requires_grad}")  # Debugging
+      print(f"error.grad_fn: {error.grad_fn}")  # Debugging
+      print(f"x.grad_fn: {x.grad_fn}")
+
+      constraint_grad = grad(error, x, retain_graph=True, allow_unused=True)[0]
       # Rescale based on the fraction of values being conditioned.
-      cond_fraction = jnp.prod(jnp.asarray(x[self.slices].shape)) / jnp.prod(
-          jnp.asarray(x.shape)
+      cond_fraction = th.prod(th.tensor(x[self.slices].shape)) / th.prod(
+          th.tensor(x.shape)
       )
       guide_strength = self.guide_strength / cond_fraction
       denoised -= guide_strength * constraint_grad
-      return denoised.at[self.slices].set(guidance_inputs['observed_slices'])
+      denoised[self.slices] = guidance_inputs["observed_slices"]
+      return denoised
 
     return _guided_denoise
 
 
-@flax.struct.dataclass
 class InterlockingFrames:
   """Condition on the first and last frame to be equal in a short trajectory.
 
@@ -143,19 +153,20 @@ class InterlockingFrames:
     overlap_length: The length of the overlap which we impose to be the same
       across the boundaries.
   """
-
-  guide_strength: float = 0.5
-  style: Literal['average', 'swap'] = 'average'
-  overlap_length: int = 1
+  def __init__(self, guide_strength: float = 0.5, style: Literal['average', 'swap'] = 'average', 
+               overlap_length: int = 1):
+    self.guide_strength = guide_strength
+    self.style = style
+    self.overlap_length = overlap_length
 
   def __call__(
-      self, denoise_fn: DenoiseFn, guidance_inputs: ArrayMapping | None = None
+      self, denoise_fn: DenoiseFn, guidance_inputs: TensorMapping | None = None
   ) -> DenoiseFn:
     """Constructs denoise function conditioned on overlaping values."""
 
     def _guided_denoise(
-        x: Array, sigma: Array, cond: ArrayMapping | None = None
-    ) -> Array:
+        x: Tensor, sigma: Tensor, cond: TensorMapping | None = None
+    ) -> Tensor:
       """Guided denoise function.
 
       Args:
@@ -172,10 +183,11 @@ class InterlockingFrames:
         raise ValueError(f'Invalid input dimension: {x.shape}, a 6-tensor is '
                          'expected.')
 
-      def constraint(xt: Array) -> tuple[Array, Array]:
+      def constraint(xt: Tensor) -> tuple[Tensor, Tensor]:
         denoised = denoise_fn(xt, sigma, cond)
+        denoised = denoised.requires_grad_(True)
         return (
-            jnp.sum(
+            th.sum(
                 (
                     denoised[:, 1:, :self.overlap_length]
                     - denoised[:, :-1, -self.overlap_length:]
@@ -185,7 +197,10 @@ class InterlockingFrames:
             denoised,
         )
 
-      constraint_grad, denoised = jax.grad(constraint, has_aux=True)(x)
+      x = x.requires_grad_(True)
+      error, denoised = constraint(x)
+    
+      constraint_grad = grad(error, x, retain_graph=True, allow_unused=True)[0]
       denoised -= self.guide_strength * constraint_grad
 
       # Interchanging information at each side of the interface.
@@ -193,31 +208,24 @@ class InterlockingFrames:
         raise ValueError(f'Invalid style: {self.style}. Expected either'
                          '"average" or "swap".')
       elif self.style == 'swap':
-        cond_value_first = denoised[:, 1:, : self.overlap_length]
-        denoised = denoised.at[:, 1:, : self.overlap_length].set(
-            denoised[:, :-1, -self.overlap_length :]
-        )
-        denoised = denoised.at[:, :-1, -self.overlap_length :].set(
-            cond_value_first
-        )
+        cond_value_first = denoised[:, 1:, :self.overlap_length].clone()
+        denoised[:, 1:, : self.overlap_length] = denoised[:, :-1, -self.overlap_length:]
+        denoised[:, :-1, -self.overlap_length:] = cond_value_first
 
       # Average the values at each side of the interface.
       elif self.style == 'average':
         average_value = 0.5 * (
-            denoised[:, 1:, : self.overlap_length]
-            + denoised[:, :-1, -self.overlap_length :]
+            denoised[:, 1:, :self.overlap_length]
+            + denoised[:, :-1, -self.overlap_length:]
         )
-        denoised = denoised.at[:, 1:, : self.overlap_length].set(average_value)
-        denoised = denoised.at[:, :-1, -self.overlap_length :].set(
-            average_value
-        )
+        denoised[:, 1:, :self.overlap_length] = average_value
+        denoised[:, :-1, -self.overlap_length:] = average_value
 
       return denoised
 
     return _guided_denoise
 
 
-@flax.struct.dataclass
 class ClassifierFreeHybrid:
   """Classifier-free guidance for a hybrid (cond/uncond) denoising model.
 
@@ -248,22 +256,24 @@ class ClassifierFreeHybrid:
       value must be consistent with the masking applied at training.
   """
 
-  guidance_strength: float = 0.0
-  cond_mask_keys: Sequence[str] | None = None
-  cond_mask_value: float = 0.0
+  def __init__(self, guidance_strength: float = 0.0, cond_mask_keys: Sequence[str] | None = None, 
+               cond_mask_value: float = 0.0):
+    self.guidance_strength = guidance_strength
+    self.cond_mask_value = cond_mask_value
+    self.cond_mask_keys = cond_mask_keys
 
   def __call__(
-      self, denoise_fn: DenoiseFn, guidance_inputs: ArrayMapping
+      self, denoise_fn: DenoiseFn, guidance_inputs: TensorMapping
   ) -> DenoiseFn:
     """Constructs denoise function with classifier free guidance."""
 
-    def _guided_denoise(x: Array, sigma: Array, cond: ArrayMapping) -> Array:
+    def _guided_denoise(x: Tensor, sigma: Tensor, cond: TensorMapping) -> Tensor:
       masked_cond = {
           k: (
               v  # pylint: disable=g-long-ternary
               if self.cond_mask_keys is not None
               and k not in self.cond_mask_keys
-              else jnp.ones_like(v) * self.cond_mask_value
+              else th.ones_like(v) * self.cond_mask_value
           )
           for k, v in cond.items()
       }

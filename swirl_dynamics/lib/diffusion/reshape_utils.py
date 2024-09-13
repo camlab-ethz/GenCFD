@@ -15,15 +15,13 @@
 """Utilities for reshaping from tokens to spatial coordinates."""
 
 from typing import Sequence
+import torch as th
 
-import jax
-import jax.numpy as jnp
-
-Array = jax.Array
+Tensor = th.Tensor
 Shape = Sequence[int]
 
 
-def reshape_2d_to_1d_factorized(x: Array, axis: int) -> Array:
+def reshape_2d_to_1d_factorized(x: Tensor, axis: int) -> Tensor:
   """Converts 2d inputs to 1d for axial attention."""
 
   if x.ndim != 4:
@@ -39,17 +37,17 @@ def reshape_2d_to_1d_factorized(x: Array, axis: int) -> Array:
     )
 
   batch_size, height, width, channel = x.shape
-  x = jnp.moveaxis(x, axis, -2)
+  x = th.moveaxis(x, axis, -2)
 
   if axis == 1:
-    x = jnp.reshape(x, (batch_size * width, height, channel))
+    x = th.reshape(x, (batch_size * width, height, channel))
   elif axis == 2:
-    x = jnp.reshape(x, (batch_size * height, width, channel))
+    x = th.reshape(x, (batch_size * height, width, channel))
 
   return x
 
 
-def reshape_3d_to_1d_factorized(x: Array, axis: int) -> Array:
+def reshape_3d_to_1d_factorized(x: Tensor, axis: int) -> Tensor:
   """Converts 2d inputs to 1d for axial attention."""
 
   if x.ndim != 5:
@@ -64,20 +62,20 @@ def reshape_3d_to_1d_factorized(x: Array, axis: int) -> Array:
 
   batch_size, time, height, width, channel = x.shape
 
-  x = jnp.moveaxis(x, axis, -2)
+  x = th.moveaxis(x, axis, -2)
 
   if axis == 1:
-    x = jnp.reshape(x, (batch_size * height * width, time, channel))
+    x = th.reshape(x, (batch_size * height * width, time, channel))
   elif axis == 2:
-    x = jnp.reshape(x, (batch_size * time * width, height, channel))
+    x = th.reshape(x, (batch_size * time * width, height, channel))
   elif axis == 3:
-    x = jnp.reshape(x, (batch_size * time * height, width, channel))
+    x = th.reshape(x, (batch_size * time * height, width, channel))
 
   return x
 
 
-def reshape_to_2d_factorized(x: Array, axis: int,
-                             two_d_shape: Shape) -> Array:
+def reshape_to_2d_factorized(x: Tensor, axis: int,
+                             two_d_shape: Shape) -> Tensor:
   """Converts 1D inputs back to 2D after axial attention.
 
   Args:
@@ -111,7 +109,8 @@ def reshape_to_2d_factorized(x: Array, axis: int,
           f'The modified batch size of the input ({x.shape[0]}) should match ',
           f'with the product batch_size ({batch_size}) x width ({width})',
       )
-    x = x.reshape((batch_size, width, height, channel)).transpose(
+
+    x = x.reshape((batch_size, width, height, channel)).permute(
         (0, 2, 1, 3)
     )
   elif axis == 2:
@@ -126,9 +125,9 @@ def reshape_to_2d_factorized(x: Array, axis: int,
 
 
 def reshape_to_3d_factorized(
-    x: Array, axis: int,
+    x: Tensor, axis: int,
     three_d_shape: Shape
-) -> Array:
+) -> Tensor:
   """Converts 1D inputs back to 3D after axial attention.
 
   Args:
@@ -164,7 +163,7 @@ def reshape_to_3d_factorized(
           f'with the product batch_size ({batch_size}) x width ({width}) x ',
           f'height ({height}) when axis = {axis}'
       )
-    x = x.reshape((batch_size, height, width, time, channel)).transpose(
+    x = x.reshape((batch_size, height, width, time, channel)).permute(
         (0, 3, 1, 2, 4))
   elif axis == 2:
     if x.shape[0] != batch_size * time * width:
@@ -173,7 +172,7 @@ def reshape_to_3d_factorized(
           f'with the product batch_size ({batch_size}) x time ({time}) x ',
           f'width ({width}) when axis = {axis}'
       )
-    x = x.reshape((batch_size, time, width, height, channel)).transpose(
+    x = x.reshape((batch_size, time, width, height, channel)).permute(
         (0, 1, 3, 2, 4))
   elif axis == 3:
     if x.shape[0] != batch_size * time * height:
@@ -187,7 +186,7 @@ def reshape_to_3d_factorized(
   return x
 
 
-def reshape_to_time_space(x: Array, temporal_dims: int)-> Array:
+def reshape_to_time_space(x: Tensor, temporal_dims: int)-> Tensor:
   """Reshape the input tensor from tokens to time-space.
 
   Args:
@@ -212,7 +211,7 @@ def reshape_to_time_space(x: Array, temporal_dims: int)-> Array:
           f' and number of frames {temporal_dims}')
 
     hw = num_tokens // temporal_dims
-    x = jnp.reshape(x, [batch_size, temporal_dims, hw, emb_dim])
+    x = th.reshape(x, [batch_size, temporal_dims, hw, emb_dim])
 
   # Last check.
   if x.ndim != 4:

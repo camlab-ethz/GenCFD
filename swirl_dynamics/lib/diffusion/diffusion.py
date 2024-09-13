@@ -15,18 +15,14 @@
 """Modules for diffusion models."""
 
 from __future__ import annotations
-
-from collections.abc import Callable
 import dataclasses
-from typing import Protocol
-
-import chex
-import jax
-import jax.numpy as jnp
+from typing import Union, Callable, Protocol
+import torch as th 
 import numpy as np
 
-Array = jax.Array
-ScheduleFn = Callable[[chex.Numeric], chex.Numeric]
+Tensor = th.Tensor
+Numeric = Union[bool, int, float, np.ndarray, th.tensor]
+ScheduleFn = Callable[[Numeric], Numeric]
 
 MIN_DIFFUSION_TIME = 0.0
 MAX_DIFFUSION_TIME = 1.0
@@ -52,21 +48,21 @@ class InvertibleSchedule:
   forward: ScheduleFn
   inverse: ScheduleFn
 
-  def __call__(self, t: chex.Numeric) -> chex.Numeric:
+  def __call__(self, t: Numeric) -> Numeric:
     return self.forward(t)
 
 
 def sigma2logsnr(sigma: InvertibleSchedule) -> InvertibleSchedule:
   """Converts a sigma schedule to a logsnr schedule."""
-  forward = lambda t: -2 * jnp.log(sigma(t))
-  inverse = lambda logsnr: sigma.inverse(jnp.exp(-logsnr / 2))
+  forward = lambda t: -2 * th.log(th.Tensor(sigma(t)))
+  inverse = lambda logsnr: sigma.inverse(th.exp(-logsnr / 2))
   return InvertibleSchedule(forward, inverse)
 
 
 def logsnr2sigma(logsnr: InvertibleSchedule) -> InvertibleSchedule:
   """Converts a logsnr schedule to a sigma schedule."""
-  forward = lambda t: jnp.exp(-logsnr(t) / 2)
-  inverse = lambda sigma: logsnr.inverse(-2 * jnp.log(sigma))
+  forward = lambda t: th.exp(-logsnr(t) / 2)
+  inverse = lambda sigma: logsnr.inverse(-2 * th.log(th.Tensor(sigma)))
   return InvertibleSchedule(forward, inverse)
 
 
@@ -99,7 +95,7 @@ class Diffusion:
     return logsnr2sigma(self.sigma)
 
   @property
-  def sigma_max(self) -> chex.Numeric:
+  def sigma_max(self) -> Numeric:
     return self.sigma(MAX_DIFFUSION_TIME)
 
   @classmethod
@@ -120,8 +116,8 @@ class Diffusion:
     Returns:
       A variance preserving diffusion scheme.
     """
-    var = jnp.square(data_std)
-    scale = lambda t: jnp.sqrt(var / (var + jnp.square(sigma(t))))
+    var = th.square(th.tensor(data_std))
+    scale = lambda t: th.sqrt(var / (var + th.square(sigma(t))))
     return cls(scale=scale, sigma=sigma)
 
   @classmethod
@@ -145,7 +141,7 @@ class Diffusion:
     scaled_forward = lambda t: sigma(t) * data_std
     scaled_inverse = lambda y: sigma.inverse(y / data_std)
     scaled_sigma = InvertibleSchedule(scaled_forward, scaled_inverse)
-    return cls(scale=jnp.ones_like, sigma=scaled_sigma)
+    return cls(scale=th.ones_like, sigma=scaled_sigma)
 
 
 def create_variance_preserving_scheme(
@@ -209,8 +205,8 @@ def tangent_noise_schedule(
   out_rescale = _linear_rescale(
       in_min=np.tan(start), in_max=np.tan(end), out_min=0.0, out_max=clip_max
   )
-  sigma = lambda t: out_rescale(jnp.tan(in_rescale(t)))
-  inverse = lambda y: in_rescale.inverse(jnp.arctan(out_rescale.inverse(y)))
+  sigma = lambda t: out_rescale(th.tan(th.Tensor(in_rescale(t))))
+  inverse = lambda y: in_rescale.inverse(th.arctan(th.Tensor(out_rescale.inverse(y))))
   return InvertibleSchedule(sigma, inverse)
 
 
@@ -251,9 +247,9 @@ def power_noise_schedule(
   out_rescale = _linear_rescale(
       in_min=start**p, in_max=end**p, out_min=0.0, out_max=clip_max
   )
-  sigma = lambda t: out_rescale(jnp.power(in_rescale(t), p))
+  sigma = lambda t: out_rescale(th.pow(th.tensor(in_rescale(t)), p))
   inverse = lambda y: in_rescale.inverse(  # pylint:disable=g-long-lambda
-      jnp.power(out_rescale.inverse(y), 1 / p)
+      th.pow(out_rescale.inverse(y), 1 / p)
   )
   return InvertibleSchedule(sigma, inverse)
 
@@ -293,9 +289,9 @@ def exponential_noise_schedule(
   out_rescale = _linear_rescale(
       in_min=base**start, in_max=base**end, out_min=0.0, out_max=clip_max
   )
-  sigma = lambda t: out_rescale(jnp.power(base, in_rescale(t)))
+  sigma = lambda t: out_rescale(th.pow(th.tensor(base), in_rescale(t)))
   inverse = lambda y: in_rescale.inverse(  # pylint:disable=g-long-lambda
-      jnp.log(out_rescale.inverse(y)) / jnp.log(base)
+      th.log(out_rescale.inverse(y)) / th.log(th.tensor(base))
   )
   return InvertibleSchedule(sigma, inverse)
 
@@ -307,23 +303,23 @@ def exponential_noise_schedule(
 
 class NoiseLevelSampling(Protocol):
 
-  def __call__(self, rng: jax.Array, shape: tuple[int, ...]) -> Array:
+  def __call__(self, rng: th.Generator, shape: tuple[int, ...]) -> Tensor:
     """Samples noise levels for training."""
     ...
 
 
 def _uniform_samples(
-    rng: jax.Array,
+    rng: th.Generator,
     shape: tuple[int, ...],
     uniform_grid: bool,
-) -> Array:
+) -> th.tensor:
   """Generates samples from uniform distribution on [0, 1]."""
   if uniform_grid:
-    s0 = jax.random.uniform(rng, dtype=jnp.float32)
-    grid = jnp.linspace(0, 1, np.prod(shape), endpoint=False, dtype=jnp.float32)
-    samples = jnp.reshape(jnp.remainder(grid + s0, 1), shape)
+    s0 = th.rand((), generator=rng).to(th.float32)
+    grid = th.linspace(0, 1, np.prod(shape)).to(th.float32)
+    samples = th.remainder(grid + s0, 1).reshape(shape)
   else:
-    samples = jax.random.uniform(rng, shape, dtype=jnp.float32)
+    samples = th.rand(shape, generator=rng).to(th.float32)
   return samples
 
 
@@ -332,11 +328,11 @@ def log_uniform_sampling(
 ) -> NoiseLevelSampling:
   """Samples noise whose natural log follows a uniform distribution."""
 
-  def _noise_sampling(rng: jax.Array, shape: tuple[int, ...]) -> Array:
+  def _noise_sampling(rng: th.Generator, shape: tuple[int, ...]) -> Tensor:
     samples = _uniform_samples(rng, shape, uniform_grid)
-    log_min, log_max = jnp.log(clip_min), jnp.log(scheme.sigma_max)
+    log_min, log_max = th.log(th.tensor(clip_min)), th.log(scheme.sigma_max)
     samples = (log_max - log_min) * samples + log_min
-    return jnp.exp(samples)
+    return th.exp(samples)
 
   return _noise_sampling
 
@@ -346,11 +342,11 @@ def time_uniform_sampling(
 ) -> NoiseLevelSampling:
   """Samples noise from a uniform distribution in t."""
 
-  def _noise_sampling(rng: jax.Array, shape: tuple[int, ...]) -> Array:
+  def _noise_sampling(rng: th.Generator, shape: tuple[int, ...]) -> Tensor:
     samples = _uniform_samples(rng, shape, uniform_grid)
     min_t = scheme.sigma.inverse(clip_min)
     samples = (MAX_DIFFUSION_TIME - min_t) * samples + min_t
-    return jnp.asarray(scheme.sigma(samples))
+    return th.tensor(scheme.sigma(samples), dtype=th.float32)
 
   return _noise_sampling
 
@@ -377,10 +373,12 @@ def normal_sampling(
     A normal sampling function.
   """
 
-  def _noise_sampler(rng: jax.Array, shape: tuple[int, ...]) -> Array:
-    log_sigma = jax.random.normal(rng, shape, dtype=jnp.float32)
+  def _noise_sampler(rng: th.Generator, shape: tuple[int, ...]) -> Tensor:
+    mean = th.zeros(size=shape, dtype=th.float32)
+    std = th.ones(size=shape, dtype=th.float32)
+    log_sigma = th.normal(mean=mean, std=std, generator=rng).to(th.float32)
     log_sigma = p_mean + p_std * log_sigma
-    return jnp.clip(jnp.exp(log_sigma), clip_min, scheme.sigma_max)
+    return th.clamp(th.exp(log_sigma), min=clip_min, max=scheme.sigma_max)
 
   return _noise_sampler
 
@@ -392,13 +390,13 @@ def normal_sampling(
 
 class NoiseLossWeighting(Protocol):
 
-  def __call__(self, sigma: chex.Numeric) -> Array:
+  def __call__(self, sigma: th.tensor) -> Tensor:
     """Returns weights of the input noise levels in the loss function."""
     ...
 
 
-def inverse_squared_weighting(sigma: Array) -> Array:
-  return 1 / jnp.square(sigma)
+def inverse_squared_weighting(sigma: th.tensor) -> Tensor:
+  return 1 / th.square(sigma)
 
 
 def edm_weighting(data_std: float = 1.0) -> NoiseLossWeighting:
@@ -414,8 +412,8 @@ def edm_weighting(data_std: float = 1.0) -> NoiseLossWeighting:
     The weighting function.
   """
 
-  def _weight_fn(sigma: Array) -> Array:
-    return (jnp.square(data_std) + jnp.square(sigma)) / jnp.square(
+  def _weight_fn(sigma: th.tensor) -> Tensor:
+    return (th.square(th.tensor(data_std)) + th.square(sigma)) / th.square(
         data_std * sigma
     )
 
