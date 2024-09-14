@@ -77,7 +77,7 @@ class AdaptiveScale(nn.Module):
         kernel_init=default_init(1.0),
         precision=self.precision,
         dtype=self.dtype,
-        param_dtype=self.param_dtype,
+        param_dtype=self.param_dtype, # not in diff code
     )
     scale_params = affine(self.act_fun(emb))
     # Unsqueeze in the middle to allow broadcasting.
@@ -105,10 +105,10 @@ class AttentionBlock(nn.Module):
         kernel_init=nn.initializers.xavier_uniform(),
         deterministic=not is_training,
         dtype=self.dtype,
-        precision=self.precision,
+        precision=self.precision, # not in diff code
         param_dtype=self.param_dtype,
         name="dot_attn",
-        normalize_qk=self.normalize_qk,
+        normalize_qk=self.normalize_qk, # not in diff code
     )(h, h)
     return layers.CombineResidualWithSkip()(residual=h, skip=x)
 
@@ -132,8 +132,8 @@ class ResConv1x(nn.Module):
         kernel_size=kernel_size,
         kernel_init=default_init(1.0),
         dtype=self.dtype,
-        precision=self.precision,
-        param_dtype=self.param_dtype,
+        precision=self.precision, # not in diff code
+        param_dtype=self.param_dtype, # not in diff code
     )(x)
     x = self.act_fun(x)
     x = nn.Conv(
@@ -141,13 +141,13 @@ class ResConv1x(nn.Module):
         kernel_size=kernel_size,
         kernel_init=default_init(1.0),
         dtype=self.dtype,
-        precision=self.precision,
-        param_dtype=self.param_dtype,
+        precision=self.precision, # not in diff code
+        param_dtype=self.param_dtype, # not in diff code
     )(x)
     return layers.CombineResidualWithSkip(
         dtype=self.dtype,
-        precision=self.precision,
-        param_dtype=self.param_dtype,
+        precision=self.precision, # not in diff code
+        param_dtype=self.param_dtype, # not in diff code
     )(residual=x, skip=skip)
 
 
@@ -285,7 +285,7 @@ class Add2dPosEmbedding(nn.Module):
     pos_embed = jnp.concatenate([row_embed, col_embed], axis=-1)
     return x + jnp.expand_dims(pos_embed, axis=0)
 
-
+# TODO: Change this also 3D embeddings are supported in our case!
 def position_embedding(ndim: int, **kwargs) -> nn.Module:
   if ndim == 1:
     return Add1dPosEmbedding(**kwargs)
