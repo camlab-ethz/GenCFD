@@ -54,17 +54,19 @@ class ConvLayersTest(unittest.TestCase):
   def test_downsample_conv_output_shape(self):
     test_cases = [
       ((8, 8, 8, 8), (2, 2), (8, 4, 4, 8)),
-      ((8, 8, 8, 8, 8), (2, 2, 2, 2), (4, 4, 4, 4, 4)),
+      ((8, 8, 8, 8, 8), (2, 2, 2), (8, 4, 4, 4, 6)),
     ]
 
     for input_shape, ratios, expected_output_shape in test_cases:
         in_channels = input_shape[-1]
         num_features = 6
         inputs = torch.ones(input_shape)
-
         model = DownsampleConv(in_channels=in_channels, features=num_features, ratios=ratios)
 
-        out = model(inputs.permute(0,3,2,1)).permute(0,3,2,1)
+        if len(input_shape) == 4:
+          out = model(inputs.permute(0,3,2,1)).permute(0,3,2,1)
+        elif len(input_shape) == 5:
+           out = model(inputs.permute(0,4,3,2,1)).permute(0,4,3,2,1)
 
         self.assertEqual(out.shape, expected_output_shape[:-1] + (num_features,))
 

@@ -15,7 +15,7 @@
 """Convolution layers."""
 
 from typing import Literal, Sequence
-
+import numpy as np
 import torch
 from torch import nn
 import torch.nn.functional as F
@@ -200,18 +200,36 @@ class DownsampleConv(nn.Module):
     self.use_bias = use_bias
     self.in_channels = kwargs.get('in_channels', 1)
 
-    # For downsampling 0 padding
-    self.conv = nn.Conv2d(
-      in_channels=self.in_channels,
-      out_channels=features,
-      kernel_size=ratios,
-      bias=use_bias,
-      padding=0,
-    )
+    # For downsampling padding = 0 and stride > 1
+    if len(ratios) == 2:
+      self.conv2d = nn.Conv2d(
+        in_channels=self.in_channels,
+        out_channels=features,
+        kernel_size=ratios,
+        stride=ratios,
+        bias=use_bias,
+        padding=0,
+      )
+      # Initialize with variance_scaling
+      # Only use this if the activation function is ReLU or smth. similar
+      torch.nn.init.kaiming_uniform_(self.conv2d.weight, a=np.sqrt(5))
     
+    elif len(ratios) == 3:
+      self.conv3d = nn.Conv3d(
+        in_channels=self.in_channels,
+        out_channels=features,
+        kernel_size=ratios,
+        stride=ratios,
+        bias=use_bias,
+        padding=0,
+      )
+      torch.nn.init.kaiming_uniform_(self.conv3d.weight, a=np.sqrt(5))
+    else:
+      raise ValueError(f"Ratio lengths should either be 2D or 3D")
     
   def forward(self, inputs):
     """Applies strided convolution for downsampling."""
+
     if len(inputs.shape) <= len(self.ratios):
       raise ValueError(
         f"Inputs ({inputs.shape}) must have at least 1 more dimension " 
@@ -226,4 +244,9 @@ class DownsampleConv(nn.Module):
         f"downsampling ratio {self.ratios}."
       )
     
-    return self.conv(inputs)
+    if len(inputs.shape) == 5:
+      return self.conv3d(inputs)
+    elif len(inputs.shape) == 4:
+      return self.conv2d(inputs)
+    else:
+      raise ValueError(f"Input Dimension must be either 4D (bs, c, y, x) or 5D (bs, c, z, y, x)")
