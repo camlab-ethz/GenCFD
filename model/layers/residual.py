@@ -11,21 +11,19 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+#
+# Modifications made by CAM LAB, 09.2024.
+# Converted from JAX to PyTorch and made further changes.
 
 """Residual layer modules."""
-import flax.linen as nn
-import jax
-import jax.numpy as jnp
+import torch
+from torch import nn
+import torch.nn.functional as F
+import numpy as np
+import math
+from utils.model_utils import reshape_jax_torch
 
-Array = jax.Array
-PrecisionLike = (
-    None
-    | str
-    | jax.lax.Precision
-    | tuple[str, str]
-    | tuple[jax.lax.Precision, jax.lax.Precision]
-)
-
+Tensor = torch.Tensor
 
 class CombineResidualWithSkip(nn.Module):
   """Combine residual and skip connections.
@@ -35,22 +33,29 @@ class CombineResidualWithSkip(nn.Module):
       connections. Mandatory if the number of channels are different between
       skip and residual values.
   """
+  def __init__(self, project_skip: bool=False, dtype: torch.dtype=torch.float32):
+    super(CombineResidualWithSkip, self).__init__()
 
-  project_skip: bool = False
-  precision: PrecisionLike = None
-  dtype: jnp.dtype = jnp.float32
-  param_dtype: jnp.dtype = jnp.float32
+    self.project_skip = project_skip
+    self.dtype = dtype
 
-  @nn.compact
-  def __call__(self, *, residual: Array, skip: Array) -> Array:
+    self.skip_projection = None
+
+  def forward(self, residual: Tensor, skip: Tensor) -> Tensor:
     if self.project_skip:
-      skip = nn.Dense(
-          residual.shape[-1],
-          kernel_init=nn.initializers.variance_scaling(
-              scale=1.0, mode="fan_avg", distribution="uniform"
-          ),
-          precision=self.precision,
-          dtype=self.dtype,
-          param_dtype=self.param_dtype,
-      )(skip)
-    return (skip + residual) / jnp.sqrt(2.0)
+      if self.skip_projection is None:
+        # linear projection layer to match the number of channels
+        self.skip_projection = nn.Linear(
+          reshape_jax_torch(skip).size(-1), reshape_jax_torch(residual).size(-1)
+          ).to(self.dtype)
+        torch.nn.init.kaiming_uniform_(self.skip_projection.weight, a=np.sqrt(5))
+
+        if self.skip_projection.bias is not None:
+          fan_in, _ = torch.nn.init._calculate_fan_in_and_fan_out(self.skip_projection.weight)
+          bound = 1 / math.sqrt(fan_in)
+          torch.nn.init.uniform_(self.skip_projection.bias, -bound, bound)
+
+      skip = reshape_jax_torch(self.skip_projection(reshape_jax_torch(skip)))
+    # combine skip and residual connections
+    return (skip + residual) / torch.sqrt(torch.tensor(2.0, dtype=self.dtype))
+
