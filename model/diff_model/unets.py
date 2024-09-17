@@ -11,6 +11,9 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+#
+# Modifications made by CAM LAB, 09.2024.
+# Converted from JAX to PyTorch and made further changes.
 
 """U-Net denoiser models."""
 
@@ -18,8 +21,13 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
-from model.layers.residual import CombineResidualWithSkip
 from typing import Callable, Sequence
+
+from model.layers.residual import CombineResidualWithSkip
+# from model.layers.resize import FilteredResize
+from model.layers.convolutions import ConvLayer, DownsampleConv, LatLonConv
+from utils.model_utils import reshape_jax_torch
+
 
 Tensor = torch.Tensor
 
@@ -33,53 +41,57 @@ def default_init(scale: float = 1e-10):
   return initializer
 
 
-# class AdaptiveScale(nn.Module):
-#   """Adaptively scale the input based on embedding.
+class AdaptiveScale(nn.Module):
+  """Adaptively scale the input based on embedding.
 
-#   Conditional information is projected to two vectors of length c where c is
-#   the number of channels of x, then x is scaled channel-wise by first vector
-#   and offset channel-wise by the second vector.
+  Conditional information is projected to two vectors of length c where c is
+  the number of channels of x, then x is scaled channel-wise by first vector
+  and offset channel-wise by the second vector.
 
-#   This method is now standard practice for conditioning with diffusion models,
-#   see e.g. https://arxiv.org/abs/2105.05233, and for the
-#   more general FiLM technique see https://arxiv.org/abs/1709.07871.
-#   """
+  This method is now standard practice for conditioning with diffusion models,
+  see e.g. https://arxiv.org/abs/2105.05233, and for the
+  more general FiLM technique see https://arxiv.org/abs/1709.07871.
+  """
 
-#   act_fun: Callable[[Array], Array] = nn.swish
-#   precision: PrecisionLike = None
-#   dtype: jnp.dtype = jnp.float32
-#   param_dtype: jnp.dtype = jnp.float32
+  def __init__(self, act_fun: Callable[[Tensor], Tensor]=F.silu, 
+               dtype: torch.dtype=torch.float32):
+    super(AdaptiveScale, self).__init__()
 
-#   @nn.compact
-#   def __call__(self, x: Array, emb: Array) -> Array:
-#     """Adaptive scaling applied to the channel dimension.
+    self.act_fun = act_fun
+    self.dtype = dtype
 
-#     Args:
-#       x: Tensor to be rescaled.
-#       emb: Embedding values that drives the rescaling.
+    self.affine = None
 
-#     Returns:
-#       Rescaled tensor plus bias.
-#     """
-#     assert emb.ndim == 2, (
-#         "The dimension of the embedding needs to be two, instead it was : "
-#         + str(emb.ndim)
-#     )
-#     affine = nn.Dense(
-#         features=x.shape[-1] * 2,
-#         kernel_init=default_init(1.0),
-#         precision=self.precision,
-#         dtype=self.dtype,
-#         param_dtype=self.param_dtype, # not in diff code
-#     )
-#     scale_params = affine(self.act_fun(emb))
-#     # Unsqueeze in the middle to allow broadcasting.
-#     scale_params = scale_params.reshape(
-#         scale_params.shape[:1] + (x.ndim - 2) * (1,) + scale_params.shape[1:]
-#     )
-#     scale, bias = jnp.split(scale_params, 2, axis=-1)
-#     return x * (scale + 1.0) + bias
+  def forward(self, x: Tensor, emb: Tensor) -> Tensor:
+    """Adaptive scaling applied to the channel dimension.
+    
+    Args:
+      x: Tensor to be rescaled.
+      emb: Embedding values that drives the rescaling.
 
+    Returns:
+      Rescaled tensor plus bias
+    """
+    assert len(emb.shape) == 2, (
+      "The dimension of the embedding needs to be two, instead it was : "
+      + str(len(emb.shape))
+    )
+    if self.affine is None:
+      # Initialize affine transformation
+      self.affine = nn.Linear(
+        in_features=emb.shape[-1],
+        out_features=reshape_jax_torch(x).shape[-1] * 2,
+        dtype=self.dtype
+      )
+
+    scale_params = self.affine(self.act_fun(emb)) # (bs, c*2)
+    # Unsqueeze in the middle to allow broadcasting. 
+    # 2D case: (bs, 1, 1, c*2), 3D case: (bs, 1, 1, 1, c*2)
+    scale_params = scale_params.view(
+      scale_params.shape[0], *([1] * (len(x.shape) - 2)), -1
+      )
+    scale, bias = torch.chunk(scale_params, 2, dim=-1)
+    return reshape_jax_torch(reshape_jax_torch(x) * (scale + 1) + bias)
 
 # class AttentionBlock(nn.Module):
 #   """Attention block."""
@@ -714,120 +726,120 @@ class ResConv1x(nn.Module):
 #     return skips
 
 
-# class UStack(nn.Module):
-#   """Upsampling Stack.
+class UStack(nn.Module):
+  """Upsampling Stack.
 
-#   Takes in features at intermediate resolutions from the downsampling stack
-#   as well as final output, and applies upsampling with convolutional blocks
-#   and combines together with skip connections in typical UNet style.
-#   Optionally can use self attention at low spatial resolutions.
+  Takes in features at intermediate resolutions from the downsampling stack
+  as well as final output, and applies upsampling with convolutional blocks
+  and combines together with skip connections in typical UNet style.
+  Optionally can use self attention at low spatial resolutions.
 
-#   Attributes:
-#     num_channels: Number of channels at each resolution level.
-#     num_res_blocks: Number of resnest blocks at each resolution level.
-#     upsample_ratio: The upsampling ration between levels.
-#     padding: Type of padding for the convolutional layers.
-#     dropout_rate: Rate for the dropout inside the transformed blocks.
-#     use_attention: Whether to use attention at the coarser (deepest) level.
-#     num_heads: Number of attentions heads inside the attention block.
-#     channels_per_head: Number of channels per head.
-#     dtype: Data type.
-#   """
+  Attributes:
+    num_channels: Number of channels at each resolution level.
+    num_res_blocks: Number of resnest blocks at each resolution level.
+    upsample_ratio: The upsampling ration between levels.
+    padding: Type of padding for the convolutional layers.
+    dropout_rate: Rate for the dropout inside the transformed blocks.
+    use_attention: Whether to use attention at the coarser (deepest) level.
+    num_heads: Number of attentions heads inside the attention block.
+    channels_per_head: Number of channels per head.
+    dtype: Data type.
+  """
 
-#   num_channels: tuple[int, ...]
-#   num_res_blocks: tuple[int, ...]
-#   upsample_ratio: tuple[int, ...]
-#   padding: str = "CIRCULAR"
-#   dropout_rate: float = 0.0
-#   use_attention: bool = False
-#   num_heads: int = 8
-#   channels_per_head: int = -1
-#   normalize_qk: bool = False
-#   precision: PrecisionLike = None
-#   dtype: jnp.dtype = jnp.float32
-#   param_dtype: jnp.dtype = jnp.float32
+  num_channels: tuple[int, ...]
+  num_res_blocks: tuple[int, ...]
+  upsample_ratio: tuple[int, ...]
+  padding: str = "CIRCULAR"
+  dropout_rate: float = 0.0
+  use_attention: bool = False
+  num_heads: int = 8
+  channels_per_head: int = -1
+  normalize_qk: bool = False
+  precision: PrecisionLike = None
+  dtype: jnp.dtype = jnp.float32
+  param_dtype: jnp.dtype = jnp.float32
 
-#   @nn.compact
-#   def __call__(
-#       self, x: Array, emb: Array, skips: list[Array], *, is_training: bool
-#   ) -> Array:
-#     assert (
-#         len(self.num_channels)
-#         == len(self.num_res_blocks)
-#         == len(self.upsample_ratio)
-#     )
-#     kernel_dim = x.ndim - 2
-#     res = np.asarray(x.shape[1:-1])
-#     h = x
-#     for level, channel in enumerate(self.num_channels):
-#       for block_id in range(self.num_res_blocks[level]):
-#         h = layers.CombineResidualWithSkip(
-#             project_skip=h.shape[-1] != skips[-1].shape[-1],
-#             precision=self.precision,
-#             dtype=self.dtype,
-#             param_dtype=self.param_dtype,
-#         )(residual=h, skip=skips.pop())
-#         h = ConvBlock(
-#             out_channels=channel,
-#             kernel_size=kernel_dim * (3,),
-#             padding=self.padding,
-#             dropout=self.dropout_rate,
-#             precision=self.precision,
-#             dtype=self.dtype,
-#             param_dtype=self.param_dtype,
-#             name=f"res{'x'.join(res.astype(str))}.up.block{block_id}",
-#         )(h, emb, is_training=is_training)
-#         if self.use_attention and level == 0:  # opposite to DStack
-#           b, *hw, c = h.shape
-#           h = AttentionBlock(
-#               num_heads=self.num_heads,
-#               normalize_qk=self.normalize_qk,
-#               precision=self.precision,
-#               dtype=self.dtype,
-#               param_dtype=self.param_dtype,
-#               name=f"res{'x'.join(res.astype(str))}.up.block{block_id}.attn",
-#           )(h.reshape(b, -1, c), is_training=is_training)
-#           h = ResConv1x(
-#               hidden_layer_size=channel * 2,
-#               out_channels=channel,
-#               precision=self.precision,
-#               dtype=self.dtype,
-#               param_dtype=self.param_dtype,
-#               name=f"res{'x'.join(res.astype(str))}.up.block{block_id}.res_conv_1x",
-#           )(h).reshape(b, *hw, c)
+  @nn.compact
+  def __call__(
+      self, x: Array, emb: Array, skips: list[Array], *, is_training: bool
+  ) -> Array:
+    assert (
+        len(self.num_channels)
+        == len(self.num_res_blocks)
+        == len(self.upsample_ratio)
+    )
+    kernel_dim = x.ndim - 2
+    res = np.asarray(x.shape[1:-1])
+    h = x
+    for level, channel in enumerate(self.num_channels):
+      for block_id in range(self.num_res_blocks[level]):
+        h = CombineResidualWithSkip(
+            project_skip=h.shape[-1] != skips[-1].shape[-1],
+            precision=self.precision,
+            dtype=self.dtype,
+            param_dtype=self.param_dtype,
+        )(residual=h, skip=skips.pop())
+        h = ConvBlock(
+            out_channels=channel,
+            kernel_size=kernel_dim * (3,),
+            padding=self.padding,
+            dropout=self.dropout_rate,
+            precision=self.precision,
+            dtype=self.dtype,
+            param_dtype=self.param_dtype,
+            name=f"res{'x'.join(res.astype(str))}.up.block{block_id}",
+        )(h, emb, is_training=is_training)
+        if self.use_attention and level == 0:  # opposite to DStack
+          b, *hw, c = h.shape
+          h = AttentionBlock(
+              num_heads=self.num_heads,
+              normalize_qk=self.normalize_qk,
+              precision=self.precision,
+              dtype=self.dtype,
+              param_dtype=self.param_dtype,
+              name=f"res{'x'.join(res.astype(str))}.up.block{block_id}.attn",
+          )(h.reshape(b, -1, c), is_training=is_training)
+          h = ResConv1x(
+              hidden_layer_size=channel * 2,
+              out_channels=channel,
+              precision=self.precision,
+              dtype=self.dtype,
+              param_dtype=self.param_dtype,
+              name=f"res{'x'.join(res.astype(str))}.up.block{block_id}.res_conv_1x",
+          )(h).reshape(b, *hw, c)
 
-#       # upsampling
-#       up_ratio = self.upsample_ratio[level]
-#       h = layers.ConvLayer(
-#           features=up_ratio**kernel_dim * channel,
-#           kernel_size=kernel_dim * (3,),
-#           padding=self.padding,
-#           kernel_init=default_init(1.0),
-#           precision=self.precision,
-#           dtype=self.dtype,
-#           param_dtype=self.param_dtype,
-#           name=f"res{'x'.join(res.astype(str))}.conv_upsample",
-#       )(h)
-#       h = layers.channel_to_space(h, block_shape=kernel_dim * (up_ratio,))
-#       res = res * up_ratio
+      # upsampling
+      up_ratio = self.upsample_ratio[level]
+      h = layers.ConvLayer(
+          features=up_ratio**kernel_dim * channel,
+          kernel_size=kernel_dim * (3,),
+          padding=self.padding,
+          kernel_init=default_init(1.0),
+          precision=self.precision,
+          dtype=self.dtype,
+          param_dtype=self.param_dtype,
+          name=f"res{'x'.join(res.astype(str))}.conv_upsample",
+      )(h)
+      h = layers.channel_to_space(h, block_shape=kernel_dim * (up_ratio,))
+      res = res * up_ratio
 
-#     h = layers.CombineResidualWithSkip(
-#         project_skip=h.shape[-1] != skips[-1].shape[-1],
-#         precision=self.precision,
-#         dtype=self.dtype,
-#         param_dtype=self.param_dtype,
-#     )(residual=h, skip=skips.pop())
-#     h = layers.ConvLayer(
-#         features=128,
-#         kernel_size=kernel_dim * (3,),
-#         padding=self.padding,
-#         kernel_init=default_init(1.0),
-#         precision=self.precision,
-#         dtype=self.dtype,
-#         param_dtype=self.param_dtype,
-#         name="conv_out",
-#     )(h)
-#     return h
+    h = layers.CombineResidualWithSkip(
+        project_skip=h.shape[-1] != skips[-1].shape[-1],
+        precision=self.precision,
+        dtype=self.dtype,
+        param_dtype=self.param_dtype,
+    )(residual=h, skip=skips.pop())
+    h = layers.ConvLayer(
+        features=128,
+        kernel_size=kernel_dim * (3,),
+        padding=self.padding,
+        kernel_init=default_init(1.0),
+        precision=self.precision,
+        dtype=self.dtype,
+        param_dtype=self.param_dtype,
+        name="conv_out",
+    )(h)
+    return h
 
 
 # class UNet(nn.Module):
@@ -889,7 +901,7 @@ class ResConv1x(nn.Module):
 
 #     input_size = x.shape[1:-1]
 #     if self.resize_to_shape is not None:
-#       x = layers.FilteredResize(
+#       x = FilteredResize(
 #           output_size=self.resize_to_shape,
 #           kernel_size=(7, 7),
 #           padding=self.padding,
@@ -962,7 +974,7 @@ class ResConv1x(nn.Module):
 #     )(skips[-1], emb, skips, is_training=is_training)
 
 #     h = nn.swish(nn.GroupNorm(min(h.shape[-1] // 4, 32))(h))
-#     h = layers.ConvLayer(
+#     h = ConvLayer(
 #         features=self.out_channels,
 #         kernel_size=kernel_dim * (3,),
 #         padding=self.padding,
@@ -974,7 +986,7 @@ class ResConv1x(nn.Module):
 #     )(h)
 
 #     if self.resize_to_shape:
-#       h = layers.FilteredResize(
+#       h = FilteredResize(
 #           output_size=input_size,
 #           kernel_size=(7, 7),
 #           padding=self.padding,

@@ -14,16 +14,14 @@
 
 """Upsampling modules."""
 
-from collections.abc import Sequence
-
-import jax
-import jax.numpy as jnp
+from typing import Sequence
+import torch
 import numpy as np
 
-Array = jax.Array
+Tensor = torch.Tensor
 
 
-def channel_to_space(inputs: Array, block_shape: Sequence[int]) -> Array:
+def channel_to_space(inputs: Tensor, block_shape: Sequence[int]) -> Tensor:
   """Reshapes data from the channel to spatial dims as a way to upsample.
 
   As an example, for an input of shape (*batch, x, y, z) and block_shape of
