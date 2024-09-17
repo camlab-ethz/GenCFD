@@ -18,6 +18,8 @@ from typing import Sequence
 import torch
 import numpy as np
 
+from utils.model_utils import reshape_jax_torch
+
 Tensor = torch.Tensor
 
 
@@ -41,9 +43,11 @@ def channel_to_space(inputs: Tensor, block_shape: Sequence[int]) -> Tensor:
   Returns:
     The upsampled array.
   """
-  if not inputs.ndim > len(block_shape):
+  # reshape from (bs, c, y, x) to (bs, x, y, c)
+  inputs = reshape_jax_torch(inputs)
+  if not len(inputs.shape) > len(block_shape):
     raise ValueError(
-        f"Ndim of `x` ({inputs.ndim}) expected to be higher than the length of"
+        f"Ndim of `x` ({len(inputs.shape)}) expected to be higher than the length of"
         f" `block_shape` {len(block_shape)}."
     )
 
@@ -57,12 +61,12 @@ def channel_to_space(inputs: Tensor, block_shape: Sequence[int]) -> Tensor:
   old_shape = inputs.shape
   batch_ndim = inputs.ndim - len(block_shape) - 1
   cout = old_shape[-1] // np.prod(block_shape)
-  x = jnp.reshape(inputs, old_shape[:-1] + tuple(block_shape) + (cout,))
+  x = torch.reshape(inputs, old_shape[:-1] + tuple(block_shape) + (cout,))
 
   # Interleave old and new spatial axes.
   spatial_axes = np.arange(2 * len(block_shape), dtype=np.int32) + batch_ndim
   new_axes = spatial_axes.reshape(2, -1).ravel(order="F")
-  x = jnp.transpose(
+  x = torch.permute(
       x,
       tuple(range(batch_ndim))
       + tuple(new_axes)
@@ -72,4 +76,4 @@ def channel_to_space(inputs: Tensor, block_shape: Sequence[int]) -> Tensor:
   # Merge the interleaved axes.
   new_shape = np.asarray(old_shape[batch_ndim:-1]) * np.asarray(block_shape)
   new_shape = old_shape[:batch_ndim] + tuple(new_shape) + (cout,)
-  return jnp.reshape(x, new_shape)
+  return reshape_jax_torch(torch.reshape(x, new_shape))

@@ -12,26 +12,34 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from absl.testing import absltest
-from absl.testing import parameterized
-import jax.numpy as jnp
-from swirl_dynamics.lib.layers import upsample
+import unittest
+import torch
+from model.layers.upsample import channel_to_space
+from utils.model_utils import reshape_jax_torch
 
 
-class UpsampleLayersTest(parameterized.TestCase):
+class UpsampleLayersTest(unittest.TestCase):
 
-  @parameterized.parameters(
+  def test_channel_to_space_output_shape(self):
+
+    test_cases = [
       ((8, 8, 8, 32), (8,), (8, 8, 64, 4)),
       ((8, 8, 8, 32), (4, 4), (8, 32, 32, 2)),
       ((8, 8, 8, 8, 128), (2, 2, 2, 2), (16, 16, 16, 16, 8)),
-  )
-  def test_channel_to_space_output_shape(
-      self, input_shape, block_shape, expected_output_shape
-  ):
-    inputs = jnp.ones(input_shape)
-    out = upsample.channel_to_space(inputs, block_shape)
-    self.assertEqual(out.shape, expected_output_shape)
+    ]
+
+    for input_shape, block_shape, expected_output_shape in test_cases:
+      with self.subTest(
+        input_shape=input_shape,
+        block_shape=block_shape,
+        expected_output_shape=expected_output_shape
+        ):
+
+        inputs = torch.ones(input_shape)
+        out = channel_to_space(reshape_jax_torch(inputs), block_shape)
+        out = reshape_jax_torch(out)
+        self.assertEqual(out.shape, expected_output_shape)
 
 
 if __name__ == "__main__":
-  absltest.main()
+  unittest.main()
