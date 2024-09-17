@@ -26,72 +26,11 @@ from typing import Callable, Sequence
 from model.layers.residual import CombineResidualWithSkip
 # from model.layers.resize import FilteredResize
 from model.layers.convolutions import ConvLayer, DownsampleConv, LatLonConv
-from utils.model_utils import reshape_jax_torch
+from model.layers.upsample import channel_to_space
+from utils.model_utils import reshape_jax_torch, default_init
 
 
 Tensor = torch.Tensor
-
-def default_init(scale: float = 1e-10):
-  def initializer(tensor: Tensor):
-    fan_in, fan_out = nn.init._calculate_fan_in_and_fan_out(tensor)
-    std = torch.sqrt(torch.tensor(scale / ((fan_in + fan_out) / 2.0)))
-    bound = torch.sqrt(torch.tensor(3.0)) * std # uniform dist. scaling factor
-    with torch.no_grad():
-      return tensor.uniform_(-bound, bound)
-  return initializer
-
-
-class AdaptiveScale(nn.Module):
-  """Adaptively scale the input based on embedding.
-
-  Conditional information is projected to two vectors of length c where c is
-  the number of channels of x, then x is scaled channel-wise by first vector
-  and offset channel-wise by the second vector.
-
-  This method is now standard practice for conditioning with diffusion models,
-  see e.g. https://arxiv.org/abs/2105.05233, and for the
-  more general FiLM technique see https://arxiv.org/abs/1709.07871.
-  """
-
-  def __init__(self, act_fun: Callable[[Tensor], Tensor]=F.silu, 
-               dtype: torch.dtype=torch.float32):
-    super(AdaptiveScale, self).__init__()
-
-    self.act_fun = act_fun
-    self.dtype = dtype
-
-    self.affine = None
-
-  def forward(self, x: Tensor, emb: Tensor) -> Tensor:
-    """Adaptive scaling applied to the channel dimension.
-    
-    Args:
-      x: Tensor to be rescaled.
-      emb: Embedding values that drives the rescaling.
-
-    Returns:
-      Rescaled tensor plus bias
-    """
-    assert len(emb.shape) == 2, (
-      "The dimension of the embedding needs to be two, instead it was : "
-      + str(len(emb.shape))
-    )
-    if self.affine is None:
-      # Initialize affine transformation
-      self.affine = nn.Linear(
-        in_features=emb.shape[-1],
-        out_features=reshape_jax_torch(x).shape[-1] * 2,
-        dtype=self.dtype
-      )
-
-    scale_params = self.affine(self.act_fun(emb)) # (bs, c*2)
-    # Unsqueeze in the middle to allow broadcasting. 
-    # 2D case: (bs, 1, 1, c*2), 3D case: (bs, 1, 1, 1, c*2)
-    scale_params = scale_params.view(
-      scale_params.shape[0], *([1] * (len(x.shape) - 2)), -1
-      )
-    scale, bias = torch.chunk(scale_params, 2, dim=-1)
-    return reshape_jax_torch(reshape_jax_torch(x) * (scale + 1) + bias)
 
 # class AttentionBlock(nn.Module):
 #   """Attention block."""
@@ -116,147 +55,6 @@ class AdaptiveScale(nn.Module):
 #         normalize_qk=self.normalize_qk, # not in diff code
 #     )(h, h)
 #     return layers.CombineResidualWithSkip()(residual=h, skip=x)
-
-
-class ResConv1x(nn.Module):
-  """Single-layer residual network with size-1 conv kernels."""
-
-  def __init__(
-      self, hidden_layer_size: int, out_channels: int, act_fun: Callable[[Tensor], Tensor] = F.silu,
-      dtype: torch.dtype=torch.float32, scale: float=1e-10, project_skip: bool=False):
-    super(ResConv1x, self).__init__()
-
-    self.hidden_layer_size = hidden_layer_size
-    self.out_channels = out_channels
-    self.act_fun = act_fun
-    self.dtype = dtype
-    self.scale = scale
-    self.project_skip = project_skip
-
-    self.conv1 = None
-    self.conv2 = None
-
-    self.combine_skip = CombineResidualWithSkip(project_skip=project_skip, dtype=self.dtype)
-  
-  def forward(self, x):
-
-    if len(x.shape) == 4:
-      kernel_size = (len(x.shape) - 2) * (1,)
-      if self.conv1 is None:
-        self.conv1 = nn.Conv2d(
-          in_channels=self.hidden_layer_size,
-          out_channels=self.hidden_layer_size,
-          kernel_size=kernel_size,
-          dtype=self.dtype
-        )
-        default_init(self.scale)(self.conv1.weight)
-
-        self.conv2 = nn.Conv2d(
-          in_channels=self.hidden_layer_size,
-          out_channels=self.out_channels,
-          kernel_size=kernel_size,
-          dtype=self.dtype
-        )
-        default_init(self.scale)(self.conv2.weight)
-    
-    elif len(x.shape) == 5:
-      kernel_size = (len(x.shape) - 2) * (1,)
-      if self.conv1 is None:
-        self.conv1 = nn.Conv3d(
-          in_channels=self.hidden_layer_size,
-          out_channels=self.hidden_layer_size,
-          kernel_size=kernel_size,
-          dtype=self.dtype
-        )
-        default_init(self.scale)(self.conv1.weight)
-
-        self.conv2 = nn.Conv3d(
-          in_channels=self.hidden_layer_size,
-          out_channels=self.out_channels,
-          kernel_size=kernel_size,
-          dtype=self.dtype
-        )
-        default_init(self.scale)(self.conv2.weight)
-
-    else:
-      raise ValueError(f"Unsupported input dimension. Expected 4D or 5D")
-      
-    skip = x.clone()
-    x = self.conv1(x)
-    x = self.act_fun(x)
-    x = self.conv2(x)
-
-    x = self.combine_skip(residual=x, skip=skip)
-
-    return x
-
-
-      
-
-
-# class ConvBlock(nn.Module):
-#   """A basic two-layer convolution block with adaptive scaling in between.
-
-#   main conv path:
-#   --> GroupNorm --> Swish --> Conv -->
-#       GroupNorm --> FiLM --> Swish --> Dropout --> Conv
-
-#   shortcut path:
-#   --> Linear
-
-#   Attributes:
-#     channels: The number of output channels.
-#     kernel_sizes: Kernel size for both conv layers.
-#     padding: The type of convolution padding to use.
-#     dropout: The rate of dropout applied in between the conv layers.
-#     film_act_fun: Activation function for the FilM layer.
-#   """
-
-#   out_channels: int
-#   kernel_size: tuple[int, ...]
-#   padding: str = "CIRCULAR"
-#   dropout: float = 0.0
-#   film_act_fun: Callable[[Array], Array] = nn.swish
-#   act_fun: Callable[[Array], Array] = nn.swish
-#   precision: PrecisionLike = None
-#   dtype: jnp.dtype = jnp.float32
-#   param_dtype: jnp.dtype = jnp.float32
-
-#   @nn.compact
-#   def __call__(self, x: Array, emb: Array, is_training: bool) -> Array:
-#     h = x
-#     h = nn.GroupNorm(min(h.shape[-1] // 4, 32))(h)
-#     h = self.act_fun(h)
-#     h = layers.ConvLayer(
-#         features=self.out_channels,
-#         kernel_size=self.kernel_size,
-#         padding=self.padding,
-#         kernel_init=default_init(1.0),
-#         precision=self.precision,
-#         dtype=self.dtype,
-#         param_dtype=self.param_dtype,
-#         name="conv_0",
-#     )(h)
-#     h = nn.GroupNorm(min(h.shape[-1] // 4, 32))(h)
-#     h = AdaptiveScale(act_fun=self.film_act_fun)(h, emb)
-#     h = self.act_fun(h)
-#     h = nn.Dropout(rate=self.dropout, deterministic=not is_training)(h)
-#     h = layers.ConvLayer(
-#         features=self.out_channels,
-#         kernel_size=self.kernel_size,
-#         padding=self.padding,
-#         kernel_init=default_init(1.0),
-#         precision=self.precision,
-#         dtype=self.dtype,
-#         param_dtype=self.param_dtype,
-#         name="conv_1",
-#     )(h)
-#     return layers.CombineResidualWithSkip(
-#         project_skip=True,
-#         dtype=self.dtype,
-#         precision=self.precision,
-#         param_dtype=self.param_dtype,
-#     )(residual=h, skip=x)
 
 
 # class FourierEmbedding(nn.Module):
@@ -810,7 +608,7 @@ class UStack(nn.Module):
 
       # upsampling
       up_ratio = self.upsample_ratio[level]
-      h = layers.ConvLayer(
+      h = ConvLayer(
           features=up_ratio**kernel_dim * channel,
           kernel_size=kernel_dim * (3,),
           padding=self.padding,
@@ -820,16 +618,16 @@ class UStack(nn.Module):
           param_dtype=self.param_dtype,
           name=f"res{'x'.join(res.astype(str))}.conv_upsample",
       )(h)
-      h = layers.channel_to_space(h, block_shape=kernel_dim * (up_ratio,))
+      h = channel_to_space(h, block_shape=kernel_dim * (up_ratio,))
       res = res * up_ratio
 
-    h = layers.CombineResidualWithSkip(
+    h = CombineResidualWithSkip(
         project_skip=h.shape[-1] != skips[-1].shape[-1],
         precision=self.precision,
         dtype=self.dtype,
         param_dtype=self.param_dtype,
     )(residual=h, skip=skips.pop())
-    h = layers.ConvLayer(
+    h = ConvLayer(
         features=128,
         kernel_size=kernel_dim * (3,),
         padding=self.padding,

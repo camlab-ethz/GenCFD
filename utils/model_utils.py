@@ -1,4 +1,6 @@
 import torch
+import torch.nn as nn
+
 Tensor = torch.Tensor
 
 def reshape_jax_torch(tensor: Tensor) -> Tensor:
@@ -20,3 +22,13 @@ def reshape_jax_torch(tensor: Tensor) -> Tensor:
         raise ValueError(
             f"Incorrect tensor shape, only 4D and 5D tensors are valid"
             )
+
+def default_init(scale: float = 1e-10):
+  """Initialization of weights with scaling"""
+  def initializer(tensor: Tensor):
+    fan_in, fan_out = nn.init._calculate_fan_in_and_fan_out(tensor)
+    std = torch.sqrt(torch.tensor(scale / ((fan_in + fan_out) / 2.0)))
+    bound = torch.sqrt(torch.tensor(3.0)) * std # uniform dist. scaling factor
+    with torch.no_grad():
+      return tensor.uniform_(-bound, bound)
+  return initializer

@@ -1,5 +1,7 @@
 import torch
-from model.diff_model.unets import ResConv1x, AdaptiveScale
+from model.blocks.adaptive_scaling import AdaptiveScale
+from model.blocks.convolution_blocks import ResConv1x, ConvBlock
+from utils.model_utils import reshape_jax_torch
 import unittest
 
 class ResConv1xTest(unittest.TestCase):
@@ -42,6 +44,32 @@ class AdaptiveScaleTest(unittest.TestCase):
                 out = model(inputs, emb)
 
                 self.assertEqual(out.shape, expected_shape)
+
+class ConvBlockTest(unittest.TestCase):
+
+    def test_ConvBlock(self):
+        test_cases = [
+            ((8, 8, 8, 8), (8, 10, 8, 8), (8, 50), 'True'),
+            ((8, 8, 8, 8, 8), (8, 10, 8, 8, 8), (8, 50), 'True'),
+            ((8, 8, 8, 8), (8, 10, 8, 8), (8, 50), 'False'),
+            ((8, 8, 8, 8, 8), (8, 10, 8, 8, 8), (8, 50), 'False')
+        ]
+        for inp_shape, expected_shape, emb_shape, is_training in test_cases:
+            with self.subTest(
+                inp_shape=inp_shape, 
+                expected_shape=expected_shape, 
+                emb_shape=emb_shape,
+                is_training=is_training):
+                inputs = torch.randn(inp_shape)
+                emb = torch.randn(emb_shape)
+                conv_kwargs = {'in_channels': inputs.shape[1]}
+                if len(inp_shape) == 4:
+                    model = ConvBlock(expected_shape[1], (3, 3), dropout=0.1, **conv_kwargs)
+                else:
+                    model = ConvBlock(expected_shape[1], (3,3,3), dropout=0.1, **conv_kwargs)
+
+                out = model(inputs, emb, is_training)
+
     
 if __name__ == "__main__":
   unittest.main()

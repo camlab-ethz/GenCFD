@@ -57,7 +57,7 @@ def ConvLayer(
       in_channels=kwargs.get('in_channels', 1),
       out_channels=features,
       kernel_size=kernel_size,
-      padding=padding,
+      padding_mode=padding.lower(),
       stride=kwargs.get('stride', 1),
       bias=kwargs.get('use_bias', True)
     )
@@ -184,6 +184,8 @@ class LatLonConv(nn.Module):
     padded_inputs = F.pad(inputs, [0, 0, lon_pad, lon_pad], mode='circular')
     # Edge padding to latitudinal (lat) axis
     padded_inputs = F.pad(padded_inputs, [lat_pad, lat_pad, 0, 0], mode='replicate')
+
+    # TODO: Check if CircularPad2d or 3d should be used instead!
 
     return self.conv(padded_inputs)
 
