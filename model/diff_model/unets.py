@@ -32,31 +32,6 @@ from utils.model_utils import reshape_jax_torch, default_init
 
 Tensor = torch.Tensor
 
-# class AttentionBlock(nn.Module):
-#   """Attention block."""
-
-#   num_heads: int = 1
-#   normalize_qk: bool = False
-#   precision: PrecisionLike = None
-#   dtype: jnp.dtype = jnp.float32
-#   param_dtype: jnp.dtype = jnp.float32
-
-#   @nn.compact
-#   def __call__(self, x: Array, is_training: bool) -> Array:
-#     h = nn.GroupNorm(min(x.shape[-1] // 4, 32), name="norm")(x)
-#     h = nn.MultiHeadDotProductAttention(
-#         num_heads=self.num_heads,
-#         kernel_init=nn.initializers.xavier_uniform(),
-#         deterministic=not is_training,
-#         dtype=self.dtype,
-#         precision=self.precision, # not in diff code
-#         param_dtype=self.param_dtype,
-#         name="dot_attn",
-#         normalize_qk=self.normalize_qk, # not in diff code
-#     )(h, h)
-#     return layers.CombineResidualWithSkip()(residual=h, skip=x)
-
-
 # class FourierEmbedding(nn.Module):
 #   """Fourier embedding."""
 
