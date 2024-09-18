@@ -57,6 +57,5 @@ class CombineResidualWithSkip(nn.Module):
 
       skip = reshape_jax_torch(self.skip_projection(reshape_jax_torch(skip)))
     # combine skip and residual connections
-    # TODO: RESOLVE ERROR HERE
     return (skip + residual) / torch.sqrt(torch.tensor(2.0, dtype=self.dtype))
 

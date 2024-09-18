@@ -33,7 +33,7 @@ class ConvLayersTest(unittest.TestCase):
         inputs = torch.rand(input_shape).permute(0,3,2,1)
         model = ConvLayer(
             features=num_features, 
-            padding=padding, 
+            padding_mode=padding, 
             kernel_size=(3, 3),
             in_channels=in_channels,
         )

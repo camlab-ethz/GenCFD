@@ -25,21 +25,21 @@ Tensor = torch.Tensor
 def ConvLayer(
     features: int,
     kernel_size: int | Sequence[int],
-    padding: str,
+    padding_mode: str,
     use_local: bool = False,
     **kwargs
 ) -> nn.Module:
   """Factory for different types of convolution layers."""
-  if isinstance(padding, str) and padding.lower() in ["lonlat", "latlon"]:
+  if isinstance(padding_mode, str) and padding_mode.lower() in ["lonlat", "latlon"]:
     if not (isinstance(kernel_size, tuple) and len(kernel_size) == 2):
       raise ValueError(
         f"kernel size {kernel_size} must be a length-2 tuple "
-        f"for convolution type {padding}."
+        f"for convolution type {padding_mode}."
       )
     return LatLonConv(
       features, 
       kernel_size, 
-      order=padding.lower(), 
+      order=padding_mode.lower(), 
       **kwargs,
     )
   
@@ -57,10 +57,12 @@ def ConvLayer(
       in_channels=kwargs.get('in_channels', 1),
       out_channels=features,
       kernel_size=kernel_size,
-      padding_mode=padding.lower(),
+      padding_mode=padding_mode.lower(),
+      padding=kwargs.get('padding', 0),
       stride=kwargs.get('stride', 1),
       bias=kwargs.get('use_bias', True)
     )
+  # TODO: Implement 3D CASE!!!
 
 
 class ConvLocal2d(nn.Module):

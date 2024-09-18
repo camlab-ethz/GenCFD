@@ -32,7 +32,6 @@ class ResConv1x(nn.Module):
     self.combine_skip = CombineResidualWithSkip(project_skip=project_skip, dtype=self.dtype)
   
   def forward(self, x):
-
     if len(x.shape) == 4:
       kernel_size = (len(x.shape) - 2) * (1,)
       if self.conv1 is None:
@@ -103,7 +102,7 @@ class ConvBlock(nn.Module):
   """
 
   def __init__(self, out_channels: int, kernel_size: tuple[int, ...], 
-               padding: str = 'circular', dropout: float = 0.0, 
+               padding_mode: str = 'circular', dropout: float = 0.0, 
                film_act_fun: Callable[[Tensor], Tensor] = F.silu, 
                act_fun: Callable[[Tensor], Tensor] = F.silu,
                dtype: torch.dtype = torch.float32, **kwargs):
@@ -111,7 +110,7 @@ class ConvBlock(nn.Module):
     
     self.out_channels = out_channels
     self.kernel_size = kernel_size
-    self.padding = padding
+    self.padding_mode = padding_mode
     self.dropout = dropout
     self.film_act_fun = film_act_fun
     self.act_fun = act_fun
@@ -121,7 +120,7 @@ class ConvBlock(nn.Module):
     self.conv1 = ConvLayer(
       features=self.out_channels,
       kernel_size=self.kernel_size,
-      padding=self.padding,
+      padding_mode=self.padding_mode,
       **kwargs
     )
     self.norm2 = None
@@ -130,13 +129,12 @@ class ConvBlock(nn.Module):
     self.conv2 = ConvLayer(
       features=self.out_channels,
       kernel_size=self.kernel_size,
-      padding=self.padding,
-      **{'in_channels': self.out_channels}
+      padding_mode=self.padding_mode,
+      **{'in_channels': self.out_channels, 'padding': kwargs.get('padding')}
     )
     self.res_layer = CombineResidualWithSkip(project_skip=True)
 
   def forward(self, x: Tensor, emb: Tensor, is_training: bool) -> Tensor:
-    breakpoint()
     h = x.clone()
 
     if self.norm1 is None:
