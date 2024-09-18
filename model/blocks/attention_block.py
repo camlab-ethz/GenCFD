@@ -26,7 +26,7 @@ class AttentionBlock(nn.Module):
     def forward(self, x: Tensor, is_training: bool) -> Tensor:
         # Input x -> (bs, widht*height, c)
         if self.norm is None:
-            self.norm = nn.GroupNorm(min(x.shape[-1] // 4, 32), x.shape[-1])
+            self.norm = nn.GroupNorm(min(max(x.shape[-1] // 4, 1), 32), x.shape[-1])
         if self.multihead_attention is None:
             self.multihead_attention = MultiHeadDotProductAttention(
                 x.shape[-1], self.num_heads, dropout=0.1 if is_training else 0.0
@@ -35,7 +35,7 @@ class AttentionBlock(nn.Module):
         h = x.clone()
         # GroupNorm requires x -> (bs, c, widht*height)
         h = self.norm(h.permute(0, 2, 1))
-        h = h.permute(0, 2, 1)
+        h = h.permute(0, 2, 1) # (bs, width*height, c)
         h = self.multihead_attention(h, h, h)
         h = self.res_layer(residual=h, skip=x)
 

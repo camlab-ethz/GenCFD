@@ -14,8 +14,7 @@
 
 import unittest
 import torch
-from model.layers.upsample import channel_to_space
-from utils.model_utils import reshape_jax_torch
+from model_utils import channel_to_space, reshape_jax_torch
 
 
 class UpsampleLayersTest(unittest.TestCase):

@@ -29,7 +29,13 @@ def ConvLayer(
     use_local: bool = False,
     **kwargs
 ) -> nn.Module:
-  """Factory for different types of convolution layers."""
+  """Factory for different types of convolution layers.
+  
+  Where the last part requires a case differentiation:
+  case == 1: 1D (bs, c, width)
+  case == 2: 2D (bs, c, height, width)
+  case == 3: 3D (bs, c, depth, height, width)
+  """
   if isinstance(padding_mode, str) and padding_mode.lower() in ["lonlat", "latlon"]:
     if not (isinstance(kernel_size, tuple) and len(kernel_size) == 2):
       raise ValueError(
@@ -53,16 +59,37 @@ def ConvLayer(
       use_bias=kwargs.get('use_bias', True)
     )
   else:
-    return nn.Conv2d(
-      in_channels=kwargs.get('in_channels', 1),
-      out_channels=features,
-      kernel_size=kernel_size,
-      padding_mode=padding_mode.lower(),
-      padding=kwargs.get('padding', 0),
-      stride=kwargs.get('stride', 1),
-      bias=kwargs.get('use_bias', True)
-    )
-  # TODO: Implement 3D CASE!!!
+    # TODO: Write a class to not repeat this for other classes as well!
+    if kwargs.get('case', 2) == 1:
+      return nn.Conv1d(
+        in_channels=kwargs.get('in_channels', 1),
+        out_channels=features,
+        kernel_size=kernel_size,
+        padding_mode=padding_mode.lower(),
+        padding=kwargs.get('padding', 0),
+        stride=kwargs.get('stride', 1),
+        bias=kwargs.get('use_bias', True)
+      )
+    elif kwargs.get('case', 2) == 2:
+      return nn.Conv2d(
+        in_channels=kwargs.get('in_channels', 1),
+        out_channels=features,
+        kernel_size=kernel_size,
+        padding_mode=padding_mode.lower(),
+        padding=kwargs.get('padding', 0),
+        stride=kwargs.get('stride', 1),
+        bias=kwargs.get('use_bias', True)
+      )
+    elif kwargs.get('case', 2) == 3:
+      return nn.Conv3d(
+        in_channels=kwargs.get('in_channels', 1),
+        out_channels=features,
+        kernel_size=kernel_size,
+        padding_mode=padding_mode.lower(),
+        padding=kwargs.get('padding', 0),
+        stride=kwargs.get('stride', 1),
+        bias=kwargs.get('use_bias', True)
+      )
 
 
 class ConvLocal2d(nn.Module):

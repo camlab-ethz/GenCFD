@@ -32,8 +32,25 @@ class ResConv1x(nn.Module):
     self.combine_skip = CombineResidualWithSkip(project_skip=project_skip, dtype=self.dtype)
   
   def forward(self, x):
-    if len(x.shape) == 4:
-      kernel_size = (len(x.shape) - 2) * (1,)
+    kernel_size = (len(x.shape) - 2) * (1,)
+
+    if len(x.shape) == 3:
+      # case 1
+      self.conv1 = nn.Conv1d(
+        in_channels=self.hidden_layer_size,
+        out_channels=self.hidden_layer_size,
+        kernel_size=kernel_size,
+        dtype=self.dtype
+      )
+      self.conv2 = nn.Conv1d(
+        in_channels=self.hidden_layer_size,
+        out_channels=self.out_channels,
+        kernel_size=kernel_size,
+        dtype=self.dtype
+      )
+
+    elif len(x.shape) == 4:
+      # case 2
       if self.conv1 is None:
         self.conv1 = nn.Conv2d(
           in_channels=self.hidden_layer_size,
@@ -41,18 +58,15 @@ class ResConv1x(nn.Module):
           kernel_size=kernel_size,
           dtype=self.dtype
         )
-        default_init(self.scale)(self.conv1.weight)
-
         self.conv2 = nn.Conv2d(
           in_channels=self.hidden_layer_size,
           out_channels=self.out_channels,
           kernel_size=kernel_size,
           dtype=self.dtype
         )
-        default_init(self.scale)(self.conv2.weight)
     
     elif len(x.shape) == 5:
-      kernel_size = (len(x.shape) - 2) * (1,)
+      # case 3
       if self.conv1 is None:
         self.conv1 = nn.Conv3d(
           in_channels=self.hidden_layer_size,
@@ -60,19 +74,19 @@ class ResConv1x(nn.Module):
           kernel_size=kernel_size,
           dtype=self.dtype
         )
-        default_init(self.scale)(self.conv1.weight)
-
         self.conv2 = nn.Conv3d(
           in_channels=self.hidden_layer_size,
           out_channels=self.out_channels,
           kernel_size=kernel_size,
           dtype=self.dtype
         )
-        default_init(self.scale)(self.conv2.weight)
 
     else:
       raise ValueError(f"Unsupported input dimension. Expected 4D or 5D")
-      
+    
+    default_init(self.scale)(self.conv1.weight)
+    default_init(self.scale)(self.conv2.weight)
+
     skip = x.clone()
     x = self.conv1(x)
     x = self.act_fun(x)
@@ -130,7 +144,9 @@ class ConvBlock(nn.Module):
       features=self.out_channels,
       kernel_size=self.kernel_size,
       padding_mode=self.padding_mode,
-      **{'in_channels': self.out_channels, 'padding': kwargs.get('padding')}
+      **{'in_channels': self.out_channels, 
+         'padding': kwargs.get('padding', 0), 
+         'case': kwargs.get('case', 2)}
     )
     self.res_layer = CombineResidualWithSkip(project_skip=True)
 
@@ -139,7 +155,7 @@ class ConvBlock(nn.Module):
 
     if self.norm1 is None:
       # Initialize
-      self.norm1 = nn.GroupNorm(min(x.shape[1] // 4, 32), x.shape[1])
+      self.norm1 = nn.GroupNorm(min(max(x.shape[1] // 4, 1), 32), x.shape[1])
 
     h = self.norm1(h)
     h = self.act_fun(h)
@@ -147,7 +163,7 @@ class ConvBlock(nn.Module):
 
     if self.norm2 is None:
       # Initialize
-      self.norm2 = nn.GroupNorm(min(h.shape[1] // 4, 32), h.shape[1])
+      self.norm2 = nn.GroupNorm(min(max(h.shape[1] // 4, 1), 32), h.shape[1])
 
     h = self.norm2(h)
     h = self.film(h, emb)
