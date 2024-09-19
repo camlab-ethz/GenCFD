@@ -113,10 +113,8 @@ class UStack(nn.Module):
                     b, *hw, c = h.shape
                     
                     h = self.attention_blocks[block_id](h.reshape(b, -1, c), is_training)
-                    # TODO for convolution we need to permute and transform h again back!
-                    # Currently it's a 3D instead of a 4D tensor!
-                    h = reshape_jax_torch(h) # (bs, c, *hw)
                     h = self.res_conv_blocks[block_id](h).reshape(b, *hw, c)
+                    h = reshape_jax_torch(h) # (bs, c, h, w)
 
             # upsampling
             up_ratio = self.upsample_ratio[level]

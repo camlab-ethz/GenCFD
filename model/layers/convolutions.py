@@ -232,7 +232,17 @@ class DownsampleConv(nn.Module):
     self.in_channels = kwargs.get('in_channels', 1)
 
     # For downsampling padding = 0 and stride > 1
-    if len(ratios) == 2:
+    if len(ratios) == 1:
+      self.conv1d = nn.Conv1d(
+        in_channels=self.in_channels,
+        out_channels=features,
+        kernel_size=ratios,
+        stride=ratios,
+        bias=use_bias,
+        padding=0
+      )
+      torch.nn.init.kaiming_uniform_(self.conv1d.weight, a=np.sqrt(5))
+    elif len(ratios) == 2:
       self.conv2d = nn.Conv2d(
         in_channels=self.in_channels,
         out_channels=features,
@@ -256,7 +266,7 @@ class DownsampleConv(nn.Module):
       )
       torch.nn.init.kaiming_uniform_(self.conv3d.weight, a=np.sqrt(5))
     else:
-      raise ValueError(f"Ratio lengths should either be 2D or 3D")
+      raise ValueError(f"Ratio lengths should either be 1D, 2D or 3D")
     
   def forward(self, inputs):
     """Applies strided convolution for downsampling."""
@@ -279,5 +289,7 @@ class DownsampleConv(nn.Module):
       return self.conv3d(inputs)
     elif len(inputs.shape) == 4:
       return self.conv2d(inputs)
+    elif len(inputs.shape) == 3:
+      return self.conv1d(inputs)
     else:
       raise ValueError(f"Input Dimension must be either 4D (bs, c, y, x) or 5D (bs, c, z, y, x)")

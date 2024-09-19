@@ -37,7 +37,7 @@ class ResConv1x(nn.Module):
     if len(x.shape) == 3:
       # case 1
       self.conv1 = nn.Conv1d(
-        in_channels=self.hidden_layer_size,
+        in_channels=x.shape[1],
         out_channels=self.hidden_layer_size,
         kernel_size=kernel_size,
         dtype=self.dtype
@@ -53,7 +53,7 @@ class ResConv1x(nn.Module):
       # case 2
       if self.conv1 is None:
         self.conv1 = nn.Conv2d(
-          in_channels=self.hidden_layer_size,
+          in_channels=x.shape[1],
           out_channels=self.hidden_layer_size,
           kernel_size=kernel_size,
           dtype=self.dtype
@@ -69,7 +69,7 @@ class ResConv1x(nn.Module):
       # case 3
       if self.conv1 is None:
         self.conv1 = nn.Conv3d(
-          in_channels=self.hidden_layer_size,
+          in_channels=x.shape[1],
           out_channels=self.hidden_layer_size,
           kernel_size=kernel_size,
           dtype=self.dtype
