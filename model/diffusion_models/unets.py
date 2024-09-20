@@ -1,4 +1,4 @@
-# Copyright 2024 The swirl_dynamics Authors.
+# Copyright 2024 The swirl_dynamics Authors and CAM Lab.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -31,41 +31,6 @@ from utils.model_utils import reshape_jax_torch, default_init
 
 
 Tensor = torch.Tensor
-
-class FourierEmbedding(nn.Module):
-  """Fourier embedding."""
-
-  dims: int = 64
-  max_freq: float = 2e4
-  projection: bool = True
-  act_fun: Callable[[Array], Array] = nn.swish
-  precision: PrecisionLike = None
-  dtype: jnp.dtype = jnp.float32
-  param_dtype: jnp.dtype = jnp.float32
-
-  @nn.compact
-  def __call__(self, x: Array) -> Array:
-    assert x.ndim == 1
-    logfreqs = jnp.linspace(0, jnp.log(self.max_freq), self.dims // 2)
-    x = jnp.pi * jnp.exp(logfreqs)[None, :] * x[:, None]
-    x = jnp.concatenate([jnp.sin(x), jnp.cos(x)], axis=-1)
-
-    if self.projection:
-      x = nn.Dense(
-          features=2 * self.dims,
-          precision=self.precision,
-          dtype=self.dtype,
-          param_dtype=self.param_dtype,
-      )(x)
-      x = self.act_fun(x)
-      x = nn.Dense(
-          features=self.dims,
-          precision=self.precision,
-          dtype=self.dtype,
-          param_dtype=self.param_dtype,
-      )(x)
-
-    return x
 
 
 class Add1dPosEmbedding(nn.Module):

@@ -42,6 +42,7 @@ class CombineResidualWithSkip(nn.Module):
     self.skip_projection = None
 
   def forward(self, residual: Tensor, skip: Tensor) -> Tensor:
+    # residual, skip (bs, c, w, h, d)
     if self.project_skip:
       if self.skip_projection is None:
         # linear projection layer to match the number of channels

@@ -93,7 +93,6 @@ class ResConv1x(nn.Module):
     x = self.conv2(x)
 
     x = self.combine_skip(residual=x, skip=skip)
-
     return x
 
 
