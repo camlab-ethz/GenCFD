@@ -1,4 +1,4 @@
-# Copyright 2024 The swirl_dynamics Authors and CAM Lab.
+# Copyright 2024 The CAM Lab at ETH Zurich.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -11,9 +11,6 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-#
-# Modifications made by CAM LAB, 09.2024.
-# Converted from JAX to PyTorch and made further changes.
 
 """U-Net denoiser models."""
 
@@ -21,546 +18,158 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
-from typing import Callable, Sequence
 
-from model.layers.residual import CombineResidualWithSkip
 # from model.layers.resize import FilteredResize
-from model.layers.convolutions import ConvLayer, DownsampleConv, LatLonConv
-from model.layers.upsample import channel_to_space
-from utils.model_utils import reshape_jax_torch, default_init
+from model.stacks.dtstack import DStack
+from model.stacks.ustacks import UpsampleFourierGaussian, UStack
+from model.embeddings.fourier_emb import FourierEmbedding
+from model.layers.residual import CombineResidualWithSkip
+from model.layers.convolutions import ConvLayer
+from utils.model_utils import reshape_jax_torch
 
 
 Tensor = torch.Tensor
 
 
-class Add1dPosEmbedding(nn.Module):
-  """Adds a trainable 1D position embeddings to the inputs."""
-
-  emb_init: Initializer = nn.initializers.normal(stddev=0.02)
-
-  @nn.compact
-  def __call__(self, x: Array) -> Array:
-    assert x.ndim == 3
-    _, l, c = x.shape
-    pos_embed = self.param("pos_emb", self.emb_init, (l, c))
-    return x + jnp.expand_dims(pos_embed, axis=0)
-
-
-class Add2dPosEmbedding(nn.Module):
-  """Adds a trainable 2D position embeddings to the inputs."""
-
-  emb_init: Initializer = nn.initializers.normal(stddev=0.02)
-
-  @nn.compact
-  def __call__(self, x: Array) -> Array:
-    assert x.ndim == 4
-    _, h, w, c = x.shape
-    assert c % 2 == 0, "Number of channels must be even."
-
-    row_embed = self.param("pos_emb_row", self.emb_init, (w, c // 2))
-    col_embed = self.param("pos_emb_col", self.emb_init, (h, c // 2))
-
-    row_embed = jnp.tile(jnp.expand_dims(row_embed, axis=0), (h, 1, 1))
-    col_embed = jnp.tile(jnp.expand_dims(col_embed, axis=1), (1, w, 1))
-
-    pos_embed = jnp.concatenate([row_embed, col_embed], axis=-1)
-    return x + jnp.expand_dims(pos_embed, axis=0)
-
-# TODO: Change this also 3D embeddings are supported in our case!
-def position_embedding(ndim: int, **kwargs) -> nn.Module:
-  if ndim == 1:
-    return Add1dPosEmbedding(**kwargs)
-  elif ndim == 2:
-    return Add2dPosEmbedding(**kwargs)
-  else:
-    raise ValueError("Only 1D or 2D position embeddings are supported.")
-
-
-class Axial2DMLP(nn.Module):
-  """Applies axial spatial perceptrons to an input tensor of 2D fields.
-
-  The inputs are assumed to have the shape (..., *spatial_dims, channels),
-  with two spatial dimensions.
-
-  Attributes:
-    out_dims: A tuple containing the output spatial dimensions.
-    act_fn: The activation function.
-  """
-
-  out_dims: tuple[int, int]
-  act_fn: Callable[[Array], Array] = nn.swish
-  precision: PrecisionLike = None
-  dtype: jnp.dtype = jnp.float32
-  param_dtype: jnp.dtype = jnp.float32
-
-  @nn.compact
-  def __call__(self, x: Array) -> Array:
-
-    num_channels = x.shape[-1]
-
-    for i, out_dim in enumerate(self.out_dims):
-      spatial_dim = -3 + i
-      x = jnp.swapaxes(x, spatial_dim, -1)
-      x = nn.Dense(
-          features=out_dim,
-          precision=self.precision,
-          dtype=self.dtype,
-          param_dtype=self.param_dtype,
-      )(x)
-      x = nn.swish(x)
-      x = jnp.swapaxes(x, -1, spatial_dim)
-
-    x = nn.Dense(
-        features=num_channels,
-        precision=self.precision,
-        dtype=self.dtype,
-        param_dtype=self.param_dtype,
-    )(x)
-    return x
-
-
-class MergeChannelCond(nn.Module):
-  """Base class for merging conditional inputs along the channel dimension.
-
-  Attributes:
-    embed_dim: The output channel dimension.
-    kernel_size: The convolutional kernel size.
-    resize_method: The interpolation method employed by `jax.image.resize`.
-    padding: The padding method of all convolutions.
-  """
-
-  embed_dim: int
-  kernel_size: Sequence[int]
-  resize_method: str = "cubic"
-  padding: str = "CIRCULAR"
-  precision: PrecisionLike = None
-  dtype: jnp.dtype = jnp.float32
-  param_dtype: jnp.dtype = jnp.float32
-
-
-class InterpConvMerge(MergeChannelCond):
-  """Merges conditional inputs through interpolation and convolutions.
-
-  See `MergeChannelCond` for attribute definition.
-  """
-
-  @nn.compact
-  def __call__(self, x: Array, cond: dict[str, Array]):
-    """Merges conditional inputs along the channel dimension.
-
-    Fields with spatial shape differing from the sample `x` are reshaped to
-    match it. Then, all conditional fields are passed through a nonlinearity,
-    a ConvLayer, and then concatenated with the main input along the last axis.
-
-    Args:
-      x: The main model input.
-      cond: A dictionary of conditional inputs. Those with keys that start with
-        "channel:" are processed here while all others are omitted.
-
-    Returns:
-      Model input merged with channel conditions.
-    """
-
-    out_spatial_shape = x.shape[-3:-1]
-    for key, value in sorted(cond.items()):
-      if key.startswith("channel:"):
-        if value.ndim != x.ndim:
-          raise ValueError(
-              f"Channel condition `{key}` does not have the same ndim"
-              f" ({value.ndim}) as x ({x.ndim})!"
-          )
-
-      if value.shape[-3:-1] != out_spatial_shape:
-        value = layers.FilteredResize(
-            output_size=x.shape[:-1],
-            kernel_size=self.kernel_size,
-            method=self.resize_method,
-            padding=self.padding,
-            precision=self.precision,
-            dtype=self.dtype,
-            param_dtype=self.param_dtype,
-            name=f"resize_{key}",
-        )(value)
-      value = nn.swish(nn.LayerNorm()(value))
-      value = layers.ConvLayer(
-          features=self.embed_dim,
-          kernel_size=self.kernel_size,
-          padding=self.padding,
-          precision=self.precision,
-          dtype=self.dtype,
-          param_dtype=self.param_dtype,
-          name=f"conv2d_embed_{key}",
-      )(value)
-
-      x = jnp.concatenate([x, value], axis=-1)
-    return x
-
-
-class AxialMLPInterpConvMerge(MergeChannelCond):
-  """Merges conditional inputs through MLPs, interpolation and convolutions."""
-
-  @nn.compact
-  def __call__(self, x: Array, cond: dict[str, Array]):
-    """Transforms and merges conditional inputs along the channel dimension.
-
-    Relevant fields in the conditional input dictionary are first passed through
-    axial perceptrons, then resized, and finally concatenated with the main
-    input along their last axes.
-
-    Args:
-      x: The main model input.
-      cond: A dictionary of conditional inputs. Those with keys that start with
-        "channel:" are processed here while all others are omitted.
-
-    Returns:
-      Model input merged with channel conditions.
-    """
-
-    out_spatial_shape = x.shape[-3:-1]
-    proc_cond = {}
-    for key, value in sorted(cond.items()):
-      if value.shape[-3:-1] == out_spatial_shape:
-        continue
-      proc_cond[key] = Axial2DMLP(out_dims=value.shape[-3:-1])(value)
-
-    merge_channel_cond = InterpConvMerge(
-        embed_dim=self.embed_dim,
-        kernel_size=self.kernel_size,
-        resize_method=self.resize_method,
-        padding=self.padding,
-        precision=self.precision,
-        dtype=self.dtype,
-        param_dtype=self.param_dtype,
-    )
-    return merge_channel_cond(x, proc_cond)
-
-
-class MergeEmdCond(nn.Module):
-  """Base class for merging conditional inputs as embeddings."""
-
-  def __call__(self, emb: Array, cond: dict[str, Array], is_training: bool):
-    pass
-
-
-class EmbConvMerge(MergeEmdCond):
-  """Compute conditional inputs through interpolation and convolutions.
-
-  We resize the conditional inputs to match the spatial shape of the main input
-  and then pass them through a nonlinearity and a ConvLayer. The output is then
-  mixied with the embedding from the Fourier embedding.
-
-   Attributes:
-    embed_dim: The output channel dimension.
-    latent_dim: The latent dimension of the embedding.
-    downsample_ratio: Ratio for the downsampling of the embedding.
-    interp_shape: The shape to which the conditional inputs are resized.
-    kernel_size: The convolutional kernel size.
-    resize_method: The interpolation method employed by `jax.image.resize`.
-    padding: The padding method of all convolutions.
-    num_heads: Number of heads in the attention block.
-    normalize_qk: Whether to normalize the query and key vectors in the
-      attention block.
-  """
-
-  embed_dim: int
-  latent_dim: int
-  kernel_size: Sequence[int]
-  downsample_ratio: Sequence[int]
-  interp_shape: Sequence[int]
-  resize_method: str = "cubic"
-  padding: str = "CIRCULAR"
-  num_heads: int = 128
-  normalize_qk: bool = True
-  precision: PrecisionLike = None
-  dtype: jnp.dtype = jnp.float32
-  param_dtype: jnp.dtype = jnp.float32
-
-  @nn.compact
-  def __call__(self, emb: Array, cond: dict[str, Array], is_training: bool):
-    """Merges conditional inputs along the channel dimension.
-
-    Fields with spatial shape differing from the sample `x` are reshaped to
-    match it. Then, all conditional fields are passed through a nonlinearity,
-    a ConvLayer, and then concatenated with the main input along the last axis.
-
-    Args:
-      emb: Embedding coming from the kernel_dim = x.ndim - 2.
-      cond: A dictionary of conditional inputs. Those with keys that start with
-        "channel:" are processed here while all others are omitted.
-      is_training: Whether the model is in training mode.
-
-    Returns:
-      Embedding merged with channel conditions.
-    """
-
-    if emb.shape[-1] != self.embed_dim:
-      raise ValueError(
-          f"Number of channels in the embedding ({emb.shape[-1]}) must "
-          "match the number of channels in the output "
-          f"{self.embed_dim})."
-      )
-
-    value_temp = []
-
-    # Extract fields, resize and concatenate.
-    for key, value in sorted(cond.items()):
-      # TODO: Change the prefix to "merge_embed:".
-      if key.startswith("channel:"):
-        # Enforcing prefix in the key.
-        value = layers.FilteredResize(
-            output_size=self.interp_shape,
-            kernel_size=self.kernel_size,
-            method=self.resize_method,
-            padding=self.padding,
-            precision=self.precision,
-            dtype=self.dtype,
-            param_dtype=self.param_dtype,
-            name=f"resize_embedding_{key}",
-        )(value)
-
-      value_temp.append(value)
-
-    value = jnp.concatenate(value_temp, axis=-1)
-
-    kernel_dim = value.ndim - 2
-    # Downsample the embedding.
-    num_levels = len(self.downsample_ratio)
-    for level in range(num_levels):
-      value = nn.swish(nn.LayerNorm()(value))
-      value = layers.DownsampleConv(
-          features=self.latent_dim,
-          ratios=(self.downsample_ratio[level],) * kernel_dim,
-          kernel_init=default_init(1.0),
-          precision=self.precision,
-          dtype=self.dtype,
-          param_dtype=self.param_dtype,
-          name=f"level_{level}.embedding_downsample_conv",
-      )(value)
-
-    # Add a self-attention block.
-    b, _, _, c = value.shape
-    value = AttentionBlock(
-        num_heads=self.num_heads,
-        precision=self.precision,
-        dtype=self.dtype,
-        normalize_qk=self.normalize_qk,
-        param_dtype=self.param_dtype,
-        name="cond_embedding.attention_block",
-    )(value.reshape(b, -1, c), is_training=is_training)
-
-    value = nn.Dense(
-        features=self.embed_dim,
-        precision=self.precision,
-        dtype=self.dtype,
-        param_dtype=self.param_dtype,
-    )(value.reshape(b, -1))
-    value = nn.swish(nn.LayerNorm()(value))
-
-    # Concatenate the noise and conditional embedding.
-    emb = jnp.concatenate([emb, value], axis=-1)
-    emb = nn.Dense(
-        features=self.embed_dim,
-        precision=self.precision,
-        dtype=self.dtype,
-        param_dtype=self.param_dtype,
-    )(emb)
-
-    return emb
-
-
 class UNet(nn.Module):
-  """UNet model compatible with 1 or 2 spatial dimensions."""
+  """UNet model compatible with 1 or 2 spatial dimensions.
 
-  out_channels: int
-  resize_to_shape: tuple[int, ...] | None = None  # spatial dims only
-  num_channels: tuple[int, ...] = (128, 256, 256, 256)
-  downsample_ratio: tuple[int, ...] = (2, 2, 2, 2)
-  num_blocks: int = 4
-  noise_embed_dim: int = 128
-  padding: str = "CIRCULAR"
-  dropout_rate: float = 0.0
-  use_attention: bool = True  # lowest resolution only
-  use_position_encoding: bool = True
-  num_heads: int = 8
-  normalize_qk: bool = False
-  cond_resize_method: str = "bilinear"
-  cond_embed_dim: int = 128
-  cond_merging_fn: type[MergeChannelCond] = InterpConvMerge
-  cond_embed_fn: type[nn.Module] | None = None
-  cond_embed_kwargs: dict[str, jax.typing.ArrayLike] | None = None
-  precision: PrecisionLike = None
-  dtype: jnp.dtype = jnp.float32
-  param_dtype: jnp.dtype = jnp.float32
+  Original UNet model transformed from a Jax based to a PyTorch
+  based version. Derived from Wan et al. (https://arxiv.org/abs/2305.15618)
+  """
 
-  @nn.compact
-  def __call__(
-      self,
-      x: Array,
-      sigma: Array,
-      cond: dict[str, Array] | None = None,
-      *,
-      is_training: bool,
-  ) -> Array:
-    """Predicts denoised given noised input and noise level.
+  def __init__(self, out_channels: int, resize_to_shape: tuple[int, ...] | None = None,
+               use_hr_residual: bool = False,
+               num_channels: tuple[int, ...] = (128, 256, 256, 256),
+               downsample_ratio : tuple[int, ...] = (2, 2, 2, 2), num_blocks: int = 4, 
+               noise_embed_dim: int = 128, padding_method: str = 'circular', 
+               dropout_rate: float = 0.0, use_attention: bool = True, 
+               use_position_encoding: bool = True, num_heads: int = 8,
+               normalize_qk: bool = False, dtype: torch.dtype = torch.float32):
+    super(UNet, self).__init__()
 
+    self.out_channels = out_channels
+    self.resize_to_shape = resize_to_shape
+    self.num_channels = num_channels
+    self.downsample_ratio = downsample_ratio
+    self.use_hr_residual = use_hr_residual
+    self.num_blocks = num_blocks
+    self.noise_embed_dim = noise_embed_dim
+    self.padding_method = padding_method
+    self.dropout_rate = dropout_rate
+    self.use_attention = use_attention
+    self.use_position_encoding = use_position_encoding
+    self.num_heads = num_heads
+    self.normalize_qk = normalize_qk
+    self.dtype = dtype
+
+    self.embedding = FourierEmbedding(
+      dims=self.noise_embed_dim,
+      dtype=self.dtype
+    )
+    self.DStack = DStack(
+      num_channels=self.num_channels,
+      num_res_blocks=len(self.num_channels) * (self.num_blocks,),
+      downsample_ratio=self.downsample_ratio,
+      padding_method=self.padding_method,
+      dropout_rate=self.dropout_rate,
+      use_attention=self.use_attention,
+      num_heads=self.num_heads,
+      use_positional_encoding=self.use_position_encoding,
+      normalize_qk=self.normalize_qk,
+      dtype=self.dtype
+    )
+    self.UStack = UStack(
+      num_channels=self.num_channels[::-1],
+      num_res_blocks=len(self.num_channels) * (self.num_blocks,),
+      upsample_ratio=self.downsample_ratio[::-1],
+      padding_method=self.padding_method,
+      dropout_rate=self.dropout_rate,
+      use_attention=self.use_attention,
+      num_heads=self.num_heads,
+      normalize_qk=self.normalize_qk,
+      dtype=self.dtype
+    )
+    self.norm = None
+    self.conv_layer = None
+    
+    if self.use_hr_residual:
+      self.upsample = UpsampleFourierGaussian(
+        new_shape=self.num_channels[::-1],
+        num_res_blocks=len(self.num_channels) * (self.num_blocks,),
+        mid_channel=256,
+        out_channels=self.out_channels,
+        padding_method=self.padding_method,
+        dropout_rate=self.dropout_rate,
+        use_attention=self.use_attention,
+        num_heads=self.num_heads,
+        normalize_qk=self.normalize_qk
+      )
+      self.res_skip = None
+
+  def forward(self, x: Tensor, sigma: Tensor, is_training: bool = True, 
+                down_only: bool = False) -> Tensor:
+    """Predicts denosied given noise input and noise level.
+    
     Args:
-      x: The model input (i.e. noised sample) with shape `(batch,
-        **spatial_dims, channels)`.
-      sigma: The noise level, which either shares the same batch dimension as
-        `x` or is a scalar (will be broadcasted accordingly).
-      cond: The conditional inputs as a dictionary. Currently, only channelwise
-        conditioning is supported.
-      is_training: A boolean flag that indicates whether the module runs in
-        training mode.
-
+      x: The model input (i.e. noise sample) with shape (bs, **spatial_dims, c)
+      sigma: The noise level, which either shares the same bs dim as 'x' 
+              or is a scalar
+      is_training: A flag that indicates whether the module runs in training mode.
+      down_only: If set to 'True', only returns 'skips[-1]' (used for downstream
+                  tasks) as an embedding. If set to 'False' it then does the full
+                  UNet usual computation.
+    
     Returns:
-      An output array with the same dimension as `x`.
+      An output tensor with the same dimension as 'x'.
     """
-    if sigma.ndim < 1:
-      sigma = jnp.broadcast_to(sigma, (x.shape[0],))
 
-    if sigma.ndim != 1 or x.shape[0] != sigma.shape[0]:
+    if sigma.dim() < 1:
+      sigma = sigma.expand(x.size(0))
+
+    if sigma.dim() != 1 or x.shape[0] != sigma.shape[0]:
       raise ValueError(
-          "sigma must be 1D and have the same leading (batch) dimension as x"
-          f" ({x.shape[0]})!"
+        "sigma must be 1D and have the same leading (batch) dim as x"
+        f" ({x.shape[0]})"
       )
 
-    input_size = x.shape[1:-1]
-    if self.resize_to_shape is not None:
-      x = FilteredResize(
-          output_size=self.resize_to_shape,
-          kernel_size=(7, 7),
-          padding=self.padding,
-          precision=self.precision,
-          dtype=self.dtype,
-          param_dtype=self.param_dtype,
-      )(x)
+    kernel_dim = x.dim() - 2
 
-    kernel_dim = x.ndim - 2
-    cond = {} if cond is None else cond
-    x = self.cond_merging_fn(
-        embed_dim=self.cond_embed_dim,
-        resize_method=self.cond_resize_method,
-        kernel_size=(3,) * kernel_dim,
-        padding=self.padding,
-        precision=self.precision,
-        dtype=self.dtype,
-        param_dtype=self.param_dtype,
-    )(x, cond)
+    emb = self.embedding(sigma)
+    skips = self.DStack(x, emb, is_training=is_training)
 
-    emb = FourierEmbedding(dims=self.noise_embed_dim)(sigma)
-    # Incorporating the embedding from the conditional inputs.
-    if self.cond_embed_fn:
-      if self.cond_embed_kwargs is None:
-        # For backward compatibility.
-        # TODO: Remove this once the configs are updated.
-        cond_embed_kwargs = dict(latent_dim=32, num_heads=32)
-      else:
-        cond_embed_kwargs = self.cond_embed_kwargs
+    if down_only:
+      return skips[-1]
+    
+    if self.use_hr_residual:
+      # high_res_residual = 0
+      high_res_residual, _ = self.upsample(skips[-1], emb, is_training=is_training)
+    
+    h = self.UStack(skips[-1], emb, skips, is_training=is_training)
 
-      emb = self.cond_embed_fn(
-          embed_dim=self.noise_embed_dim,
-          latent_dim=cond_embed_kwargs["latent_dim"],
-          num_heads=cond_embed_kwargs["num_heads"],
-          kernel_size=(3,) * kernel_dim,
-          interp_shape=x.shape[:-1],
-          downsample_ratio=self.downsample_ratio,
-          padding=self.padding,
-          precision=self.precision,
-          dtype=self.dtype,
-          param_dtype=self.param_dtype,
-      )(emb, cond, is_training=is_training)
+    if self.norm is None:
+      self.norm = nn.GroupNorm(min(max(h.shape[1] // 4, 1), 32), h.shape[1])
 
-    skips = DStack(
-        num_channels=self.num_channels,
-        num_res_blocks=len(self.num_channels) * (self.num_blocks,),
-        downsample_ratio=self.downsample_ratio,
-        padding=self.padding,
-        dropout_rate=self.dropout_rate,
-        use_attention=self.use_attention,
-        num_heads=self.num_heads,
-        use_position_encoding=self.use_position_encoding,
-        normalize_qk=self.normalize_qk,
-        precision=self.precision,
-        dtype=self.dtype,
-        param_dtype=self.param_dtype,
-    )(x, emb, is_training=is_training)
-    h = UStack(
-        num_channels=self.num_channels[::-1],
-        num_res_blocks=len(self.num_channels) * (self.num_blocks,),
-        upsample_ratio=self.downsample_ratio[::-1],
-        padding=self.padding,
-        dropout_rate=self.dropout_rate,
-        use_attention=self.use_attention,
-        num_heads=self.num_heads,
-        normalize_qk=self.normalize_qk,
-        precision=self.precision,
-        dtype=self.dtype,
-        param_dtype=self.param_dtype,
-    )(skips[-1], emb, skips, is_training=is_training)
+    h = F.silu(self.norm(h))
 
-    h = nn.swish(nn.GroupNorm(min(h.shape[-1] // 4, 32))(h))
-    h = ConvLayer(
+    if self.conv_layer is None:
+      self.conv_layer = ConvLayer(
         features=self.out_channels,
         kernel_size=kernel_dim * (3,),
-        padding=self.padding,
-        kernel_init=default_init(),
-        precision=self.precision,
-        dtype=self.dtype,
-        param_dtype=self.param_dtype,
-        name="conv_out",
-    )(h)
-
-    if self.resize_to_shape:
-      h = FilteredResize(
-          output_size=input_size,
-          kernel_size=(7, 7),
-          padding=self.padding,
-          precision=self.precision,
-          dtype=self.dtype,
-          param_dtype=self.param_dtype,
-      )(h)
-    return h
-
-
-class PreconditionedDenoiser(UNet):
-  """Preconditioned denoising model.
-
-  See Appendix B.6 in Karras et al. (https://arxiv.org/abs/2206.00364).
-  """
-
-  sigma_data: float = 1.0
-
-  @nn.compact
-  def __call__(
-      self,
-      x: Array,
-      sigma: Array,
-      cond: dict[str, Array] | None = None,
-      *,
-      is_training: bool,
-  ) -> Array:
-    """Runs preconditioned denoising."""
-    if sigma.ndim < 1:
-      sigma = jnp.broadcast_to(sigma, (x.shape[0],))
-
-    if sigma.ndim != 1 or x.shape[0] != sigma.shape[0]:
-      raise ValueError(
-          "sigma must be 1D and have the same leading (batch) dimension as x"
-          f" ({x.shape[0]})!"
+        padding_mode=self.padding_method,
+        **{'in_channels': h.shape[1], 'padding': 1, 'case': kernel_dim}
       )
+    
+    h = self.conv_layer(h)
 
-    total_var = jnp.square(self.sigma_data) + jnp.square(sigma)
-    c_skip = jnp.square(self.sigma_data) / total_var
-    c_out = sigma * self.sigma_data / jnp.sqrt(total_var)
-    c_in = 1 / jnp.sqrt(total_var)
-    c_noise = 0.25 * jnp.log(sigma)
-
-    c_in = jnp.expand_dims(c_in, axis=np.arange(x.ndim - 1, dtype=np.int32) + 1)
-    c_out = jnp.expand_dims(c_out, axis=np.arange(x.ndim - 1) + 1)
-    c_skip = jnp.expand_dims(c_skip, axis=np.arange(x.ndim - 1) + 1)
-
-    f_x = super().__call__(
-        jnp.multiply(c_in, x), c_noise, cond, is_training=is_training
-    )
-    return jnp.multiply(c_skip, x) + jnp.multiply(c_out, f_x)
+    if self.use_hr_residual:
+      if self.res_skip is None:
+        # TODO: There is a mismatch
+        # when it comes to the spatial dimension!
+        self.res_skip = CombineResidualWithSkip(
+          project_skip=not(h.shape[1] == high_res_residual.shape[1]),
+          dtype = self.dtype
+        )
+      h = self.res_skip(residual=h, skip=high_res_residual)
+    
+    return h
