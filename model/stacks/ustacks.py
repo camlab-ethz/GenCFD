@@ -153,7 +153,7 @@ class UStack(nn.Module):
 
 class UpsampleFourierGaussian(nn.Module):
     """Performs upsamling on input data using either the Fourier transform
-        or gaussian interpolation
+    or gaussian interpolation
     """
 
     def __init__(self, new_shape: tuple[int, ...], 

@@ -17,7 +17,6 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import numpy as np
 
 # from model.layers.resize import FilteredResize
 from model.stacks.dtstack import DStack
@@ -25,7 +24,6 @@ from model.stacks.ustacks import UpsampleFourierGaussian, UStack
 from model.embeddings.fourier_emb import FourierEmbedding
 from model.layers.residual import CombineResidualWithSkip
 from model.layers.convolutions import ConvLayer
-from utils.model_utils import reshape_jax_torch
 
 
 Tensor = torch.Tensor
@@ -94,18 +92,9 @@ class UNet(nn.Module):
     self.conv_layer = None
     
     if self.use_hr_residual:
-      self.upsample = UpsampleFourierGaussian(
-        new_shape=self.num_channels[::-1],
-        num_res_blocks=len(self.num_channels) * (self.num_blocks,),
-        mid_channel=256,
-        out_channels=self.out_channels,
-        padding_method=self.padding_method,
-        dropout_rate=self.dropout_rate,
-        use_attention=self.use_attention,
-        num_heads=self.num_heads,
-        normalize_qk=self.normalize_qk
-      )
+      self.upsample = None
       self.res_skip = None
+
 
   def forward(self, x: Tensor, sigma: Tensor, is_training: bool = True, 
                 down_only: bool = False) -> Tensor:
@@ -136,13 +125,25 @@ class UNet(nn.Module):
     kernel_dim = x.dim() - 2
 
     emb = self.embedding(sigma)
+
     skips = self.DStack(x, emb, is_training=is_training)
 
     if down_only:
       return skips[-1]
     
     if self.use_hr_residual:
-      # high_res_residual = 0
+      if self.upsample is None:
+        self.upsample = UpsampleFourierGaussian(
+        new_shape=x.shape,
+        num_res_blocks=len(self.num_channels) * (self.num_blocks,),
+        mid_channel=256,
+        out_channels=self.out_channels,
+        padding_method=self.padding_method,
+        dropout_rate=self.dropout_rate,
+        use_attention=self.use_attention,
+        num_heads=self.num_heads,
+        normalize_qk=self.normalize_qk
+      )
       high_res_residual, _ = self.upsample(skips[-1], emb, is_training=is_training)
     
     h = self.UStack(skips[-1], emb, skips, is_training=is_training)
@@ -164,8 +165,6 @@ class UNet(nn.Module):
 
     if self.use_hr_residual:
       if self.res_skip is None:
-        # TODO: There is a mismatch
-        # when it comes to the spatial dimension!
         self.res_skip = CombineResidualWithSkip(
           project_skip=not(h.shape[1] == high_res_residual.shape[1]),
           dtype = self.dtype
@@ -173,3 +172,47 @@ class UNet(nn.Module):
       h = self.res_skip(residual=h, skip=high_res_residual)
     
     return h
+  
+
+class PreconditionedConditionalDenoiser(UNet):
+  """Preconditioned denoising model."""
+
+  def __init__(self, sigma_data: float = 1.0):
+    super().__init__()
+    self.sigma_data = sigma_data
+    # TODO: Continue Rewriting!
+    
+
+  def forward(self, x: Tensor, y: Tensor, sigma: Tensor,
+              down_only: bool = False, is_training: bool=True) -> Tensor:
+    """Runs preconditioned denoising."""
+    if sigma.dim() < 1:
+      sigma = sigma.expand(x.shape[0])
+    
+    if sigma.dim() != 1 or x.shape[0] != sigma.shape[0]:
+      raise ValueError(
+        "sigma must be 1D and have the same leading (batch) dim as x"
+        f" ({x.shape[0]})"
+      )
+    
+    total_var = self.sigma_data ** 2 + sigma ** 2
+    c_skip = self.sigma_data ** 2 / total_var
+    c_out = sigma * self.sigma_data / torch.sqrt(total_var)
+    c_in = 1 / torch.sqrt(total_var)
+    c_noise = 0.25 * torch.log(sigma)
+
+    # Expand dimensions of the coefficients
+    c_in = c_in.unsqueeze(dim=-1).expand_as(x)
+    c_out = c_out.unsqueeze(dim=-1).expand_as(x)
+    c_skip = c_skip.unsqueeze(dim=-1).expand_as(x)
+
+    # Forward pass through the UNet
+    f_x = super().forward(
+      torch.cat((c_in * x, y), dim=-1), c_noise, 
+      is_training=is_training, down_only=down_only
+    )
+
+    if down_only:
+      return f_x
+    
+    return c_skip * x + c_out * f_x

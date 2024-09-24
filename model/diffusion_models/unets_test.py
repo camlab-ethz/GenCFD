@@ -22,16 +22,16 @@ class NetworksTest(unittest.TestCase):
         """Test to check if UNet output shape matches input shape"""
         
         test_cases = [
-            ((64,), "CIRCULAR", (2, 2, 2)),
-            ((64, 64), "CIRCULAR", (2, 2, 2)),
-            ((64, 64), "LATLON", (2, 2, 2)),
+            ((64,), "CIRCULAR", (2, 2, 2), True),
+            ((64, 64), "CIRCULAR", (2, 2, 2), False),
+            ((64, 64), "LATLON", (2, 2, 2), True),
             # ((72, 144), "LATLON", (2, 2, 3)), # This test fails!
         ]
 
-        for spatial_dims, padding_method, ds_ratio in test_cases:
+        for spatial_dims, padding_method, ds_ratio, hr_res in test_cases:
             with self.subTest(
                 spatial_dims=spatial_dims, padding_method=padding_method,
-                ds_ratio=ds_ratio
+                ds_ratio=ds_ratio, hr_res=hr_res
             ):
                 batch, channels = 2, 3
                 x = torch.randn((batch, channels, *spatial_dims))
@@ -45,12 +45,10 @@ class NetworksTest(unittest.TestCase):
                     padding_method=padding_method,
                     num_heads=4,
                     use_position_encoding=True,
+                    use_hr_residual=hr_res,
                 )
 
-                # TODO: There is a problem in Molinaro's code with use_hr_residual!
-
                 out = model.forward(x, sigma, is_training=True)
-                
                 self.assertEqual(out.shape, x.shape)
 
 if __name__ == "__main__":
