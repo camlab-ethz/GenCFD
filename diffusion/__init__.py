@@ -17,7 +17,7 @@
 # pylint: disable=g-importing-member
 # pylint: disable=g-multiple-import
 
-from swirl_dynamics.lib.diffusion.diffusion import (
+from diffusion.diffusion import (
     Diffusion,
     InvertibleSchedule,
     NoiseLevelSampling,
@@ -33,30 +33,32 @@ from swirl_dynamics.lib.diffusion.diffusion import (
     tangent_noise_schedule,
     time_uniform_sampling,
 )
-from swirl_dynamics.lib.diffusion.guidance import (
+from diffusion.guidance import (
     ClassifierFreeHybrid,
     InfillFromSlices,
     Transform as GuidanceTransform,
 )
-from swirl_dynamics.lib.diffusion.samplers import (
-    DenoiseFn,
-    OdeSampler,
-    Sampler,
-    ScoreFn,
-    SdeSampler,
-    TimeStepScheduler,
-    edm_noise_decay,
-    exponential_noise_decay,
-    uniform_time,
-)
-from swirl_dynamics.lib.diffusion.unets import (
-    AxialMLPInterpConvMerge,
-    InterpConvMerge,
+# from diffusion.samplers import (
+#     DenoiseFn,
+#     OdeSampler,
+#     Sampler,
+#     ScoreFn,
+#     SdeSampler,
+#     TimeStepScheduler,
+#     edm_noise_decay,
+#     exponential_noise_decay,
+#     uniform_time,
+# )
+from model.building_blocks.unets.unets import (
+    # AxialMLPInterpConvMerge,
+    # InterpConvMerge,
     UNet,
 )
-from swirl_dynamics.lib.diffusion.unets import PreconditionedDenoiser as PreconditionedDenoiserUNet
-from swirl_dynamics.lib.diffusion.unets3d import PreconditionedDenoiser3d as PreconditionedDenoiserUNet3d
-from swirl_dynamics.lib.diffusion.unets3d import UNet3d
-from swirl_dynamics.lib.diffusion.vivit import ViViT
-from swirl_dynamics.lib.diffusion.vivit_diffusion import PreconditionedDenoiser as PreconditionedDenoiserViViT
-from swirl_dynamics.lib.diffusion.vivit_diffusion import ViViTDiffusion
+from model.building_blocks.unets.unets import PreconditionedConditionalDenoiser as PreconditionedDenoiserUNet
+# from model.building_blocks.unets.unets3d import PreconditionedDenoiser3d as PreconditionedDenoiserUNet3d
+# from model.building_blocks.unets.unets3d import UNet3d
+# from diffusion.vivit import ViViT
+# from diffusion.vivit_diffusion import PreconditionedDenoiser as PreconditionedDenoiserViViT
+# from diffusion.vivit_diffusion import ViViTDiffusion
+
+from model.probabilistic_diffusion.denoising_model import DenoisingModel

@@ -14,23 +14,22 @@
 
 """Generic model class for use in gradient descent mini-batch training."""
 
-import abc
-from collections.abc import Callable, Mapping
-from typing import Any
+from abc import ABC, abstractmethod
+from typing import Callable, Mapping, Any, Union, Tuple
 
-import flax.linen as nn
-import jax
+import torch
+import torch.nn as nn
 import numpy as np
 
-ArrayDict = Mapping[str, jax.Array]
-BatchType = Mapping[str, np.ndarray | jax.Array]
-VarDict = nn.module.FrozenVariableDict
-ModelVariable = VarDict | tuple[VarDict, ...] | Mapping[str, VarDict]
+Tensor = torch.Tensor
+TensorDict = Mapping[str, Tensor]
+BatchType = Mapping[str, Union[np.ndarray, Tensor]]
+ModelVariable = Union[dict, tuple[dict, ...], Mapping[str, dict]]
 PyTree = Any
-LossAndAux = tuple[jax.Array, tuple[ArrayDict, PyTree]]
+LossAndAux = tuple[Tensor, tuple[TensorDict, PyTree]]
 
 
-class BaseModel(metaclass=abc.ABCMeta):
+class BaseModel(ABC):
   """Base class for models.
 
   Wraps flax module(s) to provide interfaces for variable
@@ -41,41 +40,38 @@ class BaseModel(metaclass=abc.ABCMeta):
   Subclasses must implement the abstract methods.
   """
 
-  @abc.abstractmethod
-  def initialize(self, rng: jax.Array) -> ModelVariable:
+  @abstractmethod
+  def initialize(self) -> ModelVariable:
     """Initializes variables of the wrapped flax module(s).
 
     This method by design does not take any sample input in its argument. Input
     shapes are expected to be statically known and used to create
     initialization input for the model. For example::
 
-      import flax.linen as nn
-      import jax.numpy as jnp
-
+      import torch.nn as nn
+      
       class MLP(BaseModel):
-        def __init__(self, mlp: nn.Module, input_shape: tuple[int]):
-          self.model = mlp
+        def __init__(self, input_shape: tuple[int], hidden_size: int):
+          super().__init__()
+          self.model = nn.Sequential(
+            nn.Linear(np.prod(input_shape), hidden_size),
+            nn.ReLU(),
+            nn.Linear(hidden_size, np.pord(input_shape))
+          )
           self.input_shape = input_shape
-
-        def initialize(self, rng):
-          init_input = jnp.ones(self.input_shape)
-          return self.model.init(rng, init_input)
-
-    Args:
-      rng: random key used for initialization.
 
     Returns:
       The initial variables for this model - can be a single or a tuple/mapping
-      of flax variables.
+      of PyTorch variables.
     """
     raise NotImplementedError
 
-  @abc.abstractmethod
+  @abstractmethod
   def loss_fn(
       self,
-      params: PyTree | tuple[PyTree, ...],
+      params: Union[PyTree, tuple[PyTree, ...]],
       batch: BatchType,
-      rng: jax.Array,
+      rng: torch.Generator,
       mutables: PyTree,
       **kwargs,
   ) -> LossAndAux:
@@ -105,11 +101,11 @@ class BaseModel(metaclass=abc.ABCMeta):
 
   def eval_fn(
       self,
-      variables: tuple[PyTree, ...] | PyTree,
+      variables: Union[tuple[PyTree, ...], PyTree],
       batch: BatchType,
-      rng: jax.Array,
+      rng: torch.Generator,
       **kwargs,
-  ) -> ArrayDict:
+  ) -> TensorDict:
     """Computes evaluation metrics."""
     raise NotImplementedError
 
