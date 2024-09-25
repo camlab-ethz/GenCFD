@@ -1,7 +1,7 @@
 import torch
-from model.blocks.adaptive_scaling import AdaptiveScale
-from model.blocks.convolution_blocks import ResConv1x, ConvBlock
-from model.blocks.attention_block import AttentionBlock
+from model.building_blocks.blocks.adaptive_scaling import AdaptiveScale
+from model.building_blocks.blocks.convolution_blocks import ResConv1x, ConvBlock
+from model.building_blocks.blocks.attention_block import AttentionBlock
 from utils.model_utils import reshape_jax_torch
 import unittest
 

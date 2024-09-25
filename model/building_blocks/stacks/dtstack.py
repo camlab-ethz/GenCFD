@@ -1,9 +1,9 @@
 import torch
 import torch.nn as nn
 
-from model.layers.convolutions import ConvLayer, DownsampleConv
-from model.blocks.convolution_blocks import ConvBlock, ResConv1x
-from model.blocks.attention_block import AttentionBlock
+from model.building_blocks.layers.convolutions import ConvLayer, DownsampleConv
+from model.building_blocks.blocks.convolution_blocks import ConvBlock, ResConv1x
+from model.building_blocks.blocks.attention_block import AttentionBlock
 from utils.model_utils import channel_to_space, reshape_jax_torch
 
 Tensor = torch.Tensor

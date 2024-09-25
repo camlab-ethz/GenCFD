@@ -14,7 +14,7 @@
 
 import unittest
 import torch
-from model.diffusion_models.unets import UNet
+from model.building_blocks.unets.unets import UNet
 
 class NetworksTest(unittest.TestCase):
 

@@ -7,10 +7,10 @@ import torchvision.transforms.functional as TF
 from torchvision.transforms.functional import InterpolationMode
 from torchvision.transforms import ToPILImage, ToTensor
 
-from model.layers.residual import CombineResidualWithSkip
-from model.layers.convolutions import ConvLayer
-from model.blocks.convolution_blocks import ConvBlock, ResConv1x
-from model.blocks.attention_block import AttentionBlock
+from model.building_blocks.layers.residual import CombineResidualWithSkip
+from model.building_blocks.layers.convolutions import ConvLayer
+from model.building_blocks.blocks.convolution_blocks import ConvBlock, ResConv1x
+from model.building_blocks.blocks.attention_block import AttentionBlock
 from utils.model_utils import channel_to_space, reshape_jax_torch
 
 Tensor = torch.Tensor

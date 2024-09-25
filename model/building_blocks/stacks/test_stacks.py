@@ -1,8 +1,8 @@
 import torch
 import unittest
-from model.stacks.ustacks import UStack, UpsampleFourierGaussian
+from model.building_blocks.stacks.ustacks import UStack, UpsampleFourierGaussian
 from utils.model_utils import reshape_jax_torch
-from model.stacks.dtstack import DStack
+from model.building_blocks.stacks.dtstack import DStack
 
 class UStackTest(unittest.TestCase):
 

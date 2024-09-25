@@ -4,10 +4,10 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from utils.model_utils import default_init
-from model.layers.convolutions import ConvLayer
-from model.layers.residual import CombineResidualWithSkip
-from model.blocks.adaptive_scaling import AdaptiveScale
-from model.layers.residual import CombineResidualWithSkip
+from model.building_blocks.layers.convolutions import ConvLayer
+from model.building_blocks.layers.residual import CombineResidualWithSkip
+from model.building_blocks.blocks.adaptive_scaling import AdaptiveScale
+from model.building_blocks.layers.residual import CombineResidualWithSkip
 
 Tensor = torch.Tensor
 

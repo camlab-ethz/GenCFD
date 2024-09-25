@@ -15,8 +15,8 @@
 import unittest
 import torch
 
-from model.embeddings.position_emb import position_embedding
-from model.embeddings.fourier_emb import FourierEmbedding
+from model.building_blocks.embeddings.position_emb import position_embedding
+from model.building_blocks.embeddings.fourier_emb import FourierEmbedding
 
 class PositionEmbeddingTest(unittest.TestCase):
 

@@ -19,11 +19,11 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 # from model.layers.resize import FilteredResize
-from model.stacks.dtstack import DStack
-from model.stacks.ustacks import UpsampleFourierGaussian, UStack
-from model.embeddings.fourier_emb import FourierEmbedding
-from model.layers.residual import CombineResidualWithSkip
-from model.layers.convolutions import ConvLayer
+from model.building_blocks.stacks.dtstack import DStack
+from model.building_blocks.stacks.ustacks import UpsampleFourierGaussian, UStack
+from model.building_blocks.embeddings.fourier_emb import FourierEmbedding
+from model.building_blocks.layers.residual import CombineResidualWithSkip
+from model.building_blocks.layers.convolutions import ConvLayer
 
 
 Tensor = torch.Tensor

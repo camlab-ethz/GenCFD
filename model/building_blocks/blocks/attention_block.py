@@ -2,8 +2,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from model.layers.residual import CombineResidualWithSkip
-from model.layers.multihead_attention import MultiHeadDotProductAttention
+from model.building_blocks.layers.residual import CombineResidualWithSkip
+from model.building_blocks.layers.multihead_attention import MultiHeadDotProductAttention
 
 Tensor = torch.Tensor
 
