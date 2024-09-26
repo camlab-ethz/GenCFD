@@ -20,12 +20,11 @@ import functools
 import os
 from typing import Any
 
-from clu import values
-import jax
-import jax.numpy as jnp
+import torch
 import numpy as np
-import optax
-import tensorflow as tf
+import torch.optim as optim
+from torch.utils.tensorboard import SummaryWriter
+from tensorboard.backend.event_processing import event_accumulator
 
 Scalar = Any
 
@@ -36,7 +35,7 @@ def primary_process_only(cls: type[Any]) -> type[Any]:
   def wrap_method(method: Callable[..., Any]) -> Callable[..., Any]:
     @functools.wraps(method)
     def wrapper(self, *args, **kwargs):
-      if jax.process_index() == 0:
+      if torch.distributed.get_rank() == 0:
         return method(self, *args, **kwargs)
       else:
         return None
@@ -54,34 +53,36 @@ def load_scalars_from_tfevents(
     logdir: str,
 ) -> Mapping[int, Mapping[str, Scalar]]:
   """Loads scalar summaries from events in a logdir."""
-  paths = tf.io.gfile.glob(os.path.join(logdir, "events.out.tfevents.*"))
+  event_acc = event_accumulator.EventAccumulator(logdir)
+  event_acc.Reload()
+
   data = collections.defaultdict(dict)
-  for path in paths:
-    for event in tf.compat.v1.train.summary_iterator(path):
-      for value in event.summary.value:
-        data[event.step][value.tag] = jnp.asarray(
-            tf.make_ndarray(value.tensor).flat[0]
-        )
+
+  for tag in event_acc.Tags()['scalars']:
+    for scalar_event in event_acc.Scalars(tag):
+      data[scalar_event.step][tag] = scalar_event.value
 
   return data
 
 
 def is_scalar(value: Any) -> bool:
   """Checks if a given value is a scalar."""
-  if isinstance(value, values.Scalar) or isinstance(
-      value, (int, float, np.number)
-  ):
+  if isinstance(value, (int, float, np.number)):
     return True
-  if isinstance(value, (np.ndarray, jnp.ndarray)):
-    return value.ndim == 0 or value.size <= 1
+  if isinstance(value, (np.ndarray, torch.Tensor)):
+    return value.ndim == 0 or value.numel() <= 1
   return False
 
 
-def optax_chain(
-    transformations: Sequence[optax.GradientTransformation],
-) -> optax.GradientTransformation:
+def opt_chain(
+    transformations: Sequence[optim.Optimizer],
+) -> optim.Optimizer:
   """Wraps `optax.chain` to allow keyword arguments (for gin config)."""
-  return optax.chain(*transformations)
+  if len(transformations) == 1:
+    return transformations[0]
+  else:
+    raise NotImplementedError("PyTorch does not support chaining optimizers. Use custom optimizer Logic.")
+
 
 
 def create_slice(

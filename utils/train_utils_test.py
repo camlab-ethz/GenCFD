@@ -15,31 +15,36 @@
 """Tests for utils."""
 
 import tempfile
-
-from absl.testing import absltest
-from clu import metric_writers
+import os
+import shutil
+import unittest
 import numpy as np
-from swirl_dynamics.templates import utils
+from torch.utils.tensorboard import SummaryWriter
+from utils import train_utils
 
 abs_tol = 1e-6
 
 
-class LoadTFeventsTest(absltest.TestCase):
+class LoadTFeventsTest(unittest.TestCase):
 
   def test_load_scalars(self):
     steps = 10
     rng = np.random.default_rng(42)
     loss = rng.uniform(size=(steps,))
+
     with tempfile.TemporaryDirectory() as temp_dir:
-      writer = metric_writers.create_default_writer(temp_dir)
+      writer = SummaryWriter(log_dir=temp_dir)
       for s, l in enumerate(loss):
-        writer.write_scalars(s, {"loss": l})
+        writer.add_scalar("loss", l, s)
 
       writer.flush()
-      loaded = utils.load_scalars_from_tfevents(temp_dir)
-      loaded = [loaded[s]["loss"] for s in range(steps)]
-      self.assertSequenceAlmostEqual(loaded, loss)
+      writer.close()
+
+      loaded = train_utils.load_scalars_from_tfevents(temp_dir)
+      loaded_loss = [loaded[s]["loss"] for s in range(steps)]
+
+      np.testing.assert_allclose(loaded_loss, loss, rtol=1e-6, atol=1e-6)
 
 
 if __name__ == "__main__":
-  absltest.main()
+  unittest.main()
