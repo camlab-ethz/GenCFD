@@ -18,18 +18,19 @@ import abc
 from collections.abc import Callable, Iterator, Mapping
 from typing import Any, Generic, TypeVar
 
-from clu import metrics as clu_metrics
-import flax
-import jax
+# from clu import metrics as clu_metrics
+import torch
+import torch.nn as nn
+import torch.optim as optim
 import numpy as np
-import optax
-from swirl_dynamics.templates import models
+from model.base_model import base_model
 from swirl_dynamics.templates import train_states
+from torchmetrics import MetricCollection
 
-Array = jax.Array
-BatchType = Mapping[str, jax.typing.ArrayLike]
-Metrics = clu_metrics.Collection
-PyTree = Any
+Tensor = torch.Tensor 
+BatchType = Mapping[str, Tensor]
+Metrics = MetricCollection
+# PyTree = Any
 VariableDict = train_states.FrozenVariableDict
 
 M = TypeVar("M")  # Model
@@ -73,7 +74,7 @@ class BaseTrainer(Generic[M, S], metaclass=abc.ABCMeta):
     See `clu.metrics.Collection` for how to define this class.
     """
 
-  def __init__(self, model: M, rng: Array):
+  def __init__(self, model: M, rng: Tensor):
     self.model = model
 
     train_rng, eval_rng, self._init_rng = jax.random.split(rng, 3)
@@ -97,11 +98,11 @@ class BaseTrainer(Generic[M, S], metaclass=abc.ABCMeta):
   # Convenience properties/functions
   # **********************************
 
-  def get_train_rng(self, step: int, num: int = 1) -> Array:
+  def get_train_rng(self, step: int, num: int = 1) -> Tensor:
     rng = jax.random.fold_in(self._train_rng, step)
     return jax.random.split(rng, num=num)
 
-  def get_eval_rng(self, num: int = 1) -> Array:
+  def get_eval_rng(self, num: int = 1) -> Tensor:
     rng, self._eval_rng = jax.random.split(self._eval_rng)
     return jax.random.split(rng, num=num)
 
@@ -119,7 +120,7 @@ class BaseTrainer(Generic[M, S], metaclass=abc.ABCMeta):
   def _maybe_replicate(self, tree: PyTree) -> PyTree:
     return flax.jax_utils.replicate(tree) if self.is_distributed else tree
 
-  def _maybe_split(self, rng: Array) -> Array:
+  def _maybe_split(self, rng: Tensor) -> Tensor:
     if self.is_distributed:
       rng = jax.random.split(rng, num=jax.local_device_count())
     return rng
@@ -173,7 +174,7 @@ class BaseTrainer(Generic[M, S], metaclass=abc.ABCMeta):
   # **********************************
 
   @abc.abstractmethod
-  def initialize_train_state(self, rng: Array) -> S:
+  def initialize_train_state(self, rng: Tensor) -> S:
     """Instantiate the initial train state.
 
     Args:
@@ -217,7 +218,7 @@ class BaseTrainer(Generic[M, S], metaclass=abc.ABCMeta):
 
   @property
   @abc.abstractmethod
-  def eval_step(self) -> Callable[[S, BatchType, Array], Metrics]:
+  def eval_step(self) -> Callable[[S, BatchType, Tensor], Metrics]:
     """Returns the evaluation step function.
 
     Same as `BaseTrainer.train_step`, except for evaluation step.
@@ -229,7 +230,7 @@ class BaseTrainer(Generic[M, S], metaclass=abc.ABCMeta):
   # **********************************
 
   def preprocess_train_batch(
-      self, batch_data: BatchType, step: int, rng: Array
+      self, batch_data: BatchType, step: int, rng: Tensor
   ) -> BatchType:
     """Preprocesses batch data before calling the training step function.
 
@@ -252,7 +253,7 @@ class BaseTrainer(Generic[M, S], metaclass=abc.ABCMeta):
     return batch_data
 
   def preprocess_eval_batch(
-      self, batch_data: BatchType, rng: Array
+      self, batch_data: BatchType, rng: Tensor
   ) -> BatchType:
     """Preprocesses batch before calling the eval step function.
 
@@ -337,11 +338,11 @@ class BasicTrainer(BaseTrainer[BasicModel, BasicTrainState]):
   def train_step(
       self,
   ) -> Callable[
-      [BasicTrainState, BatchType, Array],
+      [BasicTrainState, BatchType, Tensor],
       tuple[BasicTrainState, Metrics],
   ]:
     def _train_step(
-        train_state: BasicTrainState, batch: BatchType, rng: Array
+        train_state: BasicTrainState, batch: BatchType, rng: Tensor
     ) -> tuple[BasicTrainState, Metrics]:
       """Performs gradient step and compute training metrics."""
       grad_fn = jax.grad(self.model.loss_fn, argnums=0, has_aux=True)
@@ -385,9 +386,9 @@ class BasicTrainer(BaseTrainer[BasicModel, BasicTrainState]):
   @property
   def eval_step(
       self,
-  ) -> Callable[[BasicTrainState, BatchType, Array], Metrics]:
+  ) -> Callable[[BasicTrainState, BatchType, Tensor], Metrics]:
     def _eval_step(
-        train_state: BasicTrainState, batch: BatchType, rng: Array
+        train_state: BasicTrainState, batch: BatchType, rng: Tensor
     ) -> Metrics:
       """Use model to compute the evaluation metrics."""
       eval_metrics = self.model.eval_fn(
@@ -398,7 +399,7 @@ class BasicTrainer(BaseTrainer[BasicModel, BasicTrainState]):
 
     return _eval_step
 
-  def initialize_train_state(self, rng: Array) -> BasicTrainState:
+  def initialize_train_state(self, rng: Tensor) -> BasicTrainState:
     """Initializes the model variables and the train state."""
     init_vars = self.model.initialize(rng)
     mutables, params = flax.core.pop(init_vars, "params")
@@ -434,11 +435,11 @@ class BasicDistributedTrainer(BasicTrainer[BasicModel, BasicTrainState]):
   def train_step(
       self,
   ) -> Callable[
-      [BasicTrainState, BatchType, Array],
+      [BasicTrainState, BatchType, Tensor],
       tuple[BasicTrainState, Metrics],
   ]:
     def _train_step(
-        train_state: BasicTrainState, batch: BatchType, rng: Array
+        train_state: BasicTrainState, batch: BatchType, rng: Tensor
     ) -> tuple[BasicTrainState, Metrics]:
       """Performs gradient step and compute training metrics."""
       grad_fn = jax.grad(self.model.loss_fn, argnums=0, has_aux=True)
@@ -466,9 +467,9 @@ class BasicDistributedTrainer(BasicTrainer[BasicModel, BasicTrainState]):
   @property
   def eval_step(
       self,
-  ) -> Callable[[BasicTrainState, BatchType, Array], Metrics]:
+  ) -> Callable[[BasicTrainState, BatchType, Tensor], Metrics]:
     def _eval_step(
-        train_state: BasicTrainState, batch: BatchType, rng: Array
+        train_state: BasicTrainState, batch: BatchType, rng: Tensor
     ) -> Metrics:
       """Use model to compute the evaluation metrics."""
       eval_metrics = self.model.eval_fn(
@@ -481,7 +482,7 @@ class BasicDistributedTrainer(BasicTrainer[BasicModel, BasicTrainState]):
     return _eval_step
 
   def preprocess_train_batch(
-      self, batch_data: BatchType, step: int, rng: Array
+      self, batch_data: BatchType, step: int, rng: Tensor
   ) -> BatchType:
     del step, rng
     # Preprocessed batch should always be reshaped for distributed training
