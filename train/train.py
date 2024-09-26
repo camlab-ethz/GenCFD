@@ -16,16 +16,12 @@
 
 from collections.abc import Iterable, Sequence
 from typing import Any
-
-from clu import metric_writers
-from etils import epath
-import jax
+import torch
+from torch.utils.tensorboard import SummaryWriter
 from swirl_dynamics.templates import callbacks as cb
-from swirl_dynamics.templates import trainers
+from train import trainers
 from swirl_dynamics.templates import utils
-
-filesys = epath.backend.tf_backend
-
+import os
 
 # TODO: package parameters into logical groupings (see cl/497196196)
 def run(

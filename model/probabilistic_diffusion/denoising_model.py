@@ -14,18 +14,23 @@
 
 """Training a denoising model for diffusion-based generation."""
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Callable
 import dataclasses
-from typing import Any, Protocol
+from typing import Any, Protocol, ClassVar
 
 import torch
 import torch.nn as nn
+import torch.optim as optim
 import torch.nn.functional as F
+import torchmetrics
 import numpy as np
 
 import diffusion as dfn_lib
 from model.base_model import base_model
-# from swirl_dynamics.templates import trainers
+from train import trainers
+from train import train_states
+
+from GPUtil.GPUtil import getGPUs
 
 Tensor = torch.Tensor
 Metrics = dict # TODO: Placeholder for metrics that are implemented!
@@ -40,7 +45,8 @@ class DenoisingTorchModule(Protocol):
   """
 
   def forward(
-      self, x: Tensor, sigma: Tensor, is_training: bool) -> Tensor:
+      self, x: Tensor, y: Tensor, time: Tensor, sigma: Tensor, is_training: bool
+      ) -> Tensor:
     ...
 
 
