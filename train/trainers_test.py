@@ -21,7 +21,7 @@ import numpy as np
 from unittest import mock
 from model.base_model.base_model import BaseModel
 from train.train_states import TrainState, BasicTrainState
-from train.trainers import BaseTrainer
+from train.trainers import BaseTrainer, BasicTrainer
 
 from torchmetrics import MetricCollection
 
@@ -38,7 +38,10 @@ class TestTrainer(BaseTrainer):
             self.train_loss = []
 
         def update(self, loss):
-            self.train_loss.append(loss.item())
+            if isinstance(loss, torch.Tensor):
+                self.train_loss.append(loss.item())
+            else:
+                self.train_loss.append(loss)
 
         def compute(self):
             return {"train_loss": np.mean(self.train_loss)}
@@ -48,7 +51,10 @@ class TestTrainer(BaseTrainer):
             self.eval_accuracy = []
 
         def update(self, accuracy):
-            self.eval_accuracy.append(accuracy.item())
+            if isinstance(accuracy, torch.Tensor):
+                self.eval_accuracy.append(accuracy.item())
+            else:
+                self.eval_accuracy.append(accuracy)
 
         def compute(self):
             return {"eval_accuracy": np.mean(self.eval_accuracy)}
@@ -85,10 +91,10 @@ class BaseTrainerTest(unittest.TestCase):
             mock_model = mock.Mock(spec=BaseModel)
             # there is no mock method with train and to thus it's manually implemented!
             mock_model.to = mock.Mock(return_value=mock_model)
-            # mock_model.train = mock.Mock(return_value={"loss": torch.tensor(0.5)})
-            mock_model.train = mock.Mock(side_effect=lambda *args, **kwargs: {"loss": torch.tensor(0.5)})
+            mock_model.train = mock.Mock(return_value={"loss": torch.tensor(0.5)})
+            # mock_model.train = mock.Mock(side_effect=lambda *args, **kwargs: {"loss": torch.tensor(0.5)})
 
-            breakpoint()
+            
             trainer = TestTrainer(model=mock_model, device=torch.device('cpu'))
             train_metrics = trainer.train(batch_iter=dummy_iter(1), num_steps=num_steps).compute()
 
@@ -111,7 +117,11 @@ class BaseTrainerTest(unittest.TestCase):
                 output.update(torch.tensor(test_eval_accuracies[i]))
             mock_eval_fn.side_effect = eval_outputs
 
-            trainer = TestTrainer(model=mock.Mock(spec=BaseModel), device=torch.device('cpu'))
+            mock_model = mock.Mock(spec=BaseModel)
+            mock_model.to = mock.Mock(return_value=mock_model)
+            mock_model.eval = mock.Mock(return_value={"loss": torch.tensor(0.5)})
+
+            trainer = TestTrainer(model=mock_model, device=torch.device('cpu'))
             eval_metrics = trainer.eval(batch_iter=dummy_iter(1), num_steps=num_steps).compute()
 
         self.assertEqual(trainer.train_state.step, 0)

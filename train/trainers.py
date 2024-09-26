@@ -73,8 +73,8 @@ class BaseTrainer(Generic[M, S], metaclass=abc.ABCMeta):
       for step in range(num_steps):
           batch = next(batch_iter)
           batch = {k: v.to(self.device) for k, v in batch.items()}
-          self.train_state, metrics_update = self._compiled_train_step(self.train_state, batch)
-          train_metrics.update(metrics_update)
+          self.train_state, metrics_update = self._compiled_train_step(batch) # self.train_state as first entry
+          train_metrics.update(metrics_update.train_loss)
 
       return train_metrics
 
@@ -87,8 +87,8 @@ class BaseTrainer(Generic[M, S], metaclass=abc.ABCMeta):
           for _ in range(num_steps):
               batch = next(batch_iter)
               batch = {k: v.to(self.device) for k, v in batch.items()}
-              metrics_update = self._compiled_eval_step(self.train_state, batch)
-              eval_metrics.update(metrics_update)
+              metrics_update = self._compiled_eval_step(batch) # self.train_state as first entry
+              eval_metrics.update(metrics_update.eval_accuracy)
 
       return eval_metrics
   
