@@ -1,4 +1,5 @@
-# Copyright 2024 The swirl_dynamics Authors.
+# Copyright 2024 The swirl_dynamics Authors and Modifications made 
+# by the CAM Lab at ETH Zurich.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -170,3 +171,6 @@ class BasicDistributedTrainer(BasicTrainer[M, S]):
 
   def eval_step(self, train_state: S, batch: BatchType) -> Metrics:
       return super().eval_step(train_state, batch)
+  
+class DenoisingTrainer(BasicTrainer[M, S]):
+    pass

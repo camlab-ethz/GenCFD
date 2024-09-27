@@ -1,4 +1,5 @@
-# Copyright 2024 The swirl_dynamics Authors.
+# Copyright 2024 The swirl_dynamics Authors and adaptations made
+# by the CAM Lab at ETH Zurich.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -34,12 +35,11 @@ from GPUtil.GPUtil import getGPUs
 
 Tensor = torch.Tensor
 Metrics = dict # TODO: Placeholder for metrics that are implemented!
-# PyTree = Any
-# VariableDict = trainers.VariableDict
 
 
 class DenoisingTorchModule(Protocol):
   """Expected interface of the flax module compatible with `DenoisingModel`.
+  For the PyTorch based version we don't need to worry about that!
 
   NOTE: This protocol is for reference only and not statically checked.
   """
