@@ -1,7 +1,5 @@
 import functools
 
-# from clu import metric_writers
-
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 import torch
@@ -11,6 +9,7 @@ import diffusion as dfn_lib
 from model import probabilistic_diffusion as dfn
 from torch.utils.data import DataLoader, Dataset
 from torchvision import datasets, transforms
+
 
 def get_mnist_dataset(split: str, batch_size: int):
     # Define the dataset transformation

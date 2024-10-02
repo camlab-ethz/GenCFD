@@ -28,14 +28,11 @@ import numpy as np
 
 import diffusion as dfn_lib
 from model.base_model import base_model
-from train import trainers
-from train import train_states
 
 from GPUtil.GPUtil import getGPUs
 
 Tensor = torch.Tensor
 Metrics = dict # TODO: Placeholder for metrics that are implemented!
-
 
 class DenoisingTorchModule(Protocol):
   """Expected interface of the flax module compatible with `DenoisingModel`.
@@ -82,7 +79,6 @@ class DenoisingModel(base_model.BaseModel):
   min_eval_noise_lvl: float = 1e-3
   max_eval_noise_lvl: float = 50.0
   
-  num_eval_noise_levels: int = 10
   input_channel: int = 1
   which_tspan: str = 'exponential_noise_decay'
   consistent_weight: float = 0
@@ -91,10 +87,14 @@ class DenoisingModel(base_model.BaseModel):
 
   def initialize(self):
     x_sample = torch.ones((1,) + self.input_shape)
-    x = x_sample[:,self.input_channel:, ...]
-    y = x_sample[:, :self.input_channel, ...]
+    # x = x_sample[:,self.input_channel:, ...]
+    # y = x_sample[:, :self.input_channel, ...]
+    # TODO: Include the TIME once this model is built!
+    # return self.denoiser(
+    #     x=x, y=y, time=torch.ones((1,)), sigma=torch.ones((1,)), is_training=False
+    # )
     return self.denoiser(
-        x=x, y=y, time=torch.ones((1,)), sigma=torch.ones((1,)), is_training=False
+        x=x_sample, sigma=torch.ones((1,)), is_training=False
     )
 
   def loss_fn(
@@ -127,19 +127,31 @@ class DenoisingModel(base_model.BaseModel):
     x = data[:,self.input_channel:, ...]
     y = data[:, :self.input_channel, ...]
 
-    x_squared = torch.square(x)
+    # x_squared = torch.square(x)
+    x_squared = torch.square(data)
 
     sigma = self.noise_sampling(rng=rng, shape=(batch_size,))
     weights = self.noise_weighting(sigma)
-    noise = torch.randn_like(x) # TODO: Check with the JAX based version!
+    if weights.ndim != x.ndim:
+      weights = weights.view(-1, *([1] * (x.ndim - 1)))
 
-    noised = x + noise * sigma.unsqueeze(-1)
+    # noise = torch.randn_like(x) # TODO: Check with the JAX based version!
+    noise = torch.randn_like(data)
+
+    # noise = x + noise * sigma
+    if sigma.ndim != x.ndim:
+      noised = data + noise * sigma.view(-1, *([1] * (x.ndim - 1))) 
+    else:
+      noised = data + noise * sigma
     
-    denoised = self.denoiser.forward(x=noised, y=y, time=time, sigma=sigma, is_training=True)
+    # denoised = self.denoiser.forward(x=noised, y=y, time=time, sigma=sigma, is_training=True)
+    denoised = self.denoiser.forward(x=noised, sigma=sigma, is_training=True)
     denoised_square = torch.square(denoised)
 
-    rel_norm = torch.mean(torch.square(x) / torch.mean(torch.square(x_squared)))
-    loss = torch.mean(weights * torch.square(denoised - x))
+    # rel_norm = torch.mean(torch.square(x) / torch.mean(torch.square(x_squared)))
+    # loss = torch.mean(weights * torch.square(denoised - x))
+    rel_norm = torch.mean(torch.square(data) / torch.mean(torch.square(x_squared)))
+    loss = torch.mean(weights * torch.square(denoised - data))
     loss += self.consistent_weight * rel_norm * \
             torch.mean(weights * torch.square(denoised_square - x_squared))
     
@@ -194,14 +206,23 @@ class DenoisingModel(base_model.BaseModel):
       )
     )
 
-    noise = torch.randn_like(x)
-    noised = x + noise * sigma.unsqueeze(-1)
-    denoise_fn = self.inference_fn(variables, self.denoiser)
-    denoised = torch.stack([denoise_fn(noised[i], y[i], inputs_time[i], sigma[i]) for i in range(len(sigma))])
+    # noise = torch.randn_like(x)
+    # noised = x + noise * sigma.unsqueeze(-1)
+    # denoise_fn = self.inference_fn(variables, self.denoiser)
+    # denoised = torch.stack([denoise_fn(noised[i], y[i], inputs_time[i], sigma[i]) for i in range(len(sigma))])
 
-    ema_losses = torch.sqrt(torch.mean(torch.square(denoised - x), dim=-1) / torch.mean(torch.square(x), dim=-1))
+    # ema_losses = torch.sqrt(torch.mean(torch.square(denoised - x), dim=-1) / torch.mean(torch.square(x), dim=-1))
+
+    noise = torch.randn_like(inputs)
+    if sigma.ndim != inputs.ndim:
+      noised = inputs + noise * sigma.view(-1, *([1] * (inputs.ndim - 1))) 
+    else:
+      noised = inputs + noise * sigma
+    denoise_fn = self.inference_fn(variables, self.denoiser)
+    denoised = torch.stack([denoise_fn(noised[i], sigma[i]) for i in range(len(sigma))])
+    ema_losses = torch.mean(torch.square(denoised - inputs), dim=[i for i in range(1, inputs.ndim)])
+
     eval_losses = {f"sigma_lvl{i}": loss.item() for i, loss in enumerate(ema_losses)}
-    eval_losses[f"total_sigma_loss"] = torch.mean(ema_losses).item()
     return eval_losses
 
 
@@ -209,9 +230,14 @@ class DenoisingModel(base_model.BaseModel):
   def inference_fn(variables: dict, denoiser: nn.Module):
     """Returns the inference denoising function."""
 
-    def _denoise(x: Tensor, y: Tensor, time: float | Tensor, sigma: float | Tensor) -> Tensor:
+    # def _denoise(x: Tensor, y: Tensor, time: float | Tensor, sigma: float | Tensor) -> Tensor:
+    #   if not torch.is_tensor(sigma):
+    #     sigma = sigma * torch.ones((x.shape[0],))
+    #   return denoiser.forward(x=x, y=y, sigma=sigma, is_training=False)
+    
+    def _denoise(x: Tensor, sigma: float | Tensor) -> Tensor:
       if not torch.is_tensor(sigma):
         sigma = sigma * torch.ones((x.shape[0],))
-      return denoiser.forward(x=x, y=y, sigma=sigma, is_training=False)
+      return denoiser.forward(x=x, sigma=sigma, is_training=False)
 
     return _denoise

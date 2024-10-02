@@ -3,11 +3,8 @@ import torch
 import torch.nn as nn
 import numpy as np
 from torch.utils.data import dataloader
-from diffusion import diffusion as dfn_lib
-
+import diffusion as dfn_lib
 from model.building_blocks.unets.unets import UNet
-from model.probabilistic_diffusion.denoising_model import DenoisingModel
-from train.trainers import DenoisingTrainer
 
 class TestDenoisingModel(unittest.TestCase):
     def test_denoiser(self):
@@ -44,8 +41,8 @@ class TestDenoisingModel(unittest.TestCase):
                     data_std=DATA_STD,
                 )
 
-                model = DenoisingModel(
-                    input_shape=x.shape,
+                model = dfn_lib.DenoisingModel(
+                    input_shape=x.shape[1:],
                     denoiser=denoiser_model,
                     noise_sampling=dfn_lib.log_uniform_sampling(
                         diffusion_scheme, clip_min=1e-4, uniform_grid=True,
@@ -53,5 +50,22 @@ class TestDenoisingModel(unittest.TestCase):
                     noise_weighting=dfn_lib.edm_weighting(data_std=DATA_STD),
                 )
 
-                # trainer = DenoisingTrainer()
+                init_output = model.initialize()
+                self.assertIsNotNone(init_output, "Model initialization failed!")
 
+                batch_data = {
+                    "lead_time": torch.ones((batch,)),
+                    "data": x,
+                }
+                rng = torch.Generator().manual_seed(42)
+
+                loss, (metric, _) = model.loss_fn({}, batch_data, rng, {})
+                self.assertTrue(loss.item() >= 0, "Loss should be non-negative.")
+                self.assertIn("loss", metric, "Metric should contain 'loss' key.")
+
+                eval_metrics = model.eval_fn({}, batch_data, rng)
+                for key in eval_metrics.keys():
+                    self.assertTrue(eval_metrics[key] >= 0, "Evaluation loss should be non-negative.")
+
+if __name__=="__main__":
+    unittest.main()

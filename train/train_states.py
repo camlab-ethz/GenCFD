@@ -23,6 +23,8 @@ saves/restores the training progress.
 from typing import Any, Optional, Dict
 import torch
 import torch.nn as nn
+from torch import optim
+from torch.optim.swa_utils import AveragedModel
 
 Tensor = torch.Tensor
 
@@ -154,3 +156,36 @@ class BasicTrainState(TrainState):
     super().update_from_checkpoint(checkpoint)
     self.model.load_state_dict(checkpoint["params"])
     self.optimizer.load_state_dict(checkpoint["opt_state"])
+
+  def replace(self, step: int, params: Dict[str, Any], opt_state: Dict[str, Any]):
+        """Replaces state values with updated fields."""
+        self.step = step
+        self.params = params
+        self.opt_state = opt_state
+      
+
+class DenoisingModelTrainState(BasicTrainState):
+  """Train state with an additional field tracking the EMA parameters."""
+
+  def __init__(
+      self, 
+      model: Optional[nn.Module] = None, 
+      optimizer: Optional[optim.Optimizer] = None, 
+      params = None,
+      opt_state = None,
+      step: int = 0
+      ):
+    super().__init__(
+      model=model, 
+      optimizer=optimizer, 
+      params=params, 
+      opt_state=opt_state, 
+      step=step)
+    self.ema_model = AveragedModel(self.model)
+
+  @property
+  def ema_parameters(self):
+    if self.ema_model:
+      return self.ema_model.module.state_dict()
+    else:
+      raise ValueError("EMA model is None")
