@@ -62,3 +62,4 @@ from model.building_blocks.unets.unets import PreconditionedConditionalDenoiser 
 # from diffusion.vivit_diffusion import ViViTDiffusion
 
 from model.probabilistic_diffusion.denoising_model import DenoisingModel
+# from train.trainers import DenoisingTrainer

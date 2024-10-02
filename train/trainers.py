@@ -46,7 +46,8 @@ class BaseTrainer(Generic[M, S], metaclass=abc.ABCMeta):
     """Abstract base trainer for gradient descent mini-batch training."""
 
     def __init__(self, model: M, device: torch.device):
-        self.model = model.to(device)
+        # self.model = model.to(device)
+        self.model = model
         self.device = device
         self.train_state = self.initialize_train_state()
 
@@ -70,13 +71,17 @@ class BaseTrainer(Generic[M, S], metaclass=abc.ABCMeta):
     def train(self, batch_iter: Iterator[BatchType], num_steps: int) -> Metrics:
         """Runs training for a specified number of steps."""
         train_metrics = self.TrainMetrics()
-        self.model.train()
+        self.model.denoiser.train() # adapt this part!
 
         for step in range(num_steps):
             batch = next(batch_iter)
-            batch = {k: v.to(self.device) for k, v in batch.items()}
+            # batch = {k: v.to(self.device) for k, v in batch.items()}
             metrics_update = self.train_step(batch)
-            train_metrics.update(metrics_update.train_loss)
+            train_loss_value = metrics_update["train_loss"].compute()
+            test = metrics_update["train_loss"]
+            train_metrics.update(train_loss_value)
+
+            print(f"mean_loss: {train_loss_value}    train_loss: {test}")
 
         return train_metrics
 
@@ -124,7 +129,6 @@ class BasicTrainer(BaseTrainer[M, S]):
     def train_step(self, batch: BatchType) -> Metrics:
         
         self.model.train()
-
         output = self.model(batch)
         loss, metrics = self.model.loss_fn(output, batch)
 
@@ -191,10 +195,13 @@ class DenoisingTrainer(BasicTrainer[M, SD]):
             self, 
             model: nn.Module, 
             optimizer: optim.Optimizer,
-            ema_decay: float, 
-            device: torch.device):
-      super().__init__(model=model, optimizer=optimizer, device=device)
+            device: torch.device,
+            ema_decay: float = 0.999):
+      
+      self.optimizer = optimizer
       self.ema_decay = ema_decay 
+
+      super().__init__(model=model, optimizer=optimizer, device=device)
 
     class TrainMetrics(Metrics):
         """Train metrics including mean and std of loss"""
@@ -205,9 +212,10 @@ class DenoisingTrainer(BasicTrainer[M, SD]):
             }
             super().__init__(metrics=train_metrics)
     
+
     class EvalMetrics(Metrics):
         """Evaluation metrics based on the model output, using noise level"""
-        def __init__(self, num_eval_noise_levels: int):
+        def __init__(self, num_eval_noise_levels: int = 10):
             eval_metrics = {
                 f"eval_denoise_lvl{i}": MeanMetric() 
                 for i in range(num_eval_noise_levels) 
@@ -218,14 +226,34 @@ class DenoisingTrainer(BasicTrainer[M, SD]):
     def initialize_train_state(self) -> SD:
         """Initializes the train state with EMA and model params"""
         return train_states.DenoisingModelTrainState(
-            model=self.model,
+            model=self.model.denoiser,
             optimizer=self.optimizer,
-            params=self.model.state_dict(),
+            params=self.model.denoiser.state_dict(),
             opt_state=self.optimizer.state_dict(),
             step=0,
             ema_decay=self.ema_decay
         )
     
+    def train_step(self, batch: BatchType) -> Metrics:
+        
+        self.model.denoiser.train()
+        output = self.model.denoiser(batch[0], batch[1])
+        loss, (metrics, mem) = self.model.loss_fn(batch[0])
+
+        self.optimizer.zero_grad()
+        loss.backward()
+        self.optimizer.step()
+
+        self.update_train_state()
+
+        train_metrics = self.TrainMetrics()
+
+        # train_metrics.update(torch.tensor(metrics["loss"]))
+        train_metrics.update(metrics["loss"])
+
+        return train_metrics
+    
+
     def update_train_state(self) -> SD:
         """Update the training state, including optimizer and parameters."""
         next_step = self.train_state.step + 1
@@ -233,13 +261,13 @@ class DenoisingTrainer(BasicTrainer[M, SD]):
             next_step = next_step.item()
 
         # update ema model
-        self.train_state.ema_model.update_parameters(self.model)
+        self.train_state.ema_model.update_parameters(self.model.denoiser)
         ema_params = self.train_state.ema_parameters
 
         return self.train_state.replace(
             step=next_step,
             opt_state=self.optimizer.state_dict(),
-            params=self.model.state_dict(),
+            params=self.model.denoiser.state_dict(),
             ema=ema_params,
         )
     

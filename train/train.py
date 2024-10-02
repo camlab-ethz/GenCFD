@@ -14,31 +14,32 @@
 
 """Function that runs training."""
 
-from collections.abc import Iterable, Sequence
-from typing import Any
+import os
+from typing import Any, Sequence, Optional
 import torch
+from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
-from swirl_dynamics.templates import callbacks as cb
+from utils import callbacks as cb
 from train import trainers
-from swirl_dynamics.templates import utils
+from utils import train_utils
 import os
 
 # TODO: package parameters into logical groupings (see cl/497196196)
 def run(
     *,
-    train_dataloader: Iterable[Any],
+    train_dataloader: DataLoader,
     trainer: trainers.BaseTrainer,
-    workdir: epath.PathLike,
+    workdir: str,
     # training configs
     total_train_steps: int,
     metric_aggregation_steps: int = 50,
     # evaluation configs
-    eval_dataloader: Iterable[Any] | None = None,
+    eval_dataloader: Optional[DataLoader] = None,
     eval_every_steps: int = 100,
     num_batches_per_eval: int = 10,
     run_sanity_eval_batch: bool = True,
     # other configs
-    metric_writer: metric_writers.MultiWriter | None = None,
+    metric_writer: Optional[SummaryWriter] = None,
     callbacks: Sequence[cb.Callback] = (),
 ) -> None:
   """Runs trainer for a training task.
@@ -73,8 +74,8 @@ def run(
     callbacks: A sequence of self-contained programs executing non-essential
       logic (e.g. checkpoint saving, logging, timing, profiling etc.).
   """
-  if not filesys.exists(workdir):
-    filesys.makedirs(workdir)
+  if not os.path.exists(workdir):
+    os.makedirs(workdir)
 
   train_iter = iter(train_dataloader)
   eval_iter = None
@@ -83,17 +84,15 @@ def run(
     if eval_every_steps % metric_aggregation_steps != 0:
       raise ValueError(
           f"`eval_every_steps` ({eval_every_steps}) "
-          "must be an integer multiple of "
-          "`metric_aggregation_steps` ({metric_aggregation_steps})"
+          f"must be an integer multiple of "
+          f"`metric_aggregation_steps` ({metric_aggregation_steps})"
       )
     eval_iter = iter(eval_dataloader)
     if run_sanity_eval_batch:
       trainer.eval(eval_iter, num_steps=1)
 
   if metric_writer is None:
-    metric_writer = metric_writers.create_default_writer(
-        workdir, just_logging=jax.process_index() > 0
-    )
+    metric_writer = SummaryWriter(log_dir=workdir)
 
   for callback in callbacks:
     callback.metric_writer = metric_writer
@@ -107,7 +106,7 @@ def run(
     num_steps = min(total_train_steps - cur_step, metric_aggregation_steps)
     train_metrics = trainer.train(train_iter, num_steps).compute()
     cur_step += num_steps
-    metric_writer.write_scalars(cur_step, train_metrics)
+    metric_writer.add_scalars('train', train_metrics, cur_step)
 
     # At train/eval batch end, callbacks are called in reverse order so that
     # they are last-in-first-out, loosely resembling nested python contexts.
@@ -122,9 +121,9 @@ def run(
         assert eval_iter is not None
         eval_metrics = trainer.eval(eval_iter, num_batches_per_eval).compute()
         eval_metrics_to_log = {
-            k: v for k, v in eval_metrics.items() if utils.is_scalar(v)
+            k: v for k, v in eval_metrics.items() if train_utils.is_scalar(v)
         }
-        metric_writer.write_scalars(cur_step, eval_metrics_to_log)
+        metric_writer.add_scalars('eval', eval_metrics_to_log, cur_step)
 
         for callback in reversed(callbacks):
           callback.on_eval_batches_end(trainer, eval_metrics)

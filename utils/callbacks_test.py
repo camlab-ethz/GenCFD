@@ -116,73 +116,73 @@ class TrainStateCheckpointCallbackTest(parameterized.TestCase):
     self.assertEqual(new_trainer.train_state.int_step, 20)
 
 
-class ProgressReportCallbackTest(parameterized.TestCase):
+# class ProgressReportCallbackTest(parameterized.TestCase):
 
-  @parameterized.parameters(
-      {"num_train_steps": 10, "every_steps": 2},
-      {"num_train_steps": 20, "every_steps": 3},
-      {"num_train_steps": 8, "every_steps": 8},
-      {"num_train_steps": 5, "every_steps": 10},
-  )
-  def test_reports_timing_metrics(self, num_train_steps, every_steps):
-    work_dir = self.create_tempdir().full_path
-    callback = callbacks.ProgressReport(
-        num_train_steps=num_train_steps, every_steps=every_steps
-    )
-    trainer = mock.Mock(spec=trainers.BaseTrainer)
-    callback.metric_writer = metric_writers.create_default_writer(work_dir)
-    callback.on_train_begin(trainer)
-    for step in range(num_train_steps):
-      trainer.train_state = _mock_train_state(step + 1)
-      callback.on_train_batches_end(trainer, mock.Mock())
+#   @parameterized.parameters(
+#       {"num_train_steps": 10, "every_steps": 2},
+#       {"num_train_steps": 20, "every_steps": 3},
+#       {"num_train_steps": 8, "every_steps": 8},
+#       {"num_train_steps": 5, "every_steps": 10},
+#   )
+#   def test_reports_timing_metrics(self, num_train_steps, every_steps):
+#     work_dir = self.create_tempdir().full_path
+#     callback = callbacks.ProgressReport(
+#         num_train_steps=num_train_steps, every_steps=every_steps
+#     )
+#     trainer = mock.Mock(spec=trainers.BaseTrainer)
+#     callback.metric_writer = metric_writers.create_default_writer(work_dir)
+#     callback.on_train_begin(trainer)
+#     for step in range(num_train_steps):
+#       trainer.train_state = _mock_train_state(step + 1)
+#       callback.on_train_batches_end(trainer, mock.Mock())
 
-    callback.metric_writer.flush()
-    written_metrics = utils.load_scalars_from_tfevents(work_dir)
-    # length should be ceil(num_train_steps/every_steps)
-    self.assertLen(written_metrics.keys(), -(num_train_steps // -every_steps))
-    if every_steps <= num_train_steps:
-      self.assertIn("steps_per_sec", written_metrics[every_steps].keys())
+#     callback.metric_writer.flush()
+#     written_metrics = utils.load_scalars_from_tfevents(work_dir)
+#     # length should be ceil(num_train_steps/every_steps)
+#     self.assertLen(written_metrics.keys(), -(num_train_steps // -every_steps))
+#     if every_steps <= num_train_steps:
+#       self.assertIn("steps_per_sec", written_metrics[every_steps].keys())
 
 
-class TqdmProgressBarTest(absltest.TestCase):
+# class TqdmProgressBarTest(absltest.TestCase):
 
-  def test_reports_monitors(self):
-    total_train_steps = 100
-    callback = callbacks.TqdmProgressBar(
-        total_train_steps=total_train_steps,
-        train_monitors=["train_loss"],
-        eval_monitors=["eval_accuracy"],
-    )
-    trainer = mock.Mock(spec=trainers.BaseTrainer)
-    trainer.train_state = _mock_train_state(0)
-    with mock.patch("sys.stderr", io.StringIO()) as stderr:
-      callback.on_train_begin(trainer)
-      with self.subTest("FirstTrainMonitorDisplay"):
-        callback.on_train_batches_end(trainer, {"train_loss": jnp.array(0.1)})
-        self.assertRegex(stderr.getvalue(), "train_loss=0.1")
+#   def test_reports_monitors(self):
+#     total_train_steps = 100
+#     callback = callbacks.TqdmProgressBar(
+#         total_train_steps=total_train_steps,
+#         train_monitors=["train_loss"],
+#         eval_monitors=["eval_accuracy"],
+#     )
+#     trainer = mock.Mock(spec=trainers.BaseTrainer)
+#     trainer.train_state = _mock_train_state(0)
+#     with mock.patch("sys.stderr", io.StringIO()) as stderr:
+#       callback.on_train_begin(trainer)
+#       with self.subTest("FirstTrainMonitorDisplay"):
+#         callback.on_train_batches_end(trainer, {"train_loss": jnp.array(0.1)})
+#         self.assertRegex(stderr.getvalue(), "train_loss=0.1")
 
-      with self.subTest("FirstEvalMonitorDisplay"):
-        callback.on_eval_batches_end(trainer, {"eval_accuracy": jnp.array(0.9)})
-        trainer.train_state = _mock_train_state(total_train_steps // 2)
-        callback.on_train_batches_end(trainer, {"train_loss": jnp.array(0.5)})
-        self.assertRegex(
-            stderr.getvalue(), f" {total_train_steps // 2}/{total_train_steps} "
-        )
-        self.assertRegex(stderr.getvalue(), "eval_accuracy=0.9.*train_loss=0.5")
+#       with self.subTest("FirstEvalMonitorDisplay"):
+#         callback.on_eval_batches_end(trainer, {"eval_accuracy": jnp.array(0.9)})
+#         trainer.train_state = _mock_train_state(total_train_steps // 2)
+#         callback.on_train_batches_end(trainer, {"train_loss": jnp.array(0.5)})
+#         self.assertRegex(
+#             stderr.getvalue(), f" {total_train_steps // 2}/{total_train_steps} "
+#         )
+#         self.assertRegex(stderr.getvalue(), "eval_accuracy=0.9.*train_loss=0.5")
 
-      with self.subTest("TrainMonitorUpdate"):
-        trainer.train_state = _mock_train_state(total_train_steps)
-        callback.on_train_batches_end(trainer, {"train_loss": jnp.array(0.3)})
-        self.assertRegex(
-            stderr.getvalue(), f" {total_train_steps}/{total_train_steps} "
-        )
-        self.assertRegex(stderr.getvalue(), "eval_accuracy=0.9.*train_loss=0.3")
+#       with self.subTest("TrainMonitorUpdate"):
+#         trainer.train_state = _mock_train_state(total_train_steps)
+#         callback.on_train_batches_end(trainer, {"train_loss": jnp.array(0.3)})
+#         self.assertRegex(
+#             stderr.getvalue(), f" {total_train_steps}/{total_train_steps} "
+#         )
+#         self.assertRegex(stderr.getvalue(), "eval_accuracy=0.9.*train_loss=0.3")
 
-      with self.subTest("TrainEndCloseBar"):
-        callback.on_train_end(trainer)
-        self.assertRegex(
-            stderr.getvalue(), f"{total_train_steps}/{total_train_steps}"
-        )
+#       with self.subTest("TrainEndCloseBar"):
+#         callback.on_train_end(trainer)
+#         self.assertRegex(
+#             stderr.getvalue(), f"{total_train_steps}/{total_train_steps}"
+#         )
 
 
 

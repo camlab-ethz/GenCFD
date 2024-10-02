@@ -34,6 +34,9 @@ from GPUtil.GPUtil import getGPUs
 Tensor = torch.Tensor
 Metrics = dict # TODO: Placeholder for metrics that are implemented!
 
+SEED = 0
+RNG = torch.manual_seed(SEED)
+
 class DenoisingTorchModule(Protocol):
   """Expected interface of the flax module compatible with `DenoisingModel`.
   For the PyTorch based version we don't need to worry about that!
@@ -99,10 +102,10 @@ class DenoisingModel(base_model.BaseModel):
 
   def loss_fn(
       self,
-      params: dict,
+      # params: dict,
       batch: dict,
-      rng: torch.Generator,
-      mutables: dict,
+      # mutables: dict,
+      rng: torch.Generator = RNG,
   ):
     """Computes the denoising loss on a training batch.
 
@@ -119,8 +122,9 @@ class DenoisingModel(base_model.BaseModel):
     Returns:
       The loss value and a tuple of training metric and mutables.
     """
-    time = batch["lead_time"]
-    data = batch["data"]
+
+    # data = batch["data"]
+    data = batch
 
     batch_size = len(data)
 
@@ -159,6 +163,7 @@ class DenoisingModel(base_model.BaseModel):
       "loss": loss.item(),
       "mem": 0. # TODO: Placeholder for memory metric!
     }
+    mutables = None # TODO: ADDED because commented in the argument section!
 
     return loss, (metric, mutables)
   

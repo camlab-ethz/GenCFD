@@ -1,14 +1,18 @@
 import functools
 
+import os
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 import torch
+from torch import optim
 
-from swirl_dynamics import templates
+from train import train
 import diffusion as dfn_lib
-from model import probabilistic_diffusion as dfn
+# from model import probabilistic_diffusion as dfn
 from torch.utils.data import DataLoader, Dataset
+from torch.utils.tensorboard import SummaryWriter
 from torchvision import datasets, transforms
+from utils.callbacks import Callback
 
 
 def get_mnist_dataset(split: str, batch_size: int):
@@ -75,6 +79,7 @@ ckpt_interval = 1000  #@param
 max_ckpt_to_keep = 5  #@param
 
 train_dataloader = get_mnist_dataset('train', train_batch_size)
+test_dataloader = get_mnist_dataset('test', eval_batch_size)
 first_batch = next(iter(train_dataloader))
 img = first_batch[0] 
 labels = first_batch[1]
@@ -82,4 +87,37 @@ labels = first_batch[1]
 noise = torch.randn_like(img)
 noised_img = img + noise
 
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+device = torch.device("cpu")
+
+# Initialize model by running a dummy forward pass!
+dummy_input = torch.randn_like(first_batch[0]).to(device)
+dummy_sigma = torch.randn_like(first_batch[1], dtype=torch.float32).to(device)
+# model.to(device) # TODO: model should have an input to device!!!
+_ = model.denoiser(dummy_input, dummy_sigma)
+
 # breakpoint()
+
+trainer = train.trainers.DenoisingTrainer(
+    model=model,
+    optimizer=optim.Adam(model.denoiser.parameters(), lr=peak_lr),
+    # We keep track of an exponential moving average of the model parameters
+    # over training steps. This alleviates the "color-shift" problems known to
+    # exist in the diffusion models.
+    ema_decay=ema_decay,
+    device=device
+)
+
+
+train.run(
+    train_dataloader=train_dataloader,
+    trainer=trainer,
+    workdir=workdir,
+    total_train_steps=num_train_steps,
+    metric_writer=SummaryWriter(log_dir=workdir),
+    metric_aggregation_steps=100,
+    eval_dataloader=None,
+    eval_every_steps=1000,
+    num_batches_per_eval=2,
+    callbacks=(Callback(workdir),),
+)
