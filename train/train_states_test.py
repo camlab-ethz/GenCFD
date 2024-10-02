@@ -96,7 +96,6 @@ class DenoisingModelTrainStateTest(unittest.TestCase):
         ckpt_path = os.path.join(save_dir, "checkpoint.pth")
 
         state.save_checkpoint(ckpt_path)
-
         loaded_state = DenoisingModelTrainState.restore_from_checkpoint(ckpt_path, model, optimizer)
 
         self.assertEqual(state.int_step, loaded_state.int_step)

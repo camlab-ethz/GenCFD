@@ -24,7 +24,7 @@ from typing import Any, Optional, Dict
 import torch
 import torch.nn as nn
 from torch import optim
-from torch.optim.swa_utils import AveragedModel
+from torch.optim.swa_utils import AveragedModel, get_ema_multi_avg_fn
 
 Tensor = torch.Tensor
 
@@ -173,7 +173,8 @@ class DenoisingModelTrainState(BasicTrainState):
       optimizer: Optional[optim.Optimizer] = None, 
       params = None,
       opt_state = None,
-      step: int = 0
+      step: int = 0,
+      ema_decay: float = 0.999
       ):
     super().__init__(
       model=model, 
@@ -181,11 +182,29 @@ class DenoisingModelTrainState(BasicTrainState):
       params=params, 
       opt_state=opt_state, 
       step=step)
-    self.ema_model = AveragedModel(self.model)
+    
+    self.ema_decay = ema_decay
+    self.ema_model = AveragedModel(
+      self.model, multi_avg_fn=get_ema_multi_avg_fn(ema_decay)
+      )
+    self.ema = self.ema_parameters
 
   @property
   def ema_parameters(self):
+    """Return the EMA model's prarameters."""
     if self.ema_model:
       return self.ema_model.module.state_dict()
     else:
       raise ValueError("EMA model is None")
+    
+  def replace(
+      self, 
+      step: int, 
+      params: Dict[str, Any], 
+      opt_state: Dict[str, Any],
+      ema: Dict[str, Any]):
+      """Replaces state values with updated fields."""
+      self.step = step
+      self.params = params
+      self.opt_state = opt_state
+      self.ema = ema

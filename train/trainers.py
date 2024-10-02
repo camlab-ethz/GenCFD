@@ -194,15 +194,14 @@ class DenoisingTrainer(BasicTrainer[M, SD]):
             ema_decay: float, 
             device: torch.device):
       super().__init__(model=model, optimizer=optimizer, device=device)
-      self.ema_decay = ema_decay # TODO
-      # JAX version: self.ema = optax.ema(ema_decay)
+      self.ema_decay = ema_decay 
 
     class TrainMetrics(Metrics):
         """Train metrics including mean and std of loss"""
         def __init__(self):
             train_metrics = {
                 "train_loss": MeanMetric(),
-                "train_loss_std": MeanMetric()
+                "train_loss_std": MeanMetric() # TODO: Change to STD!
             }
             super().__init__(metrics=train_metrics)
     
@@ -221,9 +220,45 @@ class DenoisingTrainer(BasicTrainer[M, SD]):
         return train_states.DenoisingModelTrainState(
             model=self.model,
             optimizer=self.optimizer,
-            # ema_decay=self.ema_decay, # TODO: make this work!
             params=self.model.state_dict(),
             opt_state=self.optimizer.state_dict(),
-            step=0
+            step=0,
+            ema_decay=self.ema_decay
         )
+    
+    def update_train_state(self) -> SD:
+        """Update the training state, including optimizer and parameters."""
+        next_step = self.train_state.step + 1
+        if isinstance(next_step, Tensor):
+            next_step = next_step.item()
+
+        # update ema model
+        self.train_state.ema_model.update_parameters(self.model)
+        ema_params = self.train_state.ema_parameters
+
+        return self.train_state.replace(
+            step=next_step,
+            opt_state=self.optimizer.state_dict(),
+            params=self.model.state_dict(),
+            ema=ema_params,
+        )
+    
+    @staticmethod
+    def inference_fn_from_state_dict(
+        state: SD,
+        *args,
+        use_ema: bool = True,
+        **kwargs
+    ):
+        if use_ema:
+            if state.ema_model:
+                variables = state.ema_parameters
+            else:
+                raise ValueError("EMA model is None or not initialized")
+            
+        else:
+            variables = state.model.state_dict()
+
+        return dfn_lib.DenoisingModel.inference_fn(variables, *args, **kwargs)
+
     
