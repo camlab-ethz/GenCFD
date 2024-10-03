@@ -238,58 +238,59 @@ class Callback:
 #     self.report_progress(trainer.train_state.int_step, time.time())
 
 
-# class TqdmProgressBar(Callback):
-#   """Tqdm progress bar callback to monitor training progress in real time."""
+class TqdmProgressBar(Callback):
+  """Tqdm progress bar callback to monitor training progress in real time."""
 
-#   def __init__(
-#       self,
-#       total_train_steps: int | None,
-#       train_monitors: Sequence[str],
-#       eval_monitors: Sequence[str] = (),
-#   ):
-#     """ProgressBar constructor.
+  def __init__(
+      self,
+      total_train_steps: int | None,
+      train_monitors: Sequence[str],
+      eval_monitors: Sequence[str] = (),
+  ):
+    """ProgressBar constructor.
 
-#     Args:
-#       total_train_steps: the total number of training steps, which is displayed
-#         as the maximum progress on the bar.
-#       train_monitors: keys in the training metrics whose values are updated on
-#         the progress bar after every training metric aggregation.
-#       eval_monitors: same as `train_monitors` except applying to evaluation.
-#     """
-#     self.total_train_steps = total_train_steps
-#     self.train_monitors = train_monitors
-#     self.eval_monitors = eval_monitors
-#     self.current_step = 0
-#     self.eval_postfix = {}  # keeps record of the most recent eval monitor
-#     self.bar = None
+    Args:
+      total_train_steps: the total number of training steps, which is displayed
+        as the maximum progress on the bar.
+      train_monitors: keys in the training metrics whose values are updated on
+        the progress bar after every training metric aggregation.
+      eval_monitors: same as `train_monitors` except applying to evaluation.
+    """
+    super().__init__()
+    self.total_train_steps = total_train_steps
+    self.train_monitors = train_monitors
+    self.eval_monitors = eval_monitors
+    self.current_step = 0
+    self.eval_postfix = {}  # keeps record of the most recent eval monitor
+    self.bar = None
 
-#   def on_train_begin(self, trainer: Trainer) -> None:
-#     del trainer
-#     self.bar = tqdm.tqdm(total=self.total_train_steps, unit="step")
+  def on_train_begin(self, trainer: Trainer) -> None:
+    del trainer
+    self.bar = tqdm.tqdm(total=self.total_train_steps, unit="step")
 
-#   def on_train_batches_end(
-#       self, trainer: Trainer, train_metrics: ComputedMetrics
-#   ) -> None:
-#     assert self.bar is not None
-#     self.bar.update(trainer.train_state.int_step - self.current_step)
-#     self.current_step = trainer.train_state.int_step
-#     postfix = {
-#         monitor: train_metrics[monitor] for monitor in self.train_monitors
-#     }
-#     self.bar.set_postfix(**postfix, **self.eval_postfix)
+  def on_train_batches_end(
+      self, trainer: Trainer, train_metrics: ComputedMetrics
+  ) -> None:
+    assert self.bar is not None
+    self.bar.update(trainer.train_state.step - self.current_step)
+    self.current_step = trainer.train_state.step
+    postfix = {
+        monitor: train_metrics[monitor] for monitor in self.train_monitors
+    }
+    self.bar.set_postfix(**postfix, **self.eval_postfix)
 
-#   def on_eval_batches_end(
-#       self, trainer: Trainer, eval_metrics: ComputedMetrics
-#   ) -> None:
-#     del trainer
-#     self.eval_postfix = {
-#         monitor: eval_metrics[monitor] for monitor in self.eval_monitors
-#     }
+  def on_eval_batches_end(
+      self, trainer: Trainer, eval_metrics: ComputedMetrics
+  ) -> None:
+    del trainer
+    self.eval_postfix = {
+        monitor: eval_metrics[monitor].item() for monitor in self.eval_monitors
+    }
 
-#   def on_train_end(self, trainer: Trainer) -> None:
-#     del trainer
-#     assert self.bar is not None
-#     self.bar.close()
+  def on_train_end(self, trainer: Trainer) -> None:
+    del trainer
+    assert self.bar is not None
+    self.bar.close()
 
 
 # @train_utils.primary_process_only

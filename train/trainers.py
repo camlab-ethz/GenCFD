@@ -256,7 +256,7 @@ class DenoisingTrainer(BasicTrainer[M, SD]):
         # train_metrics.update(torch.tensor(metrics["loss"]))
         train_metrics.update(metrics["loss"])
 
-        print(f"LOSS: {loss}")
+        # print(f"LOSS: {loss}")
 
         return train_metrics
     

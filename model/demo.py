@@ -12,7 +12,7 @@ import diffusion as dfn_lib
 from torch.utils.data import DataLoader, Dataset
 from torch.utils.tensorboard import SummaryWriter
 from torchvision import datasets, transforms
-from utils.callbacks import Callback
+from utils.callbacks import Callback, TqdmProgressBar
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 SEED = 0
@@ -132,5 +132,11 @@ train.run(
     eval_dataloader=None,
     eval_every_steps=1000,
     num_batches_per_eval=2,
-    callbacks=(Callback(workdir),),
+    # callbacks=(Callback(workdir),),
+    callbacks=(
+        TqdmProgressBar(
+            total_train_steps=num_train_steps,
+            train_monitors=("train_loss",),
+        ),
+    )
 )
