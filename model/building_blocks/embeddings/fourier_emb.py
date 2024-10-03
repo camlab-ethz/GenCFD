@@ -15,17 +15,20 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from typing import Callable
+from typing import Callable, Any
 
 Tensor = torch.Tensor
 
 class FourierEmbedding(nn.Module):
     """Fourier embedding."""
 
-    def __init__(self, dims: int=64, max_freq: float=2e4,
+    def __init__(self, 
+                 dims: int=64, 
+                 max_freq: float=2e4,
                  projection: bool=True, 
                  act_fun: Callable[[Tensor], Tensor]=F.silu,
-                 dtype: torch.dtype=torch.float32):
+                 dtype: torch.dtype=torch.float32,
+                 device: Any | None = None):
         super(FourierEmbedding, self).__init__()
 
         self.dims = dims
@@ -33,6 +36,7 @@ class FourierEmbedding(nn.Module):
         self.projection = projection
         self.act_fun = act_fun
         self.dtype = dtype
+        self.device = device
 
         self.lin_layer1 = None
         self.lin_layer2 = None
@@ -40,8 +44,9 @@ class FourierEmbedding(nn.Module):
     
     def forward(self, x: Tensor) -> Tensor:
         assert len(x.shape) == 1, "Input tensor must be 1D"
-        logfreqs = torch.linspace(0, torch.log(torch.tensor(self.max_freq)), 
-                                  self.dims // 2)
+        logfreqs = torch.linspace(0, torch.log(
+            torch.tensor(self.max_freq, dtype=self.dtype, device=self.device)
+            ), self.dims // 2, dtype=self.dtype, device=self.device)
         
         x_proj = torch.pi * torch.exp(logfreqs)[None, :] * x[:, None]
         x_proj = torch.cat([torch.sin(x_proj), torch.cos(x_proj)], dim=-1)
@@ -49,8 +54,12 @@ class FourierEmbedding(nn.Module):
 
         if self.projection:
             if self.lin_layer1 is None or self.lin_layer2 is None:
-                self.lin_layer1 = nn.Linear(x_proj.shape[1], 2 * self.dims)
-                self.lin_layer2 = nn.Linear(2* self.dims, self.dims)
+                self.lin_layer1 = nn.Linear(
+                    x_proj.shape[1], 2 * self.dims, dtype=self.dtype, device=self.device
+                    )
+                self.lin_layer2 = nn.Linear(
+                    2* self.dims, self.dims, dtype=self.dtype, device=self.device
+                    )
             
             x_proj = self.lin_layer1(x_proj)
             x_proj = self.act_fun(x_proj)

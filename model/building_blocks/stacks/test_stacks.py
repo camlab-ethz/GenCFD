@@ -4,6 +4,9 @@ from model.building_blocks.stacks.ustacks import UStack, UpsampleFourierGaussian
 from utils.model_utils import reshape_jax_torch
 from model.building_blocks.stacks.dtstack import DStack
 
+SEED = 0
+RNG = torch.manual_seed(SEED)
+
 class UStackTest(unittest.TestCase):
 
     def test_ustack(self):
@@ -23,10 +26,10 @@ class UStackTest(unittest.TestCase):
                 skips = [torch.randn(i) for i in skip_shape_list]
                 emb = torch.randn(emb_shape)
 
-                model_ustack = UStack((12, 8, 4), num_res_blocks, num_res_blocks)
+                model_ustack = UStack((12, 8, 4), num_res_blocks, num_res_blocks, rng=RNG)
                 out = model_ustack(inputs, emb, skips, True)
 
-                model_fg = UpsampleFourierGaussian(new_shape, num_res_blocks, 16, inputs.shape[1])
+                model_fg = UpsampleFourierGaussian(new_shape, num_res_blocks, 16, inputs.shape[1], rng=RNG)
                 out_fgup, out_fg = model_fg(inputs, emb, True)
     
 
@@ -48,7 +51,9 @@ class DStackTest(unittest.TestCase):
                 emb = torch.randn(emb_shape)
                 num_res_blocks = down_shape
                 downsample_ratio = down_shape
-                model = DStack(num_channels, num_res_blocks, downsample_ratio, use_attention=True, num_heads=4)
+                model = DStack(
+                    num_channels, num_res_blocks, downsample_ratio, rng=RNG, use_attention=True, num_heads=4
+                    )
                 out = model(inputs, emb, is_training=True)
 
 if __name__ == "__main__":

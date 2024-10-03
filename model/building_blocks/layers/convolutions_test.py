@@ -20,6 +20,9 @@ import torch
 import numpy as np
 from convolutions import ConvLayer, DownsampleConv
 
+SEED = 0
+RNG = torch.manual_seed(SEED)
+
 
 class ConvLayersTest(unittest.TestCase):
 
@@ -37,6 +40,7 @@ class ConvLayersTest(unittest.TestCase):
         model = ConvLayer(
             features=num_features, 
             padding_mode=padding, 
+            rng=RNG,
             kernel_size=(3, 3),
             in_channels=in_channels,
         )
@@ -64,7 +68,9 @@ class ConvLayersTest(unittest.TestCase):
         in_channels = input_shape[-1]
         num_features = 6
         inputs = torch.ones(input_shape)
-        model = DownsampleConv(in_channels=in_channels, features=num_features, ratios=ratios)
+        model = DownsampleConv(
+           in_channels=in_channels, features=num_features, ratios=ratios, rng=RNG
+           )
 
         if len(input_shape) == 4:
           out = model(inputs.permute(0,3,2,1)).permute(0,3,2,1)

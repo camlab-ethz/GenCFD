@@ -1,4 +1,4 @@
-from typing import Tuple
+from typing import Tuple, Any
 import numpy as np
 import torch
 import torch.nn as nn
@@ -35,12 +35,18 @@ class UStack(nn.Module):
         dtype: Data type.
     """
     # TODO: Think of how to add padding tuple or int?
-    def __init__(self, num_channels: tuple[int, ...], num_res_blocks: tuple[int, ...],
+    def __init__(self, num_channels: tuple[int, ...], 
+                 num_res_blocks: tuple[int, ...],
                  upsample_ratio: tuple[int, ...],
-                 padding_method: str = 'circular', dropout_rate: float = 0.0, 
-                 use_attention: bool = False, num_heads: int = 8, 
-                 channels_per_head: int = -1, normalize_qk: bool = False,
-                 dtype: torch.dtype=torch.float32):
+                 rng: torch.Generator,
+                 padding_method: str = 'circular', 
+                 dropout_rate: float = 0.0, 
+                 use_attention: bool = False, 
+                 num_heads: int = 8, 
+                 channels_per_head: int = -1, 
+                 normalize_qk: bool = False,
+                 dtype: torch.dtype=torch.float32,
+                 device: Any | None = None):
         super(UStack, self).__init__()
 
         self.num_channels = num_channels
@@ -53,6 +59,8 @@ class UStack(nn.Module):
         self.channels_per_head = channels_per_head
         self.normalize_qk = normalize_qk
         self.dtype = dtype
+        self.device = device
+        self.rng = rng
 
         # self.padding = kwargs.get('padding', 0) # TODO: MAYBE use this padding if necessary!
 
@@ -72,10 +80,21 @@ class UStack(nn.Module):
 
                 if self.use_attention and level == 0:
                     self.attention_blocks.append(
-                        AttentionBlock(num_heads=self.num_heads, normalize_qk=self.normalize_qk)
+                        AttentionBlock(
+                            rng=self.rng,
+                            num_heads=self.num_heads, 
+                            normalize_qk=self.normalize_qk,
+                            dtype=self.dtype,
+                            device=self.device
+                            )
                     )
                     self.res_conv_blocks.append(
-                        ResConv1x(hidden_layer_size=channel*2, out_channels=channel)
+                        ResConv1x(
+                            hidden_layer_size=channel*2, 
+                            out_channels=channel,
+                            rng=self.rng,
+                            dtype=self.dtype,
+                            device=self.device)
                     )
             
             self.conv_layers.append(None)
@@ -100,14 +119,20 @@ class UStack(nn.Module):
                 if self.residual_blocks[level][block_id] is None:
                     # Initialize
                     self.residual_blocks[level][block_id] = CombineResidualWithSkip(
-                        project_skip=h.shape[1] != skips[-1].shape[1]
+                        rng=self.rng,
+                        project_skip=h.shape[1] != skips[-1].shape[1],
+                        dtype=self.dtype,
+                        device=self.device
                     )
                 
                 if self.conv_blocks[level][block_id] is None:
                     self.conv_blocks[level][block_id] = ConvBlock(
                         out_channels=channel,
                         kernel_size=kernel_dim * (3,),
+                        rng=self.rng,
                         padding_mode= self.padding_method,
+                        dtype=self.dtype,
+                        device=self.device,
                         **{'padding': 1, 'in_channels': h.shape[1], 'case': len(h.shape)-2}
                         )
 
@@ -129,6 +154,9 @@ class UStack(nn.Module):
                     features=up_ratio**kernel_dim * channel,
                     kernel_size=kernel_dim * (3,),
                     padding_mode=self.padding_method,
+                    rng=self.rng,
+                    dtype=self.dtype,
+                    device=self.device,
                     **{'padding': 1, 'in_channels': h.shape[1], 'case': len(h.shape)-2}
                 )
             h = self.conv_layers[level](h)
@@ -136,7 +164,10 @@ class UStack(nn.Module):
 
         if self.res_skip_layer is None:
             self.res_skip_layer = CombineResidualWithSkip(
-                project_skip=(h.shape[1] != skips[-1].shape[1]) # channel should be here!
+                rng=self.rng,
+                project_skip=(h.shape[1] != skips[-1].shape[1]), # channel should be here!
+                dtype=self.dtype,
+                device=self.device
             )
         
         if self.conv_layers[-1] is None:
@@ -144,6 +175,9 @@ class UStack(nn.Module):
                 features = 128,
                 kernel_size=kernel_dim * (3,),
                 padding_mode=self.padding_method,
+                rng=self.rng,
+                dtype=self.dtype,
+                device=self.device,
                 **{'padding': 1, 'in_channels': h.shape[1], 'case': len(h.shape)-2}
             )
         h = self.res_skip_layer(residual=h, skip=skips.pop())
@@ -156,12 +190,20 @@ class UpsampleFourierGaussian(nn.Module):
     or gaussian interpolation
     """
 
-    def __init__(self, new_shape: tuple[int, ...], 
-               num_res_blocks: tuple[int, ...], mid_channel: int,
-               out_channels:int, dropout_rate: int=0.0, 
-               padding_method: str='circular', use_attention: bool=True,
-               num_heads: int=8, dtype: torch.dtype=torch.float32,
-               up_method: str='gaussian', normalize_qk: bool = False):
+    def __init__(self, 
+                 new_shape: tuple[int, ...], 
+                 num_res_blocks: tuple[int, ...], 
+                 mid_channel: int,
+                 out_channels:int, 
+                 rng: torch.Generator,
+                 dropout_rate: int=0.0, 
+                 padding_method: str='circular', 
+                 use_attention: bool=True,
+                 num_heads: int=8, 
+                 dtype: torch.dtype=torch.float32,
+                 device: Any | None = None,
+                 up_method: str='gaussian', 
+                 normalize_qk: bool = False):
         super(UpsampleFourierGaussian, self).__init__()
 
         self.new_shape = new_shape
@@ -173,7 +215,9 @@ class UpsampleFourierGaussian(nn.Module):
         self.use_attention = use_attention
         self.num_heads = num_heads
         self.dtype = dtype
+        self.device = device
         self.up_method = up_method
+        self.rng = rng
 
         self.conv_blocks = nn.ModuleList()
         self.attention_blocks = nn.ModuleList()
@@ -186,12 +230,20 @@ class UpsampleFourierGaussian(nn.Module):
         for i in range(self.num_res_blocks[self.level]):
             self.conv_blocks.append(None)
             self.attention_blocks.append(
-                AttentionBlock(num_heads=self.num_heads, normalize_qk=normalize_qk)
+                AttentionBlock(
+                    rng=self.rng,
+                    num_heads=self.num_heads, 
+                    normalize_qk=normalize_qk,
+                    dtype=self.dtype,
+                    device=self.device)
                 )
             self.res_conv_blocks.append(
                 ResConv1x(
                     hidden_layer_size=self.mid_channel * 2,
-                    out_channels=self.mid_channel
+                    out_channels=self.mid_channel,
+                    rng=self.rng,
+                    dtype=self.dtype,
+                    device=self.device
                 )
             )
 
@@ -281,9 +333,11 @@ class UpsampleFourierGaussian(nn.Module):
                 self.conv_blocks[block_id] = ConvBlock(
                     out_channels=self.mid_channel,
                     kernel_size=kernel_dim * (3,),
+                    rng=self.rng,
                     padding_mode=self.padding_method,
                     dropout=self.dropout_rate,
                     dtype=self.dtype,
+                    device=self.device,
                     **{'in_channels': h.shape[1], 'padding': 1, 'case': kernel_dim}
                 )
             h = self.conv_blocks[block_id](h, emb, is_training=is_training)
@@ -296,7 +350,12 @@ class UpsampleFourierGaussian(nn.Module):
                 h = reshape_jax_torch(self.res_conv_blocks[block_id](reshape_jax_torch(h)).reshape(bs, *hw, c))
 
         if self.norm is None:
-            self.norm = nn.GroupNorm(min(max(h.shape[1] // 4, 1), 32), h.shape[1])
+            self.norm = nn.GroupNorm(
+                min(max(h.shape[1] // 4, 1), 32), 
+                h.shape[1],
+                device=self.device,
+                dtype=self.dtype
+                )
 
         h = F.silu(self.norm(h))
 
@@ -306,6 +365,9 @@ class UpsampleFourierGaussian(nn.Module):
                 features=self.out_channels,
                 kernel_size=kernel_dim * (3,),
                 padding_mode=self.padding_method,
+                rng=self.rng,
+                dtype=self.dtype,
+                device=self.device,
                 **{'in_channels': h.shape[1], 'padding': 1, 'case': kernel_dim}
             )
         h = self.conv_layers(h)

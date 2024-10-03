@@ -17,6 +17,8 @@ import residual
 import torch
 import unittest
 
+SEED = 0
+RNG = torch.manual_seed(SEED)
 
 class ResidualLayersTest(unittest.TestCase):
 
@@ -29,7 +31,7 @@ class ResidualLayersTest(unittest.TestCase):
       with self.subTest(input_shape=input_shape, project_skip=project_skip):
 
         skip = res = torch.ones(input_shape)
-        model = residual.CombineResidualWithSkip(project_skip=project_skip)
+        model = residual.CombineResidualWithSkip(rng=RNG, project_skip=project_skip)
         out = model(res, skip)
         
         self.assertEqual(out.shape, input_shape)

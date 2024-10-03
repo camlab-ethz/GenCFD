@@ -21,6 +21,7 @@ from torch import nn
 import torch.nn.functional as F
 import numpy as np
 import math
+from typing import Any
 from utils.model_utils import reshape_jax_torch
 
 Tensor = torch.Tensor
@@ -33,11 +34,17 @@ class CombineResidualWithSkip(nn.Module):
       connections. Mandatory if the number of channels are different between
       skip and residual values.
   """
-  def __init__(self, project_skip: bool=False, dtype: torch.dtype=torch.float32):
+  def __init__(self, 
+               rng: torch.Generator,
+               project_skip: bool=False, 
+               dtype: torch.dtype=torch.float32,
+               device: Any | None = None):
     super(CombineResidualWithSkip, self).__init__()
 
     self.project_skip = project_skip
     self.dtype = dtype
+    self.device = device
+    self.rng = rng
 
     self.skip_projection = None
 
@@ -47,16 +54,23 @@ class CombineResidualWithSkip(nn.Module):
       if self.skip_projection is None:
         # linear projection layer to match the number of channels
         self.skip_projection = nn.Linear(
-          reshape_jax_torch(skip).size(-1), reshape_jax_torch(residual).size(-1)
-          ).to(self.dtype)
-        torch.nn.init.kaiming_uniform_(self.skip_projection.weight, a=np.sqrt(5))
+          reshape_jax_torch(skip).size(-1), 
+          reshape_jax_torch(residual).size(-1),
+          device=self.device,
+          dtype=self.dtype
+          )
+        torch.nn.init.kaiming_uniform_(
+          self.skip_projection.weight, a=np.sqrt(5), generator=self.rng
+          )
 
         if self.skip_projection.bias is not None:
           fan_in, _ = torch.nn.init._calculate_fan_in_and_fan_out(self.skip_projection.weight)
           bound = 1 / math.sqrt(fan_in)
-          torch.nn.init.uniform_(self.skip_projection.bias, -bound, bound)
+          torch.nn.init.uniform_(
+            self.skip_projection.bias, -bound, bound, generator=self.rng
+            )
 
       skip = reshape_jax_torch(self.skip_projection(reshape_jax_torch(skip)))
     # combine skip and residual connections
-    return (skip + residual) / torch.sqrt(torch.tensor(2.0, dtype=self.dtype))
+    return (skip + residual) / torch.sqrt(torch.tensor(2.0, dtype=self.dtype, device=self.device))
 

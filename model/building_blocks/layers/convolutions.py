@@ -17,7 +17,7 @@
 
 """Convolution layers."""
 
-from typing import Literal, Sequence
+from typing import Literal, Sequence, Any
 import numpy as np
 import torch
 from torch import nn
@@ -29,7 +29,10 @@ def ConvLayer(
     features: int,
     kernel_size: int | Sequence[int],
     padding_mode: str,
+    rng: torch.Generator,
     use_local: bool = False,
+    dtype: torch.dtype = torch.float32,
+    device: Any | None = None,
     **kwargs
 ) -> nn.Module:
   """Factory for different types of convolution layers.
@@ -46,9 +49,12 @@ def ConvLayer(
         f"for convolution type {padding_mode}."
       )
     return LatLonConv(
-      features, 
-      kernel_size, 
-      order=padding_mode.lower(), 
+      features=features,
+      rng=rng, 
+      kernel_size=kernel_size, 
+      order=padding_mode.lower(),
+      dtype=dtype,
+      device=device,
       **kwargs,
     )
   
@@ -57,9 +63,12 @@ def ConvLayer(
       in_channels=kwargs.get('in_channels', 1),
       out_channels=features,
       kernel_size=kernel_size,
+      rng=rng,
       padding=kwargs.get('padding', 0),
       stride=kwargs.get('stride', 1),
-      use_bias=kwargs.get('use_bias', True)
+      use_bias=kwargs.get('use_bias', True),
+      device=device,
+      dtype=dtype
     )
   else:
     # TODO: Write a class to not repeat this for other classes as well!
@@ -71,7 +80,9 @@ def ConvLayer(
         padding_mode=padding_mode.lower(),
         padding=kwargs.get('padding', 0),
         stride=kwargs.get('stride', 1),
-        bias=kwargs.get('use_bias', True)
+        bias=kwargs.get('use_bias', True),
+        device=device,
+        dtype=dtype
       )
     elif kwargs.get('case', 2) == 2:
       return nn.Conv2d(
@@ -81,7 +92,9 @@ def ConvLayer(
         padding_mode=padding_mode.lower(),
         padding=kwargs.get('padding', 0),
         stride=kwargs.get('stride', 1),
-        bias=kwargs.get('use_bias', True)
+        bias=kwargs.get('use_bias', True),
+        device=device,
+        dtype=dtype
       )
     elif kwargs.get('case', 2) == 3:
       return nn.Conv3d(
@@ -91,15 +104,27 @@ def ConvLayer(
         padding_mode=padding_mode.lower(),
         padding=kwargs.get('padding', 0),
         stride=kwargs.get('stride', 1),
-        bias=kwargs.get('use_bias', True)
+        bias=kwargs.get('use_bias', True),
+        device=device,
+        dtype=dtype
       )
 
 
 class ConvLocal2d(nn.Module):
   """Customized locally connected 2D convolution (ConvLocal) for PyTorch"""
 
-  def __init__(self, in_channels, out_channels, kernel_size, stride=1, 
-               padding=0, padding_mode='constant', use_bias=True):
+  def __init__(self, 
+               in_channels, 
+               out_channels, 
+               kernel_size, 
+               rng: torch.Generator,
+               stride = 1, 
+               padding = 0, 
+               padding_mode = 'constant', 
+               use_bias: bool = True,
+               device: Any | None = None,
+               dtype: torch.dtype = torch.float32
+               ):
     super(ConvLocal2d, self).__init__()
     self.in_channels = in_channels
     self.out_channels = out_channels
@@ -108,12 +133,17 @@ class ConvLocal2d(nn.Module):
     self.padding = padding
     self.padding_mode = padding_mode
     self.use_bias = use_bias
+    self.device = device
+    self.dtype = dtype
+    self.rng = rng
 
     # Weights for each spatial location (out_height x out_width)
     self.weights = None 
 
     if self.use_bias:
-      self.bias = nn.Parameter(torch.zeros(out_channels))
+      self.bias = nn.Parameter(
+        torch.zeros(out_channels, dtype=self.dtype, device=self.device)
+        )
     else:
       self.bias = None
 
@@ -135,12 +165,23 @@ class ConvLocal2d(nn.Module):
     if self.weights is None:
       self.weights = nn.Parameter(
         torch.empty(
-          out_height, out_width, self.out_channels, in_channels, 
-          self.kernel_size[0], self.kernel_size[1], device=x.device)
+          out_height, 
+          out_width, 
+          self.out_channels, 
+          in_channels, 
+          self.kernel_size[0], 
+          self.kernel_size[1], 
+          device=self.device, #x.device
+          dtype=self.dtype
+          )
       )
-      torch.nn.init.xavier_uniform_(self.weights)
+      torch.nn.init.xavier_uniform_(self.weights, generator=self.rng)
 
-    output = torch.zeros((batch_size, self.out_channels, out_height, out_width), device=x.device)
+    output = torch.zeros(
+      (batch_size, self.out_channels, out_height, out_width),
+      dtype=self.dtype, 
+      device=self.device
+      )
 
     # manually scripted convolution. 
     for i in range(out_height):
@@ -162,9 +203,17 @@ class LatLonConv(nn.Module):
   """2D convolutional layer adapted to inputs a lot-lon grid"""
 
   def __init__(
-      self, features: int, kernel_size: tuple[int, int] = (3, 3), 
-      order: Literal["latlon", "lonlat"] = "latlon", use_bias: bool = True,
-      strides: tuple[int, int] = (1, 1), use_local: bool = False, **kwargs
+      self, 
+      features: int, 
+      rng: torch.Generator,
+      kernel_size: tuple[int, int] = (3, 3), 
+      order: Literal["latlon", "lonlat"] = "latlon", 
+      use_bias: bool = True,
+      strides: tuple[int, int] = (1, 1), 
+      use_local: bool = False, 
+      dtype: torch.dtype = torch.float32,
+      device: Any | None = None,
+      **kwargs
   ):
     super(LatLonConv, self).__init__()
     self.features = features
@@ -173,6 +222,9 @@ class LatLonConv(nn.Module):
     self.use_bias = use_bias
     self.strides = strides
     self.use_local = use_local
+    self.dtype = dtype
+    self.device = device
+    self.rng = rng
 
     self.in_channels = kwargs.get('in_channels', 1)
 
@@ -181,8 +233,11 @@ class LatLonConv(nn.Module):
         in_channels=self.in_channels,
         out_channels=features,
         kernel_size=kernel_size,
+        rng=self.rng,
         stride=strides,
         bias=use_bias,
+        dtype = self.dtype,
+        device = self.device
       )
     else:
       self.conv = nn.Conv2d(
@@ -192,6 +247,8 @@ class LatLonConv(nn.Module):
         stride=strides,
         bias=use_bias,
         padding=0,
+        device=self.device,
+        dtype=self.dtype
       )
     
   def forward(self, inputs):
@@ -225,14 +282,23 @@ class LatLonConv(nn.Module):
 class DownsampleConv(nn.Module):
   """Downsampling layer through strided convolution."""
 
-  def __init__(self, features: int, ratios: Sequence[int], 
-               use_bias: bool = True, **kwargs):
+  def __init__(self, 
+               features: int, 
+               ratios: Sequence[int],
+               rng: torch.Generator, 
+               use_bias: bool = True,
+               device: Any | None = None,
+               dtype: torch.dtype = torch.float32, 
+               **kwargs):
     super(DownsampleConv, self).__init__()
 
     self.features = features
     self.ratios = ratios
     self.use_bias = use_bias
     self.in_channels = kwargs.get('in_channels', 1)
+    self.dtype = dtype
+    self.device = device
+    self.rng = rng
 
     # For downsampling padding = 0 and stride > 1
     if len(ratios) == 1:
@@ -242,9 +308,13 @@ class DownsampleConv(nn.Module):
         kernel_size=ratios,
         stride=ratios,
         bias=use_bias,
-        padding=0
+        padding=0,
+        device=self.device,
+        dtype=self.dtype
       )
-      torch.nn.init.kaiming_uniform_(self.conv1d.weight, a=np.sqrt(5))
+      torch.nn.init.kaiming_uniform_(
+        self.conv1d.weight, a=np.sqrt(5), generator=self.rng
+        )
     elif len(ratios) == 2:
       self.conv2d = nn.Conv2d(
         in_channels=self.in_channels,
@@ -253,6 +323,8 @@ class DownsampleConv(nn.Module):
         stride=ratios,
         bias=use_bias,
         padding=0,
+        device=self.device,
+        dtype=self.dtype
       )
       # Initialize with variance_scaling
       # Only use this if the activation function is ReLU or smth. similar
@@ -266,8 +338,12 @@ class DownsampleConv(nn.Module):
         stride=ratios,
         bias=use_bias,
         padding=0,
+        device=self.device,
+        dtype=self.dtype
       )
-      torch.nn.init.kaiming_uniform_(self.conv3d.weight, a=np.sqrt(5))
+      torch.nn.init.kaiming_uniform_(
+        self.conv3d.weight, a=np.sqrt(5), generator=self.rng
+        )
     else:
       raise ValueError(f"Ratio lengths should either be 1D, 2D or 3D")
     

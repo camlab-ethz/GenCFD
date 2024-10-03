@@ -6,6 +6,9 @@ from torch.utils.data import dataloader
 import diffusion as dfn_lib
 from model.building_blocks.unets.unets import UNet
 
+SEED = 0
+RNG = torch.manual_seed(SEED)
+
 class TestDenoisingModel(unittest.TestCase):
     def test_denoiser(self):
         test_cases = [
@@ -23,6 +26,7 @@ class TestDenoisingModel(unittest.TestCase):
                 
                 denoiser_model = UNet(
                     out_channels=channels,
+                    rng=RNG,
                     num_channels=(4, 8, 12),
                     downsample_ratio=ds_ratio,
                     num_blocks=2,
@@ -48,6 +52,8 @@ class TestDenoisingModel(unittest.TestCase):
                         diffusion_scheme, clip_min=1e-4, uniform_grid=True,
                     ),
                     noise_weighting=dfn_lib.edm_weighting(data_std=DATA_STD),
+                    rng=RNG,
+                    seed=SEED
                 )
 
                 init_output = model.initialize()
@@ -59,7 +65,7 @@ class TestDenoisingModel(unittest.TestCase):
                 }
                 rng = torch.Generator().manual_seed(42)
 
-                loss, (metric, _) = model.loss_fn({}, batch_data, rng, {})
+                loss, (metric, _) = model.loss_fn(batch_data)
                 self.assertTrue(loss.item() >= 0, "Loss should be non-negative.")
                 self.assertIn("loss", metric, "Metric should contain 'loss' key.")
 

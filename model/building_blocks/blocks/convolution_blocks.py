@@ -1,4 +1,4 @@
-from typing import Callable
+from typing import Callable, Any
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -15,8 +15,16 @@ class ResConv1x(nn.Module):
   """Single-layer residual network with size-1 conv kernels."""
 
   def __init__(
-      self, hidden_layer_size: int, out_channels: int, act_fun: Callable[[Tensor], Tensor] = F.silu,
-      dtype: torch.dtype=torch.float32, scale: float=1e-10, project_skip: bool=False):
+      self, 
+      hidden_layer_size: int, 
+      out_channels: int, 
+      rng: torch.Generator,
+      act_fun: Callable[[Tensor], Tensor] = F.silu,
+      dtype: torch.dtype=torch.float32, 
+      scale: float=1e-10, 
+      project_skip: bool=False,
+      device: Any | None = None
+      ):
     super(ResConv1x, self).__init__()
 
     self.hidden_layer_size = hidden_layer_size
@@ -25,11 +33,18 @@ class ResConv1x(nn.Module):
     self.dtype = dtype
     self.scale = scale
     self.project_skip = project_skip
+    self.device = device
+    self.rng = rng
 
     self.conv1 = None
     self.conv2 = None
 
-    self.combine_skip = CombineResidualWithSkip(project_skip=project_skip, dtype=self.dtype)
+    self.combine_skip = CombineResidualWithSkip(
+      rng=self.rng,
+      project_skip=project_skip, 
+      dtype=self.dtype, 
+      device=self.device
+      )
   
   def forward(self, x):
     kernel_size = (len(x.shape) - 2) * (1,)
@@ -40,13 +55,15 @@ class ResConv1x(nn.Module):
         in_channels=x.shape[1],
         out_channels=self.hidden_layer_size,
         kernel_size=kernel_size,
-        dtype=self.dtype
+        dtype=self.dtype,
+        device=self.device
       )
       self.conv2 = nn.Conv1d(
         in_channels=self.hidden_layer_size,
         out_channels=self.out_channels,
         kernel_size=kernel_size,
-        dtype=self.dtype
+        dtype=self.dtype,
+        device=self.device
       )
 
     elif len(x.shape) == 4:
@@ -56,13 +73,15 @@ class ResConv1x(nn.Module):
           in_channels=x.shape[1],
           out_channels=self.hidden_layer_size,
           kernel_size=kernel_size,
-          dtype=self.dtype
+          dtype=self.dtype,
+          device=self.device
         )
         self.conv2 = nn.Conv2d(
           in_channels=self.hidden_layer_size,
           out_channels=self.out_channels,
           kernel_size=kernel_size,
-          dtype=self.dtype
+          dtype=self.dtype,
+          device=self.device
         )
     
     elif len(x.shape) == 5:
@@ -72,12 +91,14 @@ class ResConv1x(nn.Module):
           in_channels=x.shape[1],
           out_channels=self.hidden_layer_size,
           kernel_size=kernel_size,
+          device=self.device,
           dtype=self.dtype
         )
         self.conv2 = nn.Conv3d(
           in_channels=self.hidden_layer_size,
           out_channels=self.out_channels,
           kernel_size=kernel_size,
+          device=self.device,
           dtype=self.dtype
         )
 
@@ -114,11 +135,17 @@ class ConvBlock(nn.Module):
     film_act_fun: Activation function for the FilM layer.
   """
 
-  def __init__(self, out_channels: int, kernel_size: tuple[int, ...], 
-               padding_mode: str = 'circular', dropout: float = 0.0, 
+  def __init__(self, 
+               out_channels: int, 
+               kernel_size: tuple[int, ...], 
+               rng: torch.Generator,
+               padding_mode: str = 'circular', 
+               dropout: float = 0.0, 
                film_act_fun: Callable[[Tensor], Tensor] = F.silu, 
                act_fun: Callable[[Tensor], Tensor] = F.silu,
-               dtype: torch.dtype = torch.float32, **kwargs):
+               dtype: torch.dtype = torch.float32,
+               device: Any | None = None,
+               **kwargs):
     super(ConvBlock, self).__init__()
     
     self.out_channels = out_channels
@@ -128,33 +155,55 @@ class ConvBlock(nn.Module):
     self.film_act_fun = film_act_fun
     self.act_fun = act_fun
     self.dtype = dtype
+    self.device = device
+    self.rng = rng
 
     self.norm1 = None
     self.conv1 = ConvLayer(
       features=self.out_channels,
       kernel_size=self.kernel_size,
       padding_mode=self.padding_mode,
+      rng = self.rng,
+      dtype=self.dtype,
+      device=self.device,
       **kwargs
     )
     self.norm2 = None
-    self.film = AdaptiveScale(act_fun=self.film_act_fun)
+    self.film = AdaptiveScale(
+      act_fun=self.film_act_fun,
+      dtype=self.dtype,
+      device=self.device
+      )
     self.dropout_layer = nn.Dropout(dropout)
     self.conv2 = ConvLayer(
       features=self.out_channels,
       kernel_size=self.kernel_size,
       padding_mode=self.padding_mode,
+      rng=self.rng,
+      dtype=self.dtype,
+      device=self.device,
       **{'in_channels': self.out_channels, 
          'padding': kwargs.get('padding', 0), 
          'case': kwargs.get('case', 2)}
     )
-    self.res_layer = CombineResidualWithSkip(project_skip=True)
+    self.res_layer = CombineResidualWithSkip(
+      rng=self.rng,
+      project_skip=True,
+      dtype=self.dtype,
+      device=self.device
+      )
 
   def forward(self, x: Tensor, emb: Tensor, is_training: bool) -> Tensor:
     h = x.clone()
 
     if self.norm1 is None:
       # Initialize
-      self.norm1 = nn.GroupNorm(min(max(x.shape[1] // 4, 1), 32), x.shape[1])
+      self.norm1 = nn.GroupNorm(
+        min(max(x.shape[1] // 4, 1), 32), 
+        x.shape[1],
+        device=self.device,
+        dtype=self.dtype
+        )
 
     h = self.norm1(h)
     h = self.act_fun(h)
@@ -162,7 +211,12 @@ class ConvBlock(nn.Module):
 
     if self.norm2 is None:
       # Initialize
-      self.norm2 = nn.GroupNorm(min(max(h.shape[1] // 4, 1), 32), h.shape[1])
+      self.norm2 = nn.GroupNorm(
+        min(max(h.shape[1] // 4, 1), 32), 
+        h.shape[1],
+        device=self.device,
+        dtype=self.dtype
+        )
 
     h = self.norm2(h)
     h = self.film(h, emb)

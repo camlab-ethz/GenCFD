@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+from typing import Any
 
 from model.building_blocks.layers.convolutions import ConvLayer, DownsampleConv
 from model.building_blocks.blocks.convolution_blocks import ConvBlock, ResConv1x
@@ -16,11 +17,19 @@ class DStack(nn.Module):
   for skip connections by the UStack module.
   """
 
-  def __init__(self, num_channels: tuple[int, ...], num_res_blocks: tuple[int, ...],
-               downsample_ratio: tuple[int, ...], padding_method: str='circular', 
-               dropout_rate: float=0.0, use_attention: bool=False, num_heads: int=8,
-               channels_per_head: int=-1, use_positional_encoding: bool=False,
-               normalize_qk: bool=False, dtype: torch.dtype=torch.float32):
+  def __init__(self, num_channels: tuple[int, ...], 
+               num_res_blocks: tuple[int, ...],
+               downsample_ratio: tuple[int, ...], 
+               rng: torch.Generator,
+               padding_method: str='circular', 
+               dropout_rate: float=0.0, 
+               use_attention: bool=False, 
+               num_heads: int=8,
+               channels_per_head: int=-1, 
+               use_positional_encoding: bool=False,
+               normalize_qk: bool=False, 
+               dtype: torch.dtype=torch.float32,
+               device: Any | None = None):
     super(DStack, self).__init__()
 
     self.num_channels = num_channels
@@ -34,6 +43,8 @@ class DStack(nn.Module):
     self.use_positional_encoding = use_positional_encoding
     self.dtype = dtype
     self.normalize_qk = normalize_qk
+    self.device = device
+    self.rng = rng
 
     self.conv_layer = None
     self.dsample_layers = nn.ModuleList()
@@ -52,10 +63,22 @@ class DStack(nn.Module):
         if self.use_attention and level == len(self.num_channels) - 1:
           self.pos_emb_layers.append(None)
           self.attention_blocks.append(
-            AttentionBlock(num_heads=self.num_heads, normalize_qk=normalize_qk)
+            AttentionBlock(
+              rng=self.rng,
+              num_heads=self.num_heads, 
+              normalize_qk=normalize_qk, 
+              dtype=self.dtype, 
+              device=self.device
+              )
           )
           self.res_conv_blocks.append(
-            ResConv1x(hidden_layer_size=channel*2, out_channels=channel)
+            ResConv1x(
+              hidden_layer_size=channel*2, 
+              out_channels=channel,
+              rng=self.rng,
+              dtype=self.dtype,
+              device=self.device
+              )
           )
 
   def forward(self, x: Tensor, emb: Tensor, is_training: bool) -> list[Tensor]:
@@ -73,6 +96,9 @@ class DStack(nn.Module):
         features=128,
         kernel_size=kernel_dim * (3,),
         padding_mode=self.padding_method,
+        rng=self.rng,
+        dtype=self.dtype,
+        device=self.device,
         **{'padding': 1, 'in_channels': h.shape[1], 'case': kernel_dim}
       )
     
@@ -85,6 +111,9 @@ class DStack(nn.Module):
         self.dsample_layers[level] = DownsampleConv(
           features=channel,
           ratios=(self.downsample_ratio[level],) * kernel_dim,
+          rng=self.rng,
+          device=self.device,
+          dtype=self.dtype,
           **{'in_channels': h.shape[1]}
         )
 
@@ -96,8 +125,11 @@ class DStack(nn.Module):
           self.conv_blocks[level][block_id] = ConvBlock(
             out_channels=channel,
             kernel_size=kernel_dim * (3,),
+            rng=self.rng,
             padding_mode=self.padding_method,
             dropout=self.dropout_rate,
+            dtype=self.dtype,
+            device=self.device,
             **{'in_channels': h.shape[1], 'padding': 1, 'case': len(h.shape)-2}
           )
         h = self.conv_blocks[level][block_id](h, emb, is_training=is_training)

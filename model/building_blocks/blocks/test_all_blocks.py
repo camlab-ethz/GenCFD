@@ -5,6 +5,9 @@ from model.building_blocks.blocks.attention_block import AttentionBlock
 from utils.model_utils import reshape_jax_torch
 import unittest
 
+SEED = 0
+RNG = torch.manual_seed(SEED)
+
 class ResConv1xTest(unittest.TestCase):
 
     def test_ResConv1x(self):
@@ -21,7 +24,9 @@ class ResConv1xTest(unittest.TestCase):
                 project_skip=project_skip
                 ):
                 input = torch.randint(0, 10, input_shape, dtype=torch.float32)
-                model = ResConv1x(input_shape[1], expected_shape[1], project_skip=project_skip)
+                model = ResConv1x(
+                    input_shape[1], expected_shape[1], rng=RNG, project_skip=project_skip
+                    )
                 output = model(input)
                 self.assertEqual(output.shape, expected_shape)
 
@@ -65,9 +70,13 @@ class ConvBlockTest(unittest.TestCase):
                 emb = torch.randn(emb_shape)
                 conv_kwargs = {'in_channels': inputs.shape[1], 'padding': 1}
                 if len(inp_shape) == 4:
-                    model = ConvBlock(expected_shape[1], (3, 3), dropout=0.1, **conv_kwargs)
+                    model = ConvBlock(
+                        expected_shape[1], (3, 3), rng=RNG, dropout=0.1, **conv_kwargs
+                        )
                 else:
-                    model = ConvBlock(expected_shape[1], (3, 3, 3), dropout=0.1, **conv_kwargs)
+                    model = ConvBlock(
+                        expected_shape[1], (3, 3, 3), rng=RNG, dropout=0.1, **conv_kwargs
+                        )
 
                 out = model(inputs, emb, is_training)
 
@@ -82,7 +91,7 @@ class AttenionBlockTest(unittest.TestCase):
         for input_shape in test_cases:
             with self.subTest(input_shape=input_shape):
                 inputs = torch.randn(input_shape)
-                model = AttentionBlock()
+                model = AttentionBlock(rng=RNG)
                 out = model(inputs, False)
     
 if __name__ == "__main__":

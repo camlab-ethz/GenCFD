@@ -14,6 +14,13 @@ from torch.utils.tensorboard import SummaryWriter
 from torchvision import datasets, transforms
 from utils.callbacks import Callback
 
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+SEED = 0
+RNG = torch.Generator(device=device)
+RNG.manual_seed(SEED)
+
+print(device)
+
 
 def get_mnist_dataset(split: str, batch_size: int):
     # Define the dataset transformation
@@ -39,6 +46,7 @@ DATA_STD = 0.31
 
 denoiser_model = dfn_lib.UNet(
     out_channels=1,
+    rng=RNG,
     num_channels=(64, 128),
     downsample_ratio=(2, 2),
     num_blocks=4,
@@ -46,7 +54,8 @@ denoiser_model = dfn_lib.UNet(
     padding_method="circular",
     use_attention=True,
     use_position_encoding=True,
-    num_heads=8
+    num_heads=8,
+    device=device
 )
 
 diffusion_scheme = dfn_lib.Diffusion.create_variance_exploding(
@@ -64,6 +73,9 @@ model = dfn_lib.DenoisingModel(
         diffusion_scheme, clip_min=1e-4, uniform_grid=True,
     ),
     noise_weighting=dfn_lib.edm_weighting(data_std=DATA_STD),
+    rng=RNG,
+    seed=SEED,
+    device=device
 )
 
 num_train_steps = 100_000  #@param
@@ -81,18 +93,19 @@ max_ckpt_to_keep = 5  #@param
 train_dataloader = get_mnist_dataset('train', train_batch_size)
 test_dataloader = get_mnist_dataset('test', eval_batch_size)
 first_batch = next(iter(train_dataloader))
-img = first_batch[0] 
-labels = first_batch[1]
+img = first_batch[0].to(device)
+labels = first_batch[1].to(device)
 
-noise = torch.randn_like(img)
+noise = torch.randn(img.shape, device=device, generator=RNG)
 noised_img = img + noise
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-device = torch.device("cpu")
-
 # Initialize model by running a dummy forward pass!
-dummy_input = torch.randn_like(first_batch[0]).to(device)
-dummy_sigma = torch.randn_like(first_batch[1], dtype=torch.float32).to(device)
+dummy_input = torch.randn(
+    img.shape, dtype=torch.float32, device=device, generator=RNG
+    )
+dummy_sigma = torch.randn(
+    labels.shape, dtype=torch.float32, device=device, generator=RNG
+    )
 # model.to(device) # TODO: model should have an input to device!!!
 _ = model.denoiser(dummy_input, dummy_sigma)
 

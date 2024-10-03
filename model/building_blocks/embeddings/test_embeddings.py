@@ -18,6 +18,9 @@ import torch
 from model.building_blocks.embeddings.position_emb import position_embedding
 from model.building_blocks.embeddings.fourier_emb import FourierEmbedding
 
+SEED = 0
+RNG = torch.manual_seed(SEED)
+
 class PositionEmbeddingTest(unittest.TestCase):
 
     def test_position_embedding(self):

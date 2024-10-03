@@ -17,6 +17,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from typing import Any
 
 # from model.layers.resize import FilteredResize
 from model.building_blocks.stacks.dtstack import DStack
@@ -36,14 +37,23 @@ class UNet(nn.Module):
   based version. Derived from Wan et al. (https://arxiv.org/abs/2305.15618)
   """
 
-  def __init__(self, out_channels: int, resize_to_shape: tuple[int, ...] | None = None,
+  def __init__(self, 
+               out_channels: int,
+               rng: torch.Generator, 
+               resize_to_shape: tuple[int, ...] | None = None,
                use_hr_residual: bool = False,
                num_channels: tuple[int, ...] = (128, 256, 256, 256),
-               downsample_ratio : tuple[int, ...] = (2, 2, 2, 2), num_blocks: int = 4, 
-               noise_embed_dim: int = 128, padding_method: str = 'circular', 
-               dropout_rate: float = 0.0, use_attention: bool = True, 
-               use_position_encoding: bool = True, num_heads: int = 8,
-               normalize_qk: bool = False, dtype: torch.dtype = torch.float32):
+               downsample_ratio : tuple[int, ...] = (2, 2, 2, 2), 
+               num_blocks: int = 4, 
+               noise_embed_dim: int = 128, 
+               padding_method: str = 'circular', 
+               dropout_rate: float = 0.0, 
+               use_attention: bool = True, 
+               use_position_encoding: bool = True, 
+               num_heads: int = 8,
+               normalize_qk: bool = False, 
+               dtype: torch.dtype = torch.float32, 
+               device: Any | None = None):
     super(UNet, self).__init__()
 
     self.out_channels = out_channels
@@ -60,33 +70,40 @@ class UNet(nn.Module):
     self.num_heads = num_heads
     self.normalize_qk = normalize_qk
     self.dtype = dtype
+    self.device = device
+    self.rng = rng
 
     self.embedding = FourierEmbedding(
       dims=self.noise_embed_dim,
-      dtype=self.dtype
+      dtype=self.dtype,
+      device=self.device
     )
     self.DStack = DStack(
       num_channels=self.num_channels,
       num_res_blocks=len(self.num_channels) * (self.num_blocks,),
       downsample_ratio=self.downsample_ratio,
+      rng=self.rng,
       padding_method=self.padding_method,
       dropout_rate=self.dropout_rate,
       use_attention=self.use_attention,
       num_heads=self.num_heads,
       use_positional_encoding=self.use_position_encoding,
       normalize_qk=self.normalize_qk,
-      dtype=self.dtype
+      dtype=self.dtype,
+      device=self.device
     )
     self.UStack = UStack(
       num_channels=self.num_channels[::-1],
       num_res_blocks=len(self.num_channels) * (self.num_blocks,),
       upsample_ratio=self.downsample_ratio[::-1],
+      rng=self.rng,
       padding_method=self.padding_method,
       dropout_rate=self.dropout_rate,
       use_attention=self.use_attention,
       num_heads=self.num_heads,
       normalize_qk=self.normalize_qk,
-      dtype=self.dtype
+      dtype=self.dtype,
+      device=self.device
     )
     self.norm = None
     self.conv_layer = None
@@ -138,10 +155,13 @@ class UNet(nn.Module):
         num_res_blocks=len(self.num_channels) * (self.num_blocks,),
         mid_channel=256,
         out_channels=self.out_channels,
+        rng=self.rng,
         padding_method=self.padding_method,
         dropout_rate=self.dropout_rate,
         use_attention=self.use_attention,
         num_heads=self.num_heads,
+        dtype=self.dtype,
+        device=self.device,
         normalize_qk=self.normalize_qk
       )
       high_res_residual, _ = self.upsample(skips[-1], emb, is_training=is_training)
@@ -149,7 +169,12 @@ class UNet(nn.Module):
     h = self.UStack(skips[-1], emb, skips, is_training=is_training)
 
     if self.norm is None:
-      self.norm = nn.GroupNorm(min(max(h.shape[1] // 4, 1), 32), h.shape[1])
+      self.norm = nn.GroupNorm(
+        min(max(h.shape[1] // 4, 1), 32), 
+        h.shape[1],
+        device=self.device,
+        dtype=self.dtype
+        )
 
     h = F.silu(self.norm(h))
 
@@ -158,6 +183,9 @@ class UNet(nn.Module):
         features=self.out_channels,
         kernel_size=kernel_dim * (3,),
         padding_mode=self.padding_method,
+        rng=self.rng,
+        dtype=self.dtype,
+        device=self.device,
         **{'in_channels': h.shape[1], 'padding': 1, 'case': kernel_dim}
       )
     
@@ -166,8 +194,10 @@ class UNet(nn.Module):
     if self.use_hr_residual:
       if self.res_skip is None:
         self.res_skip = CombineResidualWithSkip(
+          rng=self.rng,
           project_skip=not(h.shape[1] == high_res_residual.shape[1]),
-          dtype = self.dtype
+          dtype = self.dtype,
+          device=self.device
         )
       h = self.res_skip(residual=h, skip=high_res_residual)
     

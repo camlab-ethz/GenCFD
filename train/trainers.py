@@ -45,7 +45,9 @@ SD = TypeVar("SD", bound=train_states.DenoisingModelTrainState)
 class BaseTrainer(Generic[M, S], metaclass=abc.ABCMeta):
     """Abstract base trainer for gradient descent mini-batch training."""
 
-    def __init__(self, model: M, device: torch.device):
+    def __init__(self, 
+                 model: M,
+                 device: torch.device):
         # self.model = model.to(device)
         self.model = model
         self.device = device
@@ -77,11 +79,10 @@ class BaseTrainer(Generic[M, S], metaclass=abc.ABCMeta):
             batch = next(batch_iter)
             # batch = {k: v.to(self.device) for k, v in batch.items()}
             metrics_update = self.train_step(batch)
+            # TODO: Write an if statement that keeps track of a mean lets say after every 10th or 50th iteration!!!
             train_loss_value = metrics_update["train_loss"].compute()
-            test = metrics_update["train_loss"]
             train_metrics.update(train_loss_value)
-
-            print(f"mean_loss: {train_loss_value}    train_loss: {test}")
+            # print(f"mean_loss: {train_loss_value}")
 
         return train_metrics
 
@@ -237,8 +238,12 @@ class DenoisingTrainer(BasicTrainer[M, SD]):
     def train_step(self, batch: BatchType) -> Metrics:
         
         self.model.denoiser.train()
-        output = self.model.denoiser(batch[0], batch[1])
-        loss, (metrics, mem) = self.model.loss_fn(batch[0])
+        #TODO: Changed to device!
+        output = self.model.denoiser(
+            batch[0].to(device=self.device), 
+            batch[1].to(device=self.device)
+            )
+        loss, (metrics, mem) = self.model.loss_fn(batch[0].to(device=self.device))
 
         self.optimizer.zero_grad()
         loss.backward()
@@ -250,6 +255,8 @@ class DenoisingTrainer(BasicTrainer[M, SD]):
 
         # train_metrics.update(torch.tensor(metrics["loss"]))
         train_metrics.update(metrics["loss"])
+
+        print(f"LOSS: {loss}")
 
         return train_metrics
     

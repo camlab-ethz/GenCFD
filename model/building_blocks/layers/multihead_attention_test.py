@@ -16,6 +16,9 @@ import unittest
 import torch
 from multihead_attention import MultiHeadDotProductAttention
 
+SEED = 0
+RNG = torch.manual_seed(SEED)
+
 class MultiHeadAttentionTest(unittest.TestCase):
 
     def test_multi_head_attention(self):
@@ -27,7 +30,9 @@ class MultiHeadAttentionTest(unittest.TestCase):
         for inp_shape, nheads in test_cases:
             with self.subTest(inp_shape=inp_shape, nheads=nheads):
                 inputs = torch.randn(inp_shape)
-                model = MultiHeadDotProductAttention(inputs.shape[-1], nheads, normalize_qk=True)
+                model = MultiHeadDotProductAttention(
+                    inputs.shape[-1], nheads, rng=RNG, normalize_qk=True
+                    )
                 out = model(inputs, inputs, inputs)
 
 if __name__ == "__main__":

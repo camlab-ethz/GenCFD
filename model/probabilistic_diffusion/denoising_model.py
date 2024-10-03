@@ -15,15 +15,14 @@
 
 """Training a denoising model for diffusion-based generation."""
 
-from collections.abc import Mapping, Callable
 import dataclasses
-from typing import Any, Protocol, ClassVar
+from typing import Any, Protocol, Optional
 
 import torch
 import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
-import torchmetrics
+from torchmetrics import MetricCollection
 import numpy as np
 
 import diffusion as dfn_lib
@@ -32,10 +31,7 @@ from model.base_model import base_model
 from GPUtil.GPUtil import getGPUs
 
 Tensor = torch.Tensor
-Metrics = dict # TODO: Placeholder for metrics that are implemented!
-
-SEED = 0
-RNG = torch.manual_seed(SEED)
+Metrics = dict # Placeholder for metrics that are implemented!
 
 class DenoisingTorchModule(Protocol):
   """Expected interface of the flax module compatible with `DenoisingModel`.
@@ -77,6 +73,8 @@ class DenoisingModel(base_model.BaseModel):
   denoiser: nn.Module
   noise_sampling: dfn_lib.NoiseLevelSampling
   noise_weighting: dfn_lib.NoiseLossWeighting
+  rng: torch.Generator
+  seed: int = 0
   num_eval_noise_levels: int = 5
   num_eval_cases_per_lvl: int = 1
   min_eval_noise_lvl: float = 1e-3
@@ -86,10 +84,12 @@ class DenoisingModel(base_model.BaseModel):
   which_tspan: str = 'exponential_noise_decay'
   consistent_weight: float = 0
   compute_crps: bool = False
+  device: Any | None = None
+  dtype: torch.dtype = torch.float32
 
 
   def initialize(self):
-    x_sample = torch.ones((1,) + self.input_shape)
+    x_sample = torch.ones((1,) + self.input_shape, dtype=self.dtype, device=self.device)
     # x = x_sample[:,self.input_channel:, ...]
     # y = x_sample[:, :self.input_channel, ...]
     # TODO: Include the TIME once this model is built!
@@ -97,15 +97,14 @@ class DenoisingModel(base_model.BaseModel):
     #     x=x, y=y, time=torch.ones((1,)), sigma=torch.ones((1,)), is_training=False
     # )
     return self.denoiser(
-        x=x_sample, sigma=torch.ones((1,)), is_training=False
+        x=x_sample, sigma=torch.ones((1,), dtype=self.dtype, device=self.device), is_training=False
     )
 
   def loss_fn(
       self,
       # params: dict,
       batch: dict,
-      # mutables: dict,
-      rng: torch.Generator = RNG,
+      mutables: Optional[dict] = None
   ):
     """Computes the denoising loss on a training batch.
 
@@ -134,13 +133,15 @@ class DenoisingModel(base_model.BaseModel):
     # x_squared = torch.square(x)
     x_squared = torch.square(data)
 
-    sigma = self.noise_sampling(rng=rng, shape=(batch_size,))
+    sigma = self.noise_sampling(rng=torch.manual_seed(self.seed), shape=(batch_size,)).to(device=self.device)
     weights = self.noise_weighting(sigma)
     if weights.ndim != x.ndim:
       weights = weights.view(-1, *([1] * (x.ndim - 1)))
 
     # noise = torch.randn_like(x) # TODO: Check with the JAX based version!
-    noise = torch.randn_like(data)
+    noise = torch.randn(
+      data.shape, dtype=self.dtype, device=self.device, generator=self.rng
+      )
 
     # noise = x + noise * sigma
     if sigma.ndim != x.ndim:
@@ -163,7 +164,8 @@ class DenoisingModel(base_model.BaseModel):
       "loss": loss.item(),
       "mem": 0. # TODO: Placeholder for memory metric!
     }
-    mutables = None # TODO: ADDED because commented in the argument section!
+
+    # print(f"metric_loss: {loss.item()}")
 
     return loss, (metric, mutables)
   
@@ -171,8 +173,7 @@ class DenoisingModel(base_model.BaseModel):
   def eval_fn(
       self,
       variables: dict,
-      batch: dict,
-      rng: torch.Generator,
+      batch: dict
   ):
     """Compute denoising metrics on an eval batch.
 
@@ -194,11 +195,11 @@ class DenoisingModel(base_model.BaseModel):
     data = batch["data"]
     inputs = data[
       torch.randint(0, data.shape[0], (self.num_eval_noise_levels, self.num_eval_cases_per_lvl), 
-                    generator=rng)
+                    generator=self.rng)
       ]
     inputs_time = time[
       torch.randint(0, time.shape[0], (self.num_eval_noise_levels, self.num_eval_cases_per_lvl), 
-                    generator=rng)
+                    generator=self.rng)
     ]
     x = inputs[:, self.input_channel:, ...]
     y = inputs[:, :self.input_channel, ...]
@@ -218,7 +219,9 @@ class DenoisingModel(base_model.BaseModel):
 
     # ema_losses = torch.sqrt(torch.mean(torch.square(denoised - x), dim=-1) / torch.mean(torch.square(x), dim=-1))
 
-    noise = torch.randn_like(inputs)
+    noise = torch.randn(
+      inputs.shape, device=self.device, dtype=self.dtype, generator=self.rng
+      )
     if sigma.ndim != inputs.ndim:
       noised = inputs + noise * sigma.view(-1, *([1] * (inputs.ndim - 1))) 
     else:

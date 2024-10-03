@@ -1,4 +1,4 @@
-from typing import Callable
+from typing import Callable, Any
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -19,12 +19,15 @@ class AdaptiveScale(nn.Module):
   more general FiLM technique see https://arxiv.org/abs/1709.07871.
   """
 
-  def __init__(self, act_fun: Callable[[Tensor], Tensor]=F.silu, 
-               dtype: torch.dtype=torch.float32):
+  def __init__(self, 
+               act_fun: Callable[[Tensor], Tensor]=F.silu, 
+               dtype: torch.dtype=torch.float32,
+               device: Any | None = None):
     super(AdaptiveScale, self).__init__()
 
     self.act_fun = act_fun
     self.dtype = dtype
+    self.device = device
 
     self.affine = None
 
@@ -47,7 +50,8 @@ class AdaptiveScale(nn.Module):
       self.affine = nn.Linear(
         in_features=emb.shape[-1],
         out_features=reshape_jax_torch(x).shape[-1] * 2,
-        dtype=self.dtype
+        dtype=self.dtype,
+        device=self.device
       )
 
     scale_params = self.affine(self.act_fun(emb)) # (bs, c*2)

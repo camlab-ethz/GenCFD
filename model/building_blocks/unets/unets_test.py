@@ -16,6 +16,9 @@ import unittest
 import torch
 from model.building_blocks.unets.unets import UNet
 
+SEED = 0
+RNG = torch.manual_seed(SEED)
+
 class NetworksTest(unittest.TestCase):
 
     def test_unet_output_shape(self):
@@ -39,6 +42,7 @@ class NetworksTest(unittest.TestCase):
                 
                 model = UNet(
                     out_channels=channels,
+                    rng=RNG,
                     num_channels=(4, 8, 12),
                     downsample_ratio=ds_ratio,
                     num_blocks=2,
