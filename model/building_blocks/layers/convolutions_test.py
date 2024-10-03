@@ -38,11 +38,12 @@ class ConvLayersTest(unittest.TestCase):
         in_channels = input_shape[-1]
         inputs = torch.rand(input_shape).permute(0,3,2,1)
         model = ConvLayer(
-            features=num_features, 
+            out_channels=num_features, 
             padding_mode=padding, 
             rng=RNG,
             kernel_size=(3, 3),
             in_channels=in_channels,
+            case=len(inputs.shape) - 2
         )
         out = model(inputs).permute(0,3,2,1)
         self.assertEqual(out.shape, input_shape[:-1] + (num_features,))
@@ -69,7 +70,7 @@ class ConvLayersTest(unittest.TestCase):
         num_features = 6
         inputs = torch.ones(input_shape)
         model = DownsampleConv(
-           in_channels=in_channels, features=num_features, ratios=ratios, rng=RNG
+           in_channels=in_channels, out_channels=num_features, ratios=ratios, rng=RNG
            )
 
         if len(input_shape) == 4:

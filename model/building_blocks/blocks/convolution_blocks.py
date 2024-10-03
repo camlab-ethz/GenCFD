@@ -135,11 +135,16 @@ class ConvBlock(nn.Module):
     film_act_fun: Activation function for the FilM layer.
   """
 
-  def __init__(self, 
+  def __init__(self,
+               in_channels: int,
                out_channels: int, 
                kernel_size: tuple[int, ...], 
                rng: torch.Generator,
                padding_mode: str = 'circular', 
+               padding: int = 0,
+               stride: int = 1,
+               use_bias: bool = True,
+               case: int = 2,
                dropout: float = 0.0, 
                film_act_fun: Callable[[Tensor], Tensor] = F.silu, 
                act_fun: Callable[[Tensor], Tensor] = F.silu,
@@ -147,7 +152,7 @@ class ConvBlock(nn.Module):
                device: Any | None = None,
                **kwargs):
     super(ConvBlock, self).__init__()
-    
+    self.in_channels = in_channels
     self.out_channels = out_channels
     self.kernel_size = kernel_size
     self.padding_mode = padding_mode
@@ -157,13 +162,22 @@ class ConvBlock(nn.Module):
     self.dtype = dtype
     self.device = device
     self.rng = rng
+    self.padding = padding
+    self.stride = stride
+    self.use_bias = use_bias
+    self.case = case
 
     self.norm1 = None
     self.conv1 = ConvLayer(
-      features=self.out_channels,
+      in_channels=self.in_channels,
+      out_channels=self.out_channels,
       kernel_size=self.kernel_size,
       padding_mode=self.padding_mode,
       rng = self.rng,
+      padding=self.padding,
+      stride=self.stride,
+      use_bias=self.use_bias,
+      case=self.case,
       dtype=self.dtype,
       device=self.device,
       **kwargs
@@ -176,15 +190,17 @@ class ConvBlock(nn.Module):
       )
     self.dropout_layer = nn.Dropout(dropout)
     self.conv2 = ConvLayer(
-      features=self.out_channels,
+      in_channels=self.out_channels,
+      out_channels=self.out_channels,
       kernel_size=self.kernel_size,
       padding_mode=self.padding_mode,
       rng=self.rng,
+      padding=self.padding,
+      stride=self.stride,
+      use_bias=self.use_bias,
+      case=self.case,
       dtype=self.dtype,
-      device=self.device,
-      **{'in_channels': self.out_channels, 
-         'padding': kwargs.get('padding', 0), 
-         'case': kwargs.get('case', 2)}
+      device=self.device
     )
     self.res_layer = CombineResidualWithSkip(
       rng=self.rng,

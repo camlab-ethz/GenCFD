@@ -151,13 +151,15 @@ class UStack(nn.Module):
             
             if self.conv_layers[level] is None:
                 self.conv_layers[level] = ConvLayer(
-                    features=up_ratio**kernel_dim * channel,
+                    in_channels=h.shape[1],
+                    out_channels=up_ratio**kernel_dim * channel,
                     kernel_size=kernel_dim * (3,),
                     padding_mode=self.padding_method,
                     rng=self.rng,
+                    padding=1,
+                    case=len(h.shape)-2,
                     dtype=self.dtype,
-                    device=self.device,
-                    **{'padding': 1, 'in_channels': h.shape[1], 'case': len(h.shape)-2}
+                    device=self.device
                 )
             h = self.conv_layers[level](h)
             h = channel_to_space(h, block_shape=kernel_dim * (up_ratio,))
@@ -172,13 +174,15 @@ class UStack(nn.Module):
         
         if self.conv_layers[-1] is None:
             self.conv_layers[-1] = ConvLayer(
-                features = 128,
+                in_channels=h.shape[1],
+                out_channels=128,
                 kernel_size=kernel_dim * (3,),
                 padding_mode=self.padding_method,
                 rng=self.rng,
+                padding=1,
+                case=len(h.shape)-2,
                 dtype=self.dtype,
                 device=self.device,
-                **{'padding': 1, 'in_channels': h.shape[1], 'case': len(h.shape)-2}
             )
         h = self.res_skip_layer(residual=h, skip=skips.pop())
         h = self.conv_layers[-1](h)
@@ -331,14 +335,16 @@ class UpsampleFourierGaussian(nn.Module):
             if self.conv_blocks[block_id] is None:
                 # Initialize
                 self.conv_blocks[block_id] = ConvBlock(
+                    in_channels=h.shape[1],
                     out_channels=self.mid_channel,
                     kernel_size=kernel_dim * (3,),
                     rng=self.rng,
                     padding_mode=self.padding_method,
+                    padding=1,
+                    case=kernel_dim,
                     dropout=self.dropout_rate,
                     dtype=self.dtype,
                     device=self.device,
-                    **{'in_channels': h.shape[1], 'padding': 1, 'case': kernel_dim}
                 )
             h = self.conv_blocks[block_id](h, emb, is_training=is_training)
 
@@ -362,13 +368,15 @@ class UpsampleFourierGaussian(nn.Module):
         if self.conv_layers is None:
             # Initialize:
             self.conv_layers = ConvLayer(
-                features=self.out_channels,
+                in_channels=h.shape[1],
+                out_channels=self.out_channels,
                 kernel_size=kernel_dim * (3,),
                 padding_mode=self.padding_method,
                 rng=self.rng,
+                padding=1,
+                case=kernel_dim,
                 dtype=self.dtype,
                 device=self.device,
-                **{'in_channels': h.shape[1], 'padding': 1, 'case': kernel_dim}
             )
         h = self.conv_layers(h)
 

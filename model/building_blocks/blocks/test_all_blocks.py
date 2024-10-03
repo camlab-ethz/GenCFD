@@ -68,14 +68,23 @@ class ConvBlockTest(unittest.TestCase):
                 is_training=is_training):
                 inputs = torch.randn(inp_shape)
                 emb = torch.randn(emb_shape)
-                conv_kwargs = {'in_channels': inputs.shape[1], 'padding': 1}
                 if len(inp_shape) == 4:
                     model = ConvBlock(
-                        expected_shape[1], (3, 3), rng=RNG, dropout=0.1, **conv_kwargs
+                        in_channels=inputs.shape[1],
+                        out_channels=expected_shape[1], 
+                        kernel_size=(3, 3), 
+                        rng=RNG, 
+                        dropout=0.1,
+                        padding=1
                         )
                 else:
                     model = ConvBlock(
-                        expected_shape[1], (3, 3, 3), rng=RNG, dropout=0.1, **conv_kwargs
+                        in_channels=inputs.shape[1],
+                        out_channels=expected_shape[1], 
+                        kernel_size=(3, 3, 3), 
+                        rng=RNG, 
+                        dropout=0.1,
+                        padding=1
                         )
 
                 out = model(inputs, emb, is_training)

@@ -180,13 +180,15 @@ class UNet(nn.Module):
 
     if self.conv_layer is None:
       self.conv_layer = ConvLayer(
-        features=self.out_channels,
+        in_channels=h.shape[1],
+        out_channels=self.out_channels,
         kernel_size=kernel_dim * (3,),
         padding_mode=self.padding_method,
         rng=self.rng,
+        padding=1,
+        case=kernel_dim,
         dtype=self.dtype,
-        device=self.device,
-        **{'in_channels': h.shape[1], 'padding': 1, 'case': kernel_dim}
+        device=self.device
       )
     
     h = self.conv_layer(h)

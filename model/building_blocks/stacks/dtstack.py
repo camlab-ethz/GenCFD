@@ -93,13 +93,15 @@ class DStack(nn.Module):
 
     if self.conv_layer is None:
       self.conv_layer = ConvLayer(
-        features=128,
+        in_channels=h.shape[1],
+        out_channels=128,
         kernel_size=kernel_dim * (3,),
         padding_mode=self.padding_method,
         rng=self.rng,
+        padding=1,
+        case=kernel_dim,
         dtype=self.dtype,
         device=self.device,
-        **{'padding': 1, 'in_channels': h.shape[1], 'case': kernel_dim}
       )
     
     h = self.conv_layer(h)
@@ -109,12 +111,12 @@ class DStack(nn.Module):
 
       if self.dsample_layers[level] is None:
         self.dsample_layers[level] = DownsampleConv(
-          features=channel,
+          in_channels=h.shape[1],
+          out_channels=channel,
           ratios=(self.downsample_ratio[level],) * kernel_dim,
           rng=self.rng,
           device=self.device,
           dtype=self.dtype,
-          **{'in_channels': h.shape[1]}
         )
 
       h = self.dsample_layers[level](h)
@@ -123,14 +125,16 @@ class DStack(nn.Module):
 
         if self.conv_blocks[level][block_id] is None:
           self.conv_blocks[level][block_id] = ConvBlock(
+            in_channels=h.shape[1],
             out_channels=channel,
             kernel_size=kernel_dim * (3,),
             rng=self.rng,
             padding_mode=self.padding_method,
+            padding=1,
+            case=len(h.shape)-2,
             dropout=self.dropout_rate,
             dtype=self.dtype,
             device=self.device,
-            **{'in_channels': h.shape[1], 'padding': 1, 'case': len(h.shape)-2}
           )
         h = self.conv_blocks[level][block_id](h, emb, is_training=is_training)
 

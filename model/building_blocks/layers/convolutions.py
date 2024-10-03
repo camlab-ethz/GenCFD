@@ -26,11 +26,16 @@ import torch.nn.functional as F
 Tensor = torch.Tensor
 
 def ConvLayer(
-    features: int,
+    in_channels: int,
+    out_channels: int,
     kernel_size: int | Sequence[int],
     padding_mode: str,
     rng: torch.Generator,
+    padding: int = 0,
+    stride: int = 1,
+    use_bias: bool = True,
     use_local: bool = False,
+    case: int = 2,
     dtype: torch.dtype = torch.float32,
     device: Any | None = None,
     **kwargs
@@ -49,7 +54,8 @@ def ConvLayer(
         f"for convolution type {padding_mode}."
       )
     return LatLonConv(
-      features=features,
+      in_channels=in_channels,
+      out_channels=out_channels,
       rng=rng, 
       kernel_size=kernel_size, 
       order=padding_mode.lower(),
@@ -60,51 +66,51 @@ def ConvLayer(
   
   elif use_local:
     return ConvLocal2d(
-      in_channels=kwargs.get('in_channels', 1),
-      out_channels=features,
+      in_channels=in_channels,
+      out_channels=out_channels,
       kernel_size=kernel_size,
       rng=rng,
-      padding=kwargs.get('padding', 0),
-      stride=kwargs.get('stride', 1),
-      use_bias=kwargs.get('use_bias', True),
+      padding=padding,
+      stride=stride,
+      use_bias=use_bias,
       device=device,
       dtype=dtype
     )
   else:
     # TODO: Write a class to not repeat this for other classes as well!
-    if kwargs.get('case', 2) == 1:
+    if case == 1:
       return nn.Conv1d(
-        in_channels=kwargs.get('in_channels', 1),
-        out_channels=features,
+        in_channels=in_channels,
+        out_channels=out_channels,
         kernel_size=kernel_size,
         padding_mode=padding_mode.lower(),
-        padding=kwargs.get('padding', 0),
-        stride=kwargs.get('stride', 1),
-        bias=kwargs.get('use_bias', True),
+        padding=padding,
+        stride=stride,
+        bias=use_bias,
         device=device,
         dtype=dtype
       )
-    elif kwargs.get('case', 2) == 2:
+    elif case == 2:
       return nn.Conv2d(
-        in_channels=kwargs.get('in_channels', 1),
-        out_channels=features,
+        in_channels=in_channels,
+        out_channels=out_channels,
         kernel_size=kernel_size,
         padding_mode=padding_mode.lower(),
-        padding=kwargs.get('padding', 0),
-        stride=kwargs.get('stride', 1),
-        bias=kwargs.get('use_bias', True),
+        padding=padding,
+        stride=stride,
+        bias=use_bias,
         device=device,
         dtype=dtype
       )
-    elif kwargs.get('case', 2) == 3:
+    elif case == 3:
       return nn.Conv3d(
-        in_channels=kwargs.get('in_channels', 1),
-        out_channels=features,
+        in_channels=in_channels,
+        out_channels=out_channels,
         kernel_size=kernel_size,
         padding_mode=padding_mode.lower(),
-        padding=kwargs.get('padding', 0),
-        stride=kwargs.get('stride', 1),
-        bias=kwargs.get('use_bias', True),
+        padding=padding,
+        stride=stride,
+        bias=use_bias,
         device=device,
         dtype=dtype
       )
@@ -204,7 +210,8 @@ class LatLonConv(nn.Module):
 
   def __init__(
       self, 
-      features: int, 
+      in_channels: int,
+      out_channels: int, 
       rng: torch.Generator,
       kernel_size: tuple[int, int] = (3, 3), 
       order: Literal["latlon", "lonlat"] = "latlon", 
@@ -216,7 +223,8 @@ class LatLonConv(nn.Module):
       **kwargs
   ):
     super(LatLonConv, self).__init__()
-    self.features = features
+    self.in_channels = in_channels
+    self.out_channels = out_channels
     self.kernel_size = kernel_size
     self.order = order
     self.use_bias = use_bias
@@ -226,12 +234,10 @@ class LatLonConv(nn.Module):
     self.device = device
     self.rng = rng
 
-    self.in_channels = kwargs.get('in_channels', 1)
-
     if self.use_local:
       self.conv = ConvLocal2d(
         in_channels=self.in_channels,
-        out_channels=features,
+        out_channels=self.out_channels,
         kernel_size=kernel_size,
         rng=self.rng,
         stride=strides,
@@ -242,7 +248,7 @@ class LatLonConv(nn.Module):
     else:
       self.conv = nn.Conv2d(
         in_channels=self.in_channels,
-        out_channels=features,
+        out_channels=self.out_channels,
         kernel_size=kernel_size,
         stride=strides,
         bias=use_bias,
@@ -283,7 +289,8 @@ class DownsampleConv(nn.Module):
   """Downsampling layer through strided convolution."""
 
   def __init__(self, 
-               features: int, 
+               in_channels: int,
+               out_channels: int, 
                ratios: Sequence[int],
                rng: torch.Generator, 
                use_bias: bool = True,
@@ -291,11 +298,10 @@ class DownsampleConv(nn.Module):
                dtype: torch.dtype = torch.float32, 
                **kwargs):
     super(DownsampleConv, self).__init__()
-
-    self.features = features
+    self.in_channels = in_channels
+    self.out_channels = out_channels
     self.ratios = ratios
     self.use_bias = use_bias
-    self.in_channels = kwargs.get('in_channels', 1)
     self.dtype = dtype
     self.device = device
     self.rng = rng
@@ -304,7 +310,7 @@ class DownsampleConv(nn.Module):
     if len(ratios) == 1:
       self.conv1d = nn.Conv1d(
         in_channels=self.in_channels,
-        out_channels=features,
+        out_channels=self.out_channels,
         kernel_size=ratios,
         stride=ratios,
         bias=use_bias,
@@ -318,7 +324,7 @@ class DownsampleConv(nn.Module):
     elif len(ratios) == 2:
       self.conv2d = nn.Conv2d(
         in_channels=self.in_channels,
-        out_channels=features,
+        out_channels=self.out_channels,
         kernel_size=ratios,
         stride=ratios,
         bias=use_bias,
@@ -333,7 +339,7 @@ class DownsampleConv(nn.Module):
     elif len(ratios) == 3:
       self.conv3d = nn.Conv3d(
         in_channels=self.in_channels,
-        out_channels=features,
+        out_channels=self.out_channels,
         kernel_size=ratios,
         stride=ratios,
         bias=use_bias,
