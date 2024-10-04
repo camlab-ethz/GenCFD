@@ -239,10 +239,6 @@ class DenoisingTrainer(BasicTrainer[M, SD]):
         
         self.model.denoiser.train()
         #TODO: Changed to device!
-        output = self.model.denoiser(
-            batch[0].to(device=self.device), 
-            batch[1].to(device=self.device)
-            )
         loss, (metrics, mem) = self.model.loss_fn(batch[0].to(device=self.device))
 
         self.optimizer.zero_grad()

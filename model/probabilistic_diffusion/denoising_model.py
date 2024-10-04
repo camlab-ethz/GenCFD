@@ -24,6 +24,7 @@ import torch.optim as optim
 import torch.nn.functional as F
 from torchmetrics import MetricCollection
 import numpy as np
+import random
 
 import diffusion as dfn_lib
 from model.base_model import base_model
@@ -73,6 +74,7 @@ class DenoisingModel(base_model.BaseModel):
   denoiser: nn.Module
   noise_sampling: dfn_lib.NoiseLevelSampling
   noise_weighting: dfn_lib.NoiseLossWeighting
+  rng_diff: torch.Generator
   rng: torch.Generator
   seed: int = 0
   num_eval_noise_levels: int = 5
@@ -88,8 +90,9 @@ class DenoisingModel(base_model.BaseModel):
   dtype: torch.dtype = torch.float32
 
 
-  def initialize(self):
-    x_sample = torch.ones((1,) + self.input_shape, dtype=self.dtype, device=self.device)
+  def initialize(self, batch_size: int):
+    """Method necessary for a dummy initialization!"""
+    x_sample = torch.ones((batch_size,) + self.input_shape, dtype=self.dtype, device=self.device)
     # x = x_sample[:,self.input_channel:, ...]
     # y = x_sample[:, :self.input_channel, ...]
     # TODO: Include the TIME once this model is built!
@@ -97,7 +100,7 @@ class DenoisingModel(base_model.BaseModel):
     #     x=x, y=y, time=torch.ones((1,)), sigma=torch.ones((1,)), is_training=False
     # )
     return self.denoiser(
-        x=x_sample, sigma=torch.ones((1,), dtype=self.dtype, device=self.device), is_training=False
+        x=x_sample, sigma=torch.ones((batch_size,), dtype=self.dtype, device=self.device), is_training=False
     )
 
   def loss_fn(
@@ -133,12 +136,13 @@ class DenoisingModel(base_model.BaseModel):
     # x_squared = torch.square(x)
     x_squared = torch.square(data)
 
-    sigma = self.noise_sampling(rng=torch.manual_seed(self.seed), shape=(batch_size,)).to(device=self.device)
+    rand_seed = random.randint(0, 100000)
+
+    sigma = self.noise_sampling(rng=self.rng_diff, shape=(batch_size,)).to(device=self.device)
     weights = self.noise_weighting(sigma)
     if weights.ndim != x.ndim:
       weights = weights.view(-1, *([1] * (x.ndim - 1)))
 
-    # noise = torch.randn_like(x) # TODO: Check with the JAX based version!
     noise = torch.randn(
       data.shape, dtype=self.dtype, device=self.device, generator=self.rng
       )

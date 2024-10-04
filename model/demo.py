@@ -19,6 +19,9 @@ SEED = 0
 RNG = torch.Generator(device=device)
 RNG.manual_seed(SEED)
 
+RNG_DIFF = torch.Generator()
+RNG.manual_seed(SEED)
+
 print(device)
 
 
@@ -44,7 +47,7 @@ def get_mnist_dataset(split: str, batch_size: int):
 # of the neural network parametrization.
 DATA_STD = 0.31
 
-denoiser_model = dfn_lib.UNet(
+denoiser_model = dfn_lib.PreconditionedDenoiserUNet(
     out_channels=1,
     rng=RNG,
     num_channels=(64, 128),
@@ -55,8 +58,23 @@ denoiser_model = dfn_lib.UNet(
     use_attention=True,
     use_position_encoding=True,
     num_heads=8,
-    device=device
+    device=device,
+    sigma_data=DATA_STD
 )
+
+# denoiser_model = dfn_lib.UNet(
+#     out_channels=1,
+#     rng=RNG,
+#     num_channels=(64, 128),
+#     downsample_ratio=(2, 2),
+#     num_blocks=4,
+#     noise_embed_dim=128,
+#     padding_method="circular",
+#     use_attention=True,
+#     use_position_encoding=True,
+#     num_heads=8,
+#     device=device
+# )
 
 diffusion_scheme = dfn_lib.Diffusion.create_variance_exploding(
     sigma=dfn_lib.tangent_noise_schedule(),
@@ -67,16 +85,18 @@ model = dfn_lib.DenoisingModel(
     # `input_shape` must agree with the expected sample shape (without the batch
     # dimension), which in this case is simply the dimensions of a single MNIST
     # sample.
-    input_shape=(28, 28, 1),
+    input_shape=(1, 28, 28),
     denoiser=denoiser_model,
     noise_sampling=dfn_lib.log_uniform_sampling(
         diffusion_scheme, clip_min=1e-4, uniform_grid=True,
     ),
     noise_weighting=dfn_lib.edm_weighting(data_std=DATA_STD),
     rng=RNG,
+    rng_diff=RNG_DIFF,
     seed=SEED,
     device=device
 )
+
 
 num_train_steps = 100_000  #@param
 workdir = "/tmp/diffusion_demo_mnist"  #@param
@@ -99,17 +119,8 @@ labels = first_batch[1].to(device)
 noise = torch.randn(img.shape, device=device, generator=RNG)
 noised_img = img + noise
 
-# Initialize model by running a dummy forward pass!
-dummy_input = torch.randn(
-    img.shape, dtype=torch.float32, device=device, generator=RNG
-    )
-dummy_sigma = torch.randn(
-    labels.shape, dtype=torch.float32, device=device, generator=RNG
-    )
-# model.to(device) # TODO: model should have an input to device!!!
-_ = model.denoiser(dummy_input, dummy_sigma)
-
-# breakpoint()
+# dummy initialize
+model.initialize(img.shape[0])
 
 trainer = train.trainers.DenoisingTrainer(
     model=model,

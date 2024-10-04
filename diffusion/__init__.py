@@ -54,7 +54,7 @@ from model.building_blocks.unets.unets import (
     # InterpConvMerge,
     UNet,
 )
-from model.building_blocks.unets.unets import PreconditionedConditionalDenoiser as PreconditionedDenoiserUNet
+from model.building_blocks.unets.unets import PreconditionedDenoiser as PreconditionedDenoiserUNet
 # from model.building_blocks.unets.unets3d import PreconditionedDenoiser3d as PreconditionedDenoiserUNet3d
 # from model.building_blocks.unets.unets3d import UNet3d
 # from diffusion.vivit import ViViT

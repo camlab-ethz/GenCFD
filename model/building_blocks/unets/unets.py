@@ -129,7 +129,6 @@ class UNet(nn.Module):
     Returns:
       An output tensor with the same dimension as 'x'.
     """
-
     if sigma.dim() < 1:
       sigma = sigma.expand(x.size(0))
 
@@ -206,16 +205,48 @@ class UNet(nn.Module):
     return h
   
 
-class PreconditionedConditionalDenoiser(UNet):
+class PreconditionedDenoiser(UNet):
   """Preconditioned denoising model."""
 
-  def __init__(self, sigma_data: float = 1.0):
-    super().__init__()
+  def __init__(self, 
+               out_channels: int,
+               rng: torch.Generator, 
+               resize_to_shape: tuple[int, ...] | None = None,
+               use_hr_residual: bool = False,
+               num_channels: tuple[int, ...] = (128, 256, 256, 256),
+               downsample_ratio : tuple[int, ...] = (2, 2, 2, 2), 
+               num_blocks: int = 4, 
+               noise_embed_dim: int = 128, 
+               padding_method: str = 'circular', 
+               dropout_rate: float = 0.0, 
+               use_attention: bool = True, 
+               use_position_encoding: bool = True, 
+               num_heads: int = 8,
+               normalize_qk: bool = False, 
+               dtype: torch.dtype = torch.float32, 
+               device: Any | None = None,
+               sigma_data: float = 1.0,):
+    super().__init__(out_channels=out_channels,
+                     rng=rng,
+                     resize_to_shape=resize_to_shape,
+                     use_hr_residual=use_hr_residual,
+                     num_channels=num_channels,
+                     downsample_ratio=downsample_ratio,
+                     num_blocks=num_blocks,
+                     noise_embed_dim=noise_embed_dim,
+                     padding_method=padding_method,
+                     dropout_rate=dropout_rate,
+                     use_attention=use_attention,
+                     use_position_encoding=use_position_encoding,
+                     num_heads=num_heads,
+                     normalize_qk=normalize_qk,
+                     dtype=dtype,
+                     device=device)
     self.sigma_data = sigma_data
     # TODO: Continue Rewriting!
     
-
-  def forward(self, x: Tensor, y: Tensor, sigma: Tensor,
+  # Deleted y:Tensor after x!
+  def forward(self, x: Tensor, sigma: Tensor,
               down_only: bool = False, is_training: bool=True) -> Tensor:
     """Runs preconditioned denoising."""
     if sigma.dim() < 1:
@@ -233,16 +264,20 @@ class PreconditionedConditionalDenoiser(UNet):
     c_in = 1 / torch.sqrt(total_var)
     c_noise = 0.25 * torch.log(sigma)
 
+    expand_shape = [-1] + [1] * (x.dim() - 1)
     # Expand dimensions of the coefficients
-    c_in = c_in.unsqueeze(dim=-1).expand_as(x)
-    c_out = c_out.unsqueeze(dim=-1).expand_as(x)
-    c_skip = c_skip.unsqueeze(dim=-1).expand_as(x)
+    c_in = c_in.view(*expand_shape).expand_as(x)
+    c_out = c_out.view(*expand_shape).expand_as(x)
+    c_skip = c_skip.view(*expand_shape).expand_as(x)
 
     # Forward pass through the UNet
+    # f_x = super().forward(
+    #   torch.cat((c_in * x, y), dim=-1), c_noise, 
+    #   is_training=is_training, down_only=down_only
+    # )
     f_x = super().forward(
-      torch.cat((c_in * x, y), dim=-1), c_noise, 
-      is_training=is_training, down_only=down_only
-    )
+      c_in*x, c_noise, is_training=is_training, down_only=down_only
+      )
 
     if down_only:
       return f_x
