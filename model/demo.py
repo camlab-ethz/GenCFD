@@ -12,7 +12,7 @@ import diffusion as dfn_lib
 from torch.utils.data import DataLoader, Dataset
 from torch.utils.tensorboard import SummaryWriter
 from torchvision import datasets, transforms
-from utils.callbacks import Callback, TqdmProgressBar
+from utils.callbacks import Callback, TqdmProgressBar, TrainStateCheckpoint
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 SEED = 0
@@ -98,8 +98,15 @@ model = dfn_lib.DenoisingModel(
 )
 
 
+
+cwd = os.getcwd()
+workdir = cwd + '/outputs'
+
+if not os.path.exists(workdir):
+    raise ValueError("set a propoer workdirectory!")
+
+
 num_train_steps = 100_000  #@param
-workdir = "/tmp/diffusion_demo_mnist"  #@param
 train_batch_size = 32  #@param
 eval_batch_size = 32  #@param
 initial_lr = 0.0  #@param
@@ -111,13 +118,14 @@ ckpt_interval = 1000  #@param
 max_ckpt_to_keep = 5  #@param
 
 train_dataloader = get_mnist_dataset('train', train_batch_size)
-test_dataloader = get_mnist_dataset('test', eval_batch_size)
+eval_dataloader = get_mnist_dataset('test', eval_batch_size)
 first_batch = next(iter(train_dataloader))
 img = first_batch[0].to(device)
 labels = first_batch[1].to(device)
 
 noise = torch.randn(img.shape, device=device, generator=RNG)
 noised_img = img + noise
+
 
 # dummy initialize
 model.initialize(img.shape[0])
@@ -140,7 +148,7 @@ train.run(
     total_train_steps=num_train_steps,
     metric_writer=SummaryWriter(log_dir=workdir),
     metric_aggregation_steps=100,
-    eval_dataloader=None,
+    eval_dataloader=eval_dataloader,
     eval_every_steps=1000,
     num_batches_per_eval=2,
     # callbacks=(Callback(workdir),),
@@ -148,6 +156,9 @@ train.run(
         TqdmProgressBar(
             total_train_steps=num_train_steps,
             train_monitors=("train_loss",),
+        ),
+        TrainStateCheckpoint(
+            base_dir=workdir, save_every_n_step=10000
         ),
     )
 )

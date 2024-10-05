@@ -79,24 +79,22 @@ class BaseTrainer(Generic[M, S], metaclass=abc.ABCMeta):
             batch = next(batch_iter)
             # batch = {k: v.to(self.device) for k, v in batch.items()}
             metrics_update = self.train_step(batch)
-            # TODO: Write an if statement that keeps track of a mean lets say after every 10th or 50th iteration!!!
-            train_loss_value = metrics_update["train_loss"].compute()
-            train_metrics.update(train_loss_value)
-            # print(f"mean_loss: {train_loss_value}")
+            train_metrics.update(metrics_update["train_loss"].compute())
 
         return train_metrics
 
     def eval(self, batch_iter: Iterator[BatchType], num_steps: int) -> Metrics:
         """Runs evaluation for a specified number of steps."""
-        eval_metrics = self.EvalMetrics()
-        self.model.eval()
+        eval_metrics = self.EvalMetrics(self.model.num_eval_noise_levels)
+        self.model.denoiser.eval()
 
         with torch.no_grad():
             for _ in range(num_steps):
                 batch = next(batch_iter)
-                batch = {k: v.to(self.device) for k, v in batch.items()}
-                metrics_update = self.eval_step(batch) # self.train_state as first entry
-                eval_metrics.update(metrics_update.eval_accuracy)
+                # batch = {k: v.to(self.device) for k, v in batch.items()}
+                update_metrics = self.eval_step(batch) # self.train_state as first entry
+                for key, value in update_metrics.items():
+                    eval_metrics[key].update(value)
 
         return eval_metrics
   
@@ -146,13 +144,17 @@ class BasicTrainer(BaseTrainer[M, S]):
 
 
     def eval_step(self, batch: BatchType) -> Callable[[S, BatchType], Metrics]:
-        # TODO: NOT WORKING RN, IMPLEMENT THIS IN THE SAME WAY AS TRAIN_STEP
-        self.model.eval()
+        self.model.denoiser.eval()
         with torch.no_grad():
-            output = self.model(batch)
-            loss, metrics = self.model.eval_fn(output, batch)
-        metrics_update = self.EvalMetrics(**metrics)
-        return metrics_update
+            # TODO: Change batch[0]
+            metrics = self.model.eval_fn(batch[0].to(device=self.device))
+
+        eval_metrics = self.EvalMetrics(self.model.num_eval_noise_levels)
+        for key, value in metrics.items():
+            eval_metrics[key](value)
+
+        # metrics_update = self.EvalMetrics(self.model.num_eval_noise_levels)(**metrics)
+        return eval_metrics.compute()
 
 
     def initialize_train_state(self) -> S:
@@ -216,7 +218,7 @@ class DenoisingTrainer(BasicTrainer[M, SD]):
 
     class EvalMetrics(Metrics):
         """Evaluation metrics based on the model output, using noise level"""
-        def __init__(self, num_eval_noise_levels: int = 10):
+        def __init__(self, num_eval_noise_levels: int):
             eval_metrics = {
                 f"eval_denoise_lvl{i}": MeanMetric() 
                 for i in range(num_eval_noise_levels) 
@@ -251,8 +253,6 @@ class DenoisingTrainer(BasicTrainer[M, SD]):
 
         # train_metrics.update(torch.tensor(metrics["loss"]))
         train_metrics.update(metrics["loss"])
-
-        # print(f"LOSS: {loss}")
 
         return train_metrics
     

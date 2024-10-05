@@ -48,7 +48,10 @@ class TrainState:
     the current object is replicated by looking at the dimensions, and
     unreplicates the `step` field if necessary before returning it.
     """
-    return int(self.step.item())
+    if isinstance(self.step, int):
+      return self.step
+    else:
+      return int(self.step.item())
 
   @classmethod
   def restore_from_checkpoint(

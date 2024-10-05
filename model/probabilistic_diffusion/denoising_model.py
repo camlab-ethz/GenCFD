@@ -136,8 +136,6 @@ class DenoisingModel(base_model.BaseModel):
     # x_squared = torch.square(x)
     x_squared = torch.square(data)
 
-    rand_seed = random.randint(0, 100000)
-
     sigma = self.noise_sampling(rng=self.rng_diff, shape=(batch_size,)).to(device=self.device)
     weights = self.noise_weighting(sigma)
     if weights.ndim != x.ndim:
@@ -176,7 +174,7 @@ class DenoisingModel(base_model.BaseModel):
 
   def eval_fn(
       self,
-      variables: dict,
+      # variables: dict,
       batch: dict
   ):
     """Compute denoising metrics on an eval batch.
@@ -195,24 +193,21 @@ class DenoisingModel(base_model.BaseModel):
     Returns:
       A dictionary of denoising-based evaluation metrics.
     """
-    time = batch["lead_time"]
-    data = batch["data"]
+    # time = batch["lead_time"]
+    # data = batch["data"]
+    data = batch
     inputs = data[
       torch.randint(0, data.shape[0], (self.num_eval_noise_levels, self.num_eval_cases_per_lvl), 
-                    generator=self.rng)
+                    generator=self.rng, device=self.device)
       ]
-    inputs_time = time[
-      torch.randint(0, time.shape[0], (self.num_eval_noise_levels, self.num_eval_cases_per_lvl), 
-                    generator=self.rng)
-    ]
-    x = inputs[:, self.input_channel:, ...]
-    y = inputs[:, :self.input_channel, ...]
 
     sigma = torch.exp(
       torch.linspace(
         np.log(self.min_eval_noise_lvl),
         np.log(self.max_eval_noise_lvl),
-        self.num_eval_noise_levels
+        self.num_eval_noise_levels, 
+        dtype=self.dtype,
+        device=self.device
       )
     )
 
@@ -226,20 +221,24 @@ class DenoisingModel(base_model.BaseModel):
     noise = torch.randn(
       inputs.shape, device=self.device, dtype=self.dtype, generator=self.rng
       )
+    
     if sigma.ndim != inputs.ndim:
       noised = inputs + noise * sigma.view(-1, *([1] * (inputs.ndim - 1))) 
     else:
       noised = inputs + noise * sigma
-    denoise_fn = self.inference_fn(variables, self.denoiser)
-    denoised = torch.stack([denoise_fn(noised[i], sigma[i]) for i in range(len(sigma))])
+
+    denoised = torch.stack(
+      [self.inference_fn(self.denoiser, noised[i], sigma[i]) for i in range(self.num_eval_noise_levels)]
+      )
+
     ema_losses = torch.mean(torch.square(denoised - inputs), dim=[i for i in range(1, inputs.ndim)])
 
-    eval_losses = {f"sigma_lvl{i}": loss.item() for i, loss in enumerate(ema_losses)}
+    eval_losses = {f"eval_denoise_lvl{i}": loss.item() for i, loss in enumerate(ema_losses)}
     return eval_losses
 
 
   @staticmethod
-  def inference_fn(variables: dict, denoiser: nn.Module):
+  def inference_fn(denoiser: nn.Module, x: Tensor, sigma: float | Tensor) -> Tensor:
     """Returns the inference denoising function."""
 
     # def _denoise(x: Tensor, y: Tensor, time: float | Tensor, sigma: float | Tensor) -> Tensor:
@@ -247,9 +246,7 @@ class DenoisingModel(base_model.BaseModel):
     #     sigma = sigma * torch.ones((x.shape[0],))
     #   return denoiser.forward(x=x, y=y, sigma=sigma, is_training=False)
     
-    def _denoise(x: Tensor, sigma: float | Tensor) -> Tensor:
-      if not torch.is_tensor(sigma):
-        sigma = sigma * torch.ones((x.shape[0],))
-      return denoiser.forward(x=x, sigma=sigma, is_training=False)
+    if not torch.is_tensor(sigma):
+      sigma = sigma * torch.ones((x.shape[0],))
 
-    return _denoise
+    return denoiser.forward(x=x, sigma=sigma, is_training=False)

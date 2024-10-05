@@ -116,89 +116,85 @@ class Callback:
     #   self.metric_writer.close()
 
 
-# # This callback does not seem to work with `utils.primary_process_only`.
-# class TrainStateCheckpoint(Callback):
-#   """Callback that periodically saves train state checkpoints."""
+# This callback does not seem to work with `utils.primary_process_only`.
+class TrainStateCheckpoint(Callback):
+  """Callback that periodically saves train state checkpoints."""
 
-#   def __init__(
-#       self,
-#       base_dir: str,
-#       folder_prefix: str = "checkpoints",
-#       train_state_field: str = "default",
-#       options: ocp.CheckpointManagerOptions | None = None,
-#   ):
-#     self.save_dir = os.path.join(base_dir, folder_prefix)
-#     self.train_state_field = train_state_field
-#     self.ckpt_manager = ocp.CheckpointManager(
-#         self.save_dir,
-#         item_handlers={self.train_state_field: ocp.StandardCheckpointHandler()},
-#         options=options,
-#     )
+  def __init__(
+      self,
+      base_dir: str,
+      folder_prefix: str = "checkpoints",
+      train_state_field: str = "default",
+      # options: ocp.CheckpointManagerOptions | None = None,
+      save_every_n_step: int = 1000
+  ):
+    self.save_dir = os.path.join(base_dir, folder_prefix)
+    self.train_state_field = train_state_field
+    # self.ckpt_manager = ocp.CheckpointManager(
+    #     self.save_dir,
+    #     item_handlers={self.train_state_field: ocp.StandardCheckpointHandler()},
+    #     options=options,
+    # )
+    self.save_every_n_steps = save_every_n_step
+    self.last_eval_metric = {}
 
-#   def on_train_begin(self, trainer: Trainer) -> None:
-#     """Sets up directory, saves initial or restore the most recent state."""
-#     self.last_eval_metric = {}
-#     # retrieve from existing checkpoints if possible
-#     if self.ckpt_manager.latest_step() is not None:
+    os.makedirs(self.save_dir, exist_ok=True)
 
-#       def to_shard_shape_dtype(x):
-#         aval = jax.api_util.shaped_abstractify(x)
-#         if trainer.is_distributed:
-#           return jax.ShapeDtypeStruct(aval.shape[1:], dtype=aval.dtype)
-#         else:
-#           return jax.ShapeDtypeStruct(aval.shape, dtype=aval.dtype)
+  def on_train_begin(self, trainer: Trainer) -> None:
+    """Sets up directory, saves initial or restore the most recent state."""
+    # retrieve from existing checkpoints if possible
+    checkpoint_path = self._get_latest_checkpoint()
+    if checkpoint_path:
+      checkpoint = torch.load(checkpoint_path, weights_only=True)
+      trainer.model.denoiser.load_state_dict(checkpoint['model_state_dict'])
+      trainer.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+      trainer.train_state.step = checkpoint['step']
 
-#       # Load a single shard and then replicate explicitly.
-#       restored = self.ckpt_manager.restore(
-#           self.ckpt_manager.latest_step(),
-#           args=ocp.args.Composite(**{
-#               self.train_state_field: ocp.args.StandardRestore(
-#                   item=jax.tree.map(to_shard_shape_dtype, trainer.train_state)
-#               )
-#           }),
-#       )
 
-#       trainer.train_state = trainer._maybe_replicate(  # pylint: disable=protected-access
-#           getattr(restored, self.train_state_field)
-#       )
+  def on_train_batches_end(
+      self, trainer: Trainer, train_metrics: ComputedMetrics
+  ) -> None:
+    """Save checkpoints periodically after training batches"""
+    cur_step = trainer.train_state.step
 
-#   def on_train_batches_end(
-#       self, trainer: Trainer, train_metrics: ComputedMetrics
-#   ) -> None:
-#     assert self.last_eval_metric is not None
-#     cur_step = trainer.train_state.int_step
-#     if self.ckpt_manager.should_save(cur_step):
-#       self.ckpt_manager.save(
-#           step=cur_step,
-#           # This always saves the unreplicated train state.
-#           # Converting to np Tensor seems necessary for multi-host environments.
-#           args=ocp.args.Composite(**{
-#               self.train_state_field: ocp.args.StandardSave(
-#                   jax.tree.map(np.Tensor, trainer.unreplicated_train_state)
-#               )
-#           }),
-#           metrics=dict(**train_metrics, **self.last_eval_metric),
-#       )
+    if cur_step % self.save_every_n_steps == 0:
+      self._save_checkpoint(trainer, cur_step, train_metrics)
 
-#   def on_eval_batches_end(
-#       self, trainer: Trainer, eval_metrics: ComputedMetrics
-#   ) -> None:
-#     del trainer
-#     self.last_eval_metric = eval_metrics
+  def on_eval_batches_end(
+      self, trainer: Trainer, eval_metrics: ComputedMetrics
+  ) -> None:
+    """Store the evaluation metrics for inclusion in checkpoints"""
+    self.last_eval_metric = eval_metrics
 
-#   def on_train_end(self, trainer: Trainer) -> None:
-#     # Always save a checkpoint at the end of training.
-#     if self.ckpt_manager.latest_step() != trainer.train_state.int_step:
-#       self.ckpt_manager.save(
-#           trainer.train_state.int_step,
-#           args=ocp.args.Composite(**{
-#               self.train_state_field: ocp.args.StandardSave(
-#                   jax.tree.map(np.Tensor, trainer.unreplicated_train_state)
-#               )
-#           }),
-#           force=True,
-#       )
-#     self.ckpt_manager.wait_until_finished()
+  def on_train_end(self, trainer: Trainer) -> None:
+    """Save a final checkpoint at the end of training"""
+    cur_step = trainer.train_state.step
+    self._save_checkpoint(trainer, cur_step, self.last_eval_metric, force=True)
+
+  def _save_checkpoint(self, 
+                       trainer: Trainer, 
+                       step: int, 
+                       metrics: ComputedMetrics, 
+                       force: bool = False
+                       ) -> None:
+    """Internal method to handle checkpoint saving."""
+    checkpoint = {
+      'model_state_dict': trainer.model.denoiser.state_dict(),
+      'optimizer_state_dict': trainer.optimizer.state_dict(),
+      'step': step,
+      'metrics': metrics
+    }
+    checkpoint_path = os.path.join(self.save_dir, f"checkpoint_{step}.pth")
+    torch.save(checkpoint, checkpoint_path)
+
+  def _get_latest_checkpoint(self) -> Optional[str]:
+    """Retrieve the path to the latest checkpoint if available."""
+    checkpoints = [f for f in os.listdir(self.save_dir) if f.endswith(".pth")]
+    if not checkpoints:
+      return None
+    
+    checkpoints.sort(key=lambda f: int(f.split('_')[-1].split('.')[0]))
+    return os.path.join(self.save_dir, checkpoints[-1])
 
 
 # @train_utils.primary_process_only
