@@ -17,20 +17,20 @@
 # pylint: disable=g-importing-member
 # pylint: disable=g-multiple-import
 
-from swirl_dynamics.lib.solvers.ode import (
-    DoPri45,
-    ExplicitEuler,
-    HeunsMethod,
-    MultiStepDirect,
-    MultiStepScanOdeSolver,
-    OdeDynamics,
-    OdeSolver,
-    OneStepDirect,
-    RungeKutta4,
-    ScanOdeSolver,
-    nn_module_to_dynamics as nn_module_to_ode_dynamics,
-)
-from swirl_dynamics.lib.solvers.sde import (
+# from solvers.ode import (
+#     DoPri45,
+#     ExplicitEuler,
+#     HeunsMethod,
+#     MultiStepDirect,
+#     MultiStepScanOdeSolver,
+#     OdeDynamics,
+#     OdeSolver,
+#     OneStepDirect,
+#     RungeKutta4,
+#     ScanOdeSolver,
+#     nn_module_to_dynamics as nn_module_to_ode_dynamics,
+# )
+from solvers.sde import (
     EulerMaruyama,
     SdeCoefficientFn,
     SdeDynamics,

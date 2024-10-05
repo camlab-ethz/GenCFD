@@ -15,224 +15,157 @@
 """Solvers for stochastic differential equations (SDEs)."""
 
 from collections.abc import Mapping
-import functools
-from typing import Any, ClassVar, Literal, NamedTuple, Protocol
+from typing import Any, NamedTuple, Protocol, Literal, ClassVar
+import torch
+from torch import nn
 import warnings
 
-import flax
-import jax
-import jax.numpy as jnp
-
-Array = jax.Array
-PyTree = Any
-SdeParams = Mapping[str, PyTree]
-
+Tensor = torch.Tensor
+SdeParams = Mapping[str, Any]
 
 class SdeCoefficientFn(Protocol):
-  """A callable type for the drift or diffusion coefficients of a SDE."""
+    """A callable type for the drift or diffusion coefficients of an SDE."""
 
-  def __call__(self, x: Array, t: Array, params: PyTree) -> Array:
-    """Evaluates the drift or diffusion coefficients."""
-    ...
-
+    def forward(self, x: Tensor, t: Tensor) -> Tensor:
+        """Evaluates the drift or diffusion coefficients."""
+        ...
 
 class SdeDynamics(NamedTuple):
-  """The drift and diffusion functions that represent the SDE dynamics."""
+    """The drift and diffusion functions that represents the SDE dynamics."""
 
-  drift: SdeCoefficientFn
-  diffusion: SdeCoefficientFn
+    drift: SdeCoefficientFn
+    diffusion: SdeCoefficientFn
 
-
-def _check_sde_params_fields(params: SdeParams) -> None:
-  if not ("drift" in params.keys() and "diffusion" in params.keys()):
-    raise ValueError(
-        "`params` must contain both `drift` and `diffusion` fields."
-    )
-
-
-class SdeSolver(Protocol):
-  """A callable type implementing a SDE solver.
-
-  Attributes:
-    terminal_only: If `True`, the solver only returns the terminal state, i.e.
-      corresponding to the last time stamp in `tspan`. If `False`, returns the
-      full path containing all steps.
-  """
-
-  terminal_only: bool
-
-  def __call__(
-      self,
-      dynamics: SdeDynamics,
-      x0: Array,
-      tspan: Array,
-      rng: Array,
-      params: PyTree,
-  ) -> Array:
-    """Solves a SDE at given time stamps.
-
-    Args:
-      dynamics: The SDE dynamics that evaluates the drift and diffusion
-        coefficients.
-      x0: Initial condition.
-      tspan: The sequence of time points on which the approximate solution of
-        the SDE are evaluated. The first entry corresponds to the time for x0.
-      rng: The root Jax random key used to draw realizations of the Wiener
-        processes for the SDE.
-      params: Parameters for the dynamics. Must contain both a "drift" and a
-        "diffusion" field.
-
-    Returns:
-      Integrated SDE trajectory (initial condition included at time position 0).
+  
+class SdeSolver(nn.Module):
+    """A callable type implementation a SDE solver.
+    
+    Attributes:
+      terminal_only: If 'True' the solver only returns the terminal state,
+        i.e., corresponding to the last time stamp in 'tspan'. If 'False',
+        returns the full path containing all steps.
     """
-    ...
 
+    def __init__(self, rng: torch.Generator, terminal_only: bool = False):
+        super().__init__()
+        self.terminal_only = terminal_only
+        self.rng = rng
 
-@flax.struct.dataclass
-class ScanSdeSolver:
-  """A SDE solver based on `jax.lax.scan`.
+    def forward(
+            self,
+            dynamics: SdeDynamics,
+            x0: Tensor,
+            tspan: Tensor
+      ) -> Tensor:
+        """Solves an SDE at given time stamps.
 
-  Attributes:
-    time_axis_pos: The index where the time axis should be placed. Defaults to
-      the lead axis (index 0).
-  """
+        Args:
+          dynamics: The SDE dynamics that evaluates the drift and diffusion
+            coefficients.
+          x0: Initial condition.
+          tspan: The sequence of time points on which the approximate solution
+            of the SDE are evaluated. The first entry corresponds to the time for x0.
+          rng: A PyTorch generator used to draw realizations of the Wiener processes
+            for the SDE.
 
-  time_axis_pos: int = 0
-  terminal_only: ClassVar[bool] = False
+        Returns:
+          Integrated SDE trajectory (initial condition included at time position 0).
+        """
+        raise NotImplementedError
+    
 
-  def step(
-      self,
-      dynamics: SdeDynamics,
-      x0: Array,
-      t0: Array,
-      dt: Array,
-      rng: Array,
-      params: SdeParams,
-  ) -> Array:
-    """Advances the current state one step forward in time."""
-    raise NotImplementedError
+class IterativeSdeSolver(nn.Module):
+    """A SDE solver based on an iterative step function using PyTorch
+    
+    Attributes:
+      time_axis_pos: The index where the time axis should be placed. Defaults
+      to the lead axis (index 0).
+    """
 
-  def __call__(
-      self,
-      dynamics: SdeDynamics,
-      x0: Array,
-      tspan: Array,
-      rng: Array,
-      params: SdeParams,
-  ) -> Array:
-    """Solves a SDE by integrating the step function with `jax.lax.scan`."""
+    def __init__(
+            self,
+            rng: torch.Generator = None,
+            time_axis_pos: int = 0, 
+            terminal_only: bool = False
+    ):
+        super().__init__()
+        self.rng = rng if rng is not None else torch.Generator().manual_seed(0)
+        self.time_axis_pos = time_axis_pos
+        self.terminal_only = terminal_only
 
-    def scan_fun(
-        state: tuple[Array, Array],
-        ext: tuple[Array, Array],
-    ) -> tuple[tuple[Array, Array], Array]:
-      x0, t0 = state
-      t_next, step_rng = ext
-      dt = t_next - t0
-      x_next = self.step(dynamics, x0, t0, dt, step_rng, params)
-      return (x_next, t_next), x_next
+    def step(
+            self,
+            dynamics: SdeDynamics,
+            x0: Tensor,
+            t0: Tensor,
+            dt: Tensor
+    ) -> Tensor:
+        """Advances the current state one step forward in time."""
+        raise NotImplementedError
 
-    step_rngs = jax.random.split(rng, len(tspan))
-    _, out = jax.lax.scan(scan_fun, (x0, tspan[0]), (tspan[1:], step_rngs[:-1]))
-    out = jnp.concatenate([x0[None], out], axis=0)
-    if self.time_axis_pos:
-      out = jnp.moveaxis(out, 0, self.time_axis_pos)
-    return out
+    def forward(
+            self,
+            dynamics: SdeDynamics,
+            x0: Tensor,
+            tspan: Tensor
+    ) -> Tensor:
+        """Solves an SDE by iterating the step function."""
 
+        x_path = [x0]
+        current_state = x0
+        for i in range(len(tspan) - 1):
+            t0 = tspan[i]
+            t_next = tspan[i + 1]
+            dt = t_next - t0
+            current_state = self.step(
+                dynamics=dynamics, x0=current_state, t0=t0, dt=dt
+                )
+            x_path.append(current_state)
+        
+        out = torch.stack(x_path, dim=0)
+        if self.time_axis_pos != 0:
+            out = out.movedim(0, self.time_axis_pos)
+        return out
+    
 
-class LoopSdeSolver:
-  """A SDE solver based on `jax.lax.while_loop`.
+class EulerMaruyamaStep(nn.Module):
+    """The Euler-Maruyama scheme for integrating the Ito SDE"""
 
-  Compared to the `scan` based version, the while-loop-based solver is more
-  memory friendly. As a tradeoff, this implementation is not reverse-mode
-  differentiable.
-  """
+    def __init__(self, rng: torch.Generator = None):
+        super().__init__()
+        self.rng = rng if rng is not None else torch.Generator().manual_seed(0)
 
-  terminal_only: bool = True
+    def step(
+            self,
+            dynamics: SdeDynamics,
+            x0: Tensor,
+            t0: Tensor,
+            dt: Tensor
+    ) -> Tensor:
+        """Makes one Euler-Maruyama integration step in time."""
 
-  def step(
-      self,
-      dynamics: SdeDynamics,
-      x0: Array,
-      t0: Array,
-      dt: Array,
-      rng: Array,
-      params: SdeParams,
-  ) -> Array:
-    """Advances the current state one step forward in time."""
-    raise NotImplementedError
+        drift_coeffs = dynamics.drift(x0, t0)
+        diffusion_coeffs = dynamics.diffusion(x0, t0)
 
-  def __call__(
-      self,
-      dynamics: SdeDynamics,
-      x0: Array,
-      tspan: Array,
-      rng: Array,
-      params: SdeParams,
-  ) -> Array:
-    """Solves a SDE by integrating the step function with `lax.while_loop`."""
-    # Rng splits based on the length of `tspan` so that the results are
-    # identical to that of the scan verson.
-    rngs = jax.random.split(rng, num=len(tspan))
-    step_fn = functools.partial(self.step, dynamics)
-
-    def cond_fn(loop_state: tuple[int, Array]) -> bool:
-      return loop_state[0] < len(tspan) - 1
-
-    def body_fn(loop_state: tuple[int, Array]) -> tuple[int, Array]:
-      i, xi = loop_state
-      dt = tspan[i + 1] - tspan[i]
-      x_next = step_fn(x0=xi, t0=tspan[i], dt=dt, rng=rngs[i], params=params)
-      return i + 1, x_next
-
-    _, out = jax.lax.while_loop(cond_fn, body_fn, (0, x0))
-    return out
-
-
-class EulerMaruyamaStep:
-  """The Euler-Maruyama scheme for integrating the Ito SDE."""
-
-  def step(
-      self,
-      dynamics: SdeDynamics,
-      x0: Array,
-      t0: Array,
-      dt: Array,
-      rng: Array,
-      params: SdeParams,
-  ) -> Array:
-    """Makes one Euler-Maruyama integration step in time."""
-    _check_sde_params_fields(params)
-    drift_coeffs = dynamics.drift(x0, t0, params["drift"])
-    diffusion_coeffs = dynamics.diffusion(x0, t0, params["diffusion"])
-    noise = jax.random.normal(rng, x0.shape, x0.dtype)
-    return (
-        x0
-        + dt * drift_coeffs
-        # `abs` to enable integration backward in time
-        + diffusion_coeffs * noise * jnp.sqrt(jnp.abs(dt))
-    )
-
-
-class ScanBasedEulerMaruyama(EulerMaruyamaStep, ScanSdeSolver):
-  ...
-
-
-class LoopBasedEulerMaruyama(EulerMaruyamaStep, LoopSdeSolver):
-  ...
-
-
-def EulerMaruyama(  # pylint: disable=invalid-name
-    iter_type: Literal["scan", "loop"] = "scan",
-    time_axis_pos: int | None = None,
-) -> SdeSolver:
-  match iter_type:
-    case "scan":
-      time_axis_pos = time_axis_pos or 0
-      return ScanBasedEulerMaruyama(time_axis_pos=time_axis_pos)
-    case "loop":
-      if time_axis_pos is not None:
-        warnings.warn(
-            "`time_axis_pos` is set but does not apply to loop-based solver."
+        noise = torch.randn(
+            size=x0.shape, generator=self.rng, dtype=x0.dtype, device=x0.device
+            )
+        return (
+            x0 + 
+            dt * drift_coeffs + 
+            # abs to enable integration backward in time
+            diffusion_coeffs * noise * torch.sqrt(torch.abs(dt))
         )
-      return LoopBasedEulerMaruyama()
+    
+class EulerMaruyama(EulerMaruyamaStep, IterativeSdeSolver):
+    """Solver using the Euler-Maruyama with iteration (i.e. looping through time steps)."""
+    def __init__(self, rng: torch.Generator = None, time_axis_pos: int = 0):
+        super().__init__()
+        EulerMaruyamaStep.__init__(self, rng=rng)
+        IterativeSdeSolver.__init__(self, rng=rng, time_axis_pos=time_axis_pos)
+
+
+# def EulerMaruyama(time_axis_pos: int | None = None) -> SdeSolver:
+#     """Factory function to choose between solvers if different ones are implemented"""
+#     time_axis_pos = time_axis_pos or 0
+#     return EulerMaruyamaBase(time_axis_pos)
