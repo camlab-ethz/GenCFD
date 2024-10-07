@@ -12,6 +12,41 @@ import netCDF4 as nc
 import numpy as np
 
 
+class CloudShockDataset(Dataset):
+    def __init__(self, file_path, transform=None, partial: tuple = None):
+        self.data = nc.Dataset(file_path)
+        self.num_data, self.time, self.x_dim, self.y_dim, self.channels = self.data['data'].shape
+        self.transform = transform
+
+        if partial is not None:
+            idx_start, idx_end = partial
+            self.data_tensor = torch.tensor(
+                self.data['data'][idx_start:idx_end, 0, ...], 
+                dtype=torch.float32
+                )
+        else:
+            self.data_tensor = torch.tensor(
+                self.data['data'],
+                dtype=torch.float32
+            )
+
+    def __len__(self):
+        # Number of samples in the dataset
+        return self.num_data * self.time
+
+    def __getitem__(self, idx):
+        # Calculate member and time indices based on the overall index
+        member_idx = idx // self.time
+        time_idx = idx % self.time
+
+        data = self.data['data'][member_idx, time_idx, :, :, :]  # Shape (x, y, c)
+
+        if self.transform:
+            data = self.transform(data)
+
+        return torch.tensor(data, dtype=torch.float32)
+
+
 # class BaseDataset(Dataset):
 #     def __init__(self, dataset, n_spatial_dim: int):
 #         self.dataset = dataset
@@ -101,38 +136,3 @@ import numpy as np
 #     dataloader = create_dataloader(eval_data, n_spatial_dim=spatial_dim, batch_size=batch_size, shuffle=shuffle, cache=False)
 
 #     return eval_data, dataloader
-
-
-class CloudShockDataset(Dataset):
-    def __init__(self, file_path, transform=None, partial: tuple = None):
-        self.data = nc.Dataset(file_path)
-        self.num_data, self.time, self.x_dim, self.y_dim, self.channels = self.data['data'].shape
-        self.transform = transform
-
-        if partial is not None:
-            idx_start, idx_end = partial
-            self.data_tensor = torch.tensor(
-                self.data['data'][idx_start:idx_end, 0, ...], 
-                dtype=torch.float32
-                )
-        else:
-            self.data_tensor = torch.tensor(
-                self.data['data'],
-                dtype=torch.float32
-            )
-
-    def __len__(self):
-        # Number of samples in the dataset
-        return self.num_data * self.time
-
-    def __getitem__(self, idx):
-        # Calculate member and time indices based on the overall index
-        member_idx = idx // self.time
-        time_idx = idx % self.time
-
-        data = self.data['data'][member_idx, time_idx, :, :, :]  # Shape (x, y, c)
-
-        if self.transform:
-            data = self.transform(data)
-
-        return torch.tensor(data, dtype=torch.float32)
