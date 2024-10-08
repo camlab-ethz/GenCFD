@@ -51,32 +51,38 @@ class SdeSolverTest(unittest.TestCase):
 
 
     def test_linear_drift_and_diffusion(self):
-        dt = 1e-4
-        tspan = torch.arange(100) * dt
-        rng = torch.Generator().manual_seed(0)
-        x0 = torch.tensor(1.0, dtype=torch.float64)
-        mu, sigma = 1.5, 0.25
+        for terminal_only in (False, True):
+            dt = 1e-4
+            tspan = torch.arange(100) * dt
+            rng_solver = torch.Generator().manual_seed(0)
+            rng_wiener = torch.Generator().manual_seed(0)
+            x0 = torch.tensor(1.0, dtype=torch.float64)
+            mu, sigma = 1.5, 0.25
 
-        solver = EulerMaruyama(rng=rng)
-        out = solver(
-            dynamics=SdeDynamics(
-                drift=lambda x, t: mu * x,
-                diffusion=lambda x, t: sigma * x,
-            ),
-            x0=x0,
-            tspan=tspan
-        )
-        # Simulate Wiener process
-        wiener_increments = torch.randn(len(tspan), dtype=torch.float64, generator=rng) * torch.sqrt(torch.tensor(dt))
-        path = torch.cumsum(wiener_increments[:-1], dim=0)
-        path = torch.cat([torch.zeros(1, dtype=torch.float64), path])
-        
-        # Analytical solution
-        # dX_t = mu * X_t * dt + sigma * X_t * dW_t
-        # => X_t = X_0 * exp(mu * t + sigma * W_t)
-        expected = x0 * torch.exp(mu * tspan + sigma * path)
-        # breakpoint()
-        np.testing.assert_allclose(out.numpy(), expected.numpy(), atol=1e-2, rtol=1e-1)
+            solver = EulerMaruyama(rng=rng_solver, terminal_only=terminal_only)
+            out = solver(
+                dynamics=SdeDynamics(
+                    drift=lambda x, t: mu * x,
+                    diffusion=lambda x, t: sigma * x,
+                ),
+                x0=x0,
+                tspan=tspan
+            )
+            # Simulate Wiener process
+            noise = torch.randn((1,), generator=rng_wiener)
+            for _ in range(1, len(tspan)):
+                noise = torch.cat([noise, torch.randn((1,), generator=rng_wiener)], dim=0)
+            wiener_increments = noise * torch.sqrt(torch.tensor(dt))
+            path = torch.cumsum(wiener_increments[:-1], dim=0)
+            path = torch.cat([torch.zeros(1, dtype=torch.float64), path])
+            
+            # Analytical solution
+            # dX_t = mu * X_t * dt + sigma * X_t * dW_t
+            # => X_t = X_0 * exp(mu * t + sigma * W_t)
+            expected = x0 * torch.exp(mu * tspan + sigma * path)
+            if terminal_only:
+                expected = expected[-1]
+            np.testing.assert_allclose(out.numpy(), expected.numpy(), atol=1e-3, rtol=1e-2)
 
 
 

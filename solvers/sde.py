@@ -110,8 +110,11 @@ class IterativeSdeSolver(nn.Module):
             tspan: Tensor
     ) -> Tensor:
         """Solves an SDE by iterating the step function."""
+        
+        if not self.terminal_only:
+            # store the entire path
+            x_path = [x0]
 
-        x_path = [x0]
         current_state = x0
         for i in range(len(tspan) - 1):
             t0 = tspan[i]
@@ -120,12 +123,16 @@ class IterativeSdeSolver(nn.Module):
             current_state = self.step(
                 dynamics=dynamics, x0=current_state, t0=t0, dt=dt
                 )
-            x_path.append(current_state)
+            if not self.terminal_only:
+                x_path.append(current_state)
         
-        out = torch.stack(x_path, dim=0)
-        if self.time_axis_pos != 0:
-            out = out.movedim(0, self.time_axis_pos)
-        return out
+        if self.terminal_only:
+            return current_state
+        else:
+            out = torch.stack(x_path, dim=0)
+            if self.time_axis_pos != 0:
+                out = out.movedim(0, self.time_axis_pos)
+            return out
     
 
 class EulerMaruyamaStep(nn.Module):
@@ -159,10 +166,16 @@ class EulerMaruyamaStep(nn.Module):
     
 class EulerMaruyama(EulerMaruyamaStep, IterativeSdeSolver):
     """Solver using the Euler-Maruyama with iteration (i.e. looping through time steps)."""
-    def __init__(self, rng: torch.Generator = None, time_axis_pos: int = 0):
+    def __init__(
+            self, rng: torch.Generator = None, 
+            time_axis_pos: int = 0, 
+            terminal_only: bool = False
+        ):
         super().__init__()
         EulerMaruyamaStep.__init__(self, rng=rng)
-        IterativeSdeSolver.__init__(self, rng=rng, time_axis_pos=time_axis_pos)
+        IterativeSdeSolver.__init__(
+            self, rng=rng, time_axis_pos=time_axis_pos, terminal_only=terminal_only
+        )
 
 
 # def EulerMaruyama(time_axis_pos: int | None = None) -> SdeSolver:
