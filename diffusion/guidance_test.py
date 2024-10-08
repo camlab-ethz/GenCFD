@@ -15,7 +15,8 @@
 import torch as th
 import numpy as np
 import unittest
-import guidance
+# import guidance
+from diffusion import guidance
 
 
 class GuidanceTransformsTest(unittest.TestCase):
