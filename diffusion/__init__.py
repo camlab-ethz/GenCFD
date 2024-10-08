@@ -33,7 +33,7 @@ from diffusion.diffusion import (
     tangent_noise_schedule,
     time_uniform_sampling,
 )
-from inference.guidance import (
+from diffusion.guidance import (
     ClassifierFreeHybrid,
     InfillFromSlices,
     Transform as GuidanceTransform,
