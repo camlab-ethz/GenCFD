@@ -18,7 +18,6 @@ from collections.abc import Mapping
 from typing import Any, NamedTuple, Protocol, Literal, ClassVar
 import torch
 from torch import nn
-import warnings
 
 Tensor = torch.Tensor
 SdeParams = Mapping[str, Any]
@@ -26,7 +25,7 @@ SdeParams = Mapping[str, Any]
 class SdeCoefficientFn(Protocol):
     """A callable type for the drift or diffusion coefficients of an SDE."""
 
-    def forward(self, x: Tensor, t: Tensor) -> Tensor:
+    def forward(self, x: Tensor, t: Tensor, params: SdeParams) -> Tensor:
         """Evaluates the drift or diffusion coefficients."""
         ...
 
@@ -35,6 +34,12 @@ class SdeDynamics(NamedTuple):
 
     drift: SdeCoefficientFn
     diffusion: SdeCoefficientFn
+
+def _check_sde_params_fields(params: SdeParams) -> None:
+    if not ("drift" in params.keys() and "diffusion" in params.keys()):
+        raise ValueError(
+            "'params' must contain both 'drift' and 'diffusion' fields."
+        )
 
   
 class SdeSolver(nn.Module):
@@ -98,7 +103,8 @@ class IterativeSdeSolver(nn.Module):
             dynamics: SdeDynamics,
             x0: Tensor,
             t0: Tensor,
-            dt: Tensor
+            dt: Tensor,
+            params: SdeParams
     ) -> Tensor:
         """Advances the current state one step forward in time."""
         raise NotImplementedError
@@ -107,7 +113,8 @@ class IterativeSdeSolver(nn.Module):
             self,
             dynamics: SdeDynamics,
             x0: Tensor,
-            tspan: Tensor
+            tspan: Tensor,
+            params: SdeParams
     ) -> Tensor:
         """Solves an SDE by iterating the step function."""
         
@@ -121,7 +128,11 @@ class IterativeSdeSolver(nn.Module):
             t_next = tspan[i + 1]
             dt = t_next - t0
             current_state = self.step(
-                dynamics=dynamics, x0=current_state, t0=t0, dt=dt
+                dynamics=dynamics, 
+                x0=current_state, 
+                t0=t0, 
+                dt=dt, 
+                params=params
                 )
             if not self.terminal_only:
                 x_path.append(current_state)
@@ -147,12 +158,13 @@ class EulerMaruyamaStep(nn.Module):
             dynamics: SdeDynamics,
             x0: Tensor,
             t0: Tensor,
-            dt: Tensor
+            dt: Tensor,
+            params: SdeParams
     ) -> Tensor:
         """Makes one Euler-Maruyama integration step in time."""
-
-        drift_coeffs = dynamics.drift(x0, t0)
-        diffusion_coeffs = dynamics.diffusion(x0, t0)
+        _check_sde_params_fields(params)
+        drift_coeffs = dynamics.drift(x0, t0, params["drift"])
+        diffusion_coeffs = dynamics.diffusion(x0, t0, params["diffusion"])
 
         noise = torch.randn(
             size=x0.shape, generator=self.rng, dtype=x0.dtype, device=x0.device

@@ -242,8 +242,8 @@ class PreconditionedDenoiser(UNet):
                      normalize_qk=normalize_qk,
                      dtype=dtype,
                      device=device)
+    
     self.sigma_data = sigma_data
-    # TODO: Continue Rewriting!
     
   # Deleted y:Tensor after x!
   def forward(self, x: Tensor, sigma: Tensor,

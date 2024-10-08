@@ -141,7 +141,9 @@ class Diffusion:
     scaled_forward = lambda t: th.as_tensor(sigma(t)) * data_std
     scaled_inverse = lambda y: th.as_tensor(sigma.inverse(y / data_std))
     scaled_sigma = InvertibleSchedule(scaled_forward, scaled_inverse)
-    return cls(scale=th.ones_like, sigma=scaled_sigma)
+    # TODO: Check if it still works: changed th.ones_like to th.ones_like(...)
+    # return cls(scale=th.ones_like, sigma=scaled_sigma)
+    return cls(scale=lambda s: th.as_tensor(s/s), sigma=scaled_sigma)
 
 
 def create_variance_preserving_scheme(

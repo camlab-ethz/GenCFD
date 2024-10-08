@@ -18,11 +18,12 @@ class SdeSolverTest(unittest.TestCase):
 
         out = solver(
             dynamics=SdeDynamics(
-                drift=lambda x, t: torch.ones_like(x),
-                diffusion=lambda x, t: torch.zeros_like(x)
+                drift=lambda x, t, params: torch.ones_like(x),
+                diffusion=lambda x, t, params: torch.zeros_like(x)
             ),
             x0=torch.zeros(x_dim),
-            tspan=tspan
+            tspan=tspan,
+            params = {"drift": {}, "diffusion": {}}
         )
         final = out[-1]
         expected = torch.ones(x_dim) * tspan[-1]
@@ -38,11 +39,12 @@ class SdeSolverTest(unittest.TestCase):
         def solve(solver):
             return solver(
                 dynamics=SdeDynamics(
-                    drift=lambda x, t: 2 * x,
-                    diffusion=lambda x, t: 1 + x,
+                    drift=lambda x, t, params: params * x,
+                    diffusion=lambda x, t, params: params + x,
                 ),
                 x0=torch.ones(x_dim),
-                tspan=tspan
+                tspan=tspan,
+                params={"drift": 2, "diffusion": 1}
             )
 
         solver = EulerMaruyama(rng=rng)
@@ -60,13 +62,15 @@ class SdeSolverTest(unittest.TestCase):
             mu, sigma = 1.5, 0.25
 
             solver = EulerMaruyama(rng=rng_solver, terminal_only=terminal_only)
+            dynamics_params = {"drift": mu, "diffusion": sigma}
             out = solver(
                 dynamics=SdeDynamics(
-                    drift=lambda x, t: mu * x,
-                    diffusion=lambda x, t: sigma * x,
+                    drift=lambda x, t, params: params * x,
+                    diffusion=lambda x, t, params: params * x,
                 ),
                 x0=x0,
-                tspan=tspan
+                tspan=tspan,
+                params=dynamics_params
             )
             # Simulate Wiener process
             noise = torch.randn((1,), generator=rng_wiener)
@@ -97,11 +101,12 @@ class SdeSolverTest(unittest.TestCase):
         solver = EulerMaruyama(rng=rng_solver)
         out = solver(
             dynamics=SdeDynamics(
-                drift=lambda x, t: torch.ones_like(x),
-                diffusion=lambda x, t: torch.ones_like(x)
+                drift=lambda x, t, params: torch.ones_like(x),
+                diffusion=lambda x, t, params: torch.ones_like(x)
             ),
             x0=torch.zeros(x_dim),
-            tspan=tspan
+            tspan=tspan,
+            params = {"drift": {}, "diffusion": {}}
         )
 
         # Simulate Wiener process
@@ -126,11 +131,12 @@ class SdeSolverTest(unittest.TestCase):
         solver = EulerMaruyama(rng=rng, time_axis_pos=1)
         out = solver(
             dynamics=SdeDynamics(
-                drift=lambda x, t: torch.ones_like(x),
-                diffusion=lambda x, t: torch.ones_like(x)
+                drift=lambda x, t, params: torch.ones_like(x),
+                diffusion=lambda x, t, params: torch.ones_like(x)
             ),
             x0=torch.zeros(batch_sz, x_dim),
-            tspan=tspan
+            tspan=tspan,
+            params = {"drift": {}, "diffusion": {}}
         )
         self.assertEqual(out.shape, (batch_sz, num_steps, x_dim))
 
