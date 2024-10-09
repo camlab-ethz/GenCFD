@@ -157,7 +157,7 @@ class Sampler:
 
     denoised = self.denoise(x1, self.tspan, cond, guidance_inputs)
 
-    samples = denoised[-1] if self.return_full_paths else denoised
+    samples = denoised[-1] if self.return_full_paths else denoised 
     if self.apply_denoise_at_end:
       denoise_fn = self.get_guided_denoise_fn(guidance_inputs=guidance_inputs)
       samples = denoise_fn(
@@ -261,7 +261,6 @@ class SdeSampler(Sampler):
     params = dict(
         drift=dict(guidance_inputs=guidance_inputs, cond=cond), diffusion={}
     )
-
     denoised = self.integrator(self.dynamics, noisy, tspan, params)
     # SDE solvers may return either the full paths or the terminal state only.
     # If the former, the lead axis should be time.
