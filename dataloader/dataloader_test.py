@@ -1,6 +1,6 @@
 from torch.utils.data import DataLoader
 import os
-from dataloader.dataloader import CloudShockDataset
+from dataloader.dataloader import DummyDataset
 from utils.model_utils import reshape_jax_torch
 
 def test_cloudshock_dataset():
@@ -14,7 +14,7 @@ def test_cloudshock_dataset():
 
     try:
 
-        cloud_shock_dataset = CloudShockDataset(file_path=file_path, partial=small_dataset)
+        cloud_shock_dataset = DummyDataset(file_path=file_path, partial=small_dataset)
 
 
         data_item = cloud_shock_dataset.__getitem__(idx=0)

@@ -134,14 +134,17 @@ class BasicTrainState(TrainState):
     
     checkpoint = torch.load(ckpt_path, weights_only=True)
 
-    model.load_state_dict(checkpoint["params"])
-    optimizer.load_state_dict(checkpoint["opt_state"])
+    params = checkpoint["params"] if "params" in checkpoint.keys() else checkpoint["model_state_dict"]
+    opt_state = checkpoint["opt_state"] if "opt_state" in checkpoint.keys() else checkpoint["optimizer_state_dict"]
+
+    model.load_state_dict(params)
+    optimizer.load_state_dict(opt_state)
 
     return cls(
       model=model,
       optimizer=optimizer,
-      params=checkpoint["params"],
-      opt_state=checkpoint["opt_state"],
+      params=params,
+      opt_state=opt_state,
       step=checkpoint.get("step", 0)
     )
 

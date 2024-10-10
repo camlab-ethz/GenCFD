@@ -12,7 +12,7 @@ import netCDF4 as nc
 import numpy as np
 
 
-class CloudShockDataset(Dataset):
+class DummyDataset(Dataset):
     def __init__(self, file_path, transform=None, partial: tuple = None):
         self.data = nc.Dataset(file_path)
         self.num_data, self.time, self.x_dim, self.y_dim, self.channels = self.data['data'].shape

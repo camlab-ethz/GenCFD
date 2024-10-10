@@ -16,7 +16,7 @@
 """Training a denoising model for diffusion-based generation."""
 
 import dataclasses
-from typing import Any, Protocol, Optional
+from typing import Any, Protocol, Optional, Mapping
 
 import torch
 import torch.nn as nn
@@ -24,7 +24,6 @@ import torch.optim as optim
 import torch.nn.functional as F
 from torchmetrics import MetricCollection
 import numpy as np
-import random
 
 import diffusion as dfn_lib
 from model.base_model import base_model
@@ -238,15 +237,21 @@ class DenoisingModel(base_model.BaseModel):
 
 
   @staticmethod
-  def inference_fn(denoiser: nn.Module, x: Tensor, sigma: float | Tensor) -> Tensor:
+  def inference_fn(denoiser: nn.Module) -> Tensor:
     """Returns the inference denoising function."""
 
     # def _denoise(x: Tensor, y: Tensor, time: float | Tensor, sigma: float | Tensor) -> Tensor:
     #   if not torch.is_tensor(sigma):
     #     sigma = sigma * torch.ones((x.shape[0],))
     #   return denoiser.forward(x=x, y=y, sigma=sigma, is_training=False)
-    
-    if not torch.is_tensor(sigma):
-      sigma = sigma * torch.ones((x.shape[0],))
 
-    return denoiser.forward(x=x, sigma=sigma, is_training=False)
+    def _denoise(
+        x: Tensor, sigma: float | Tensor, cond: Mapping[str, Tensor] | None = None
+      ) -> Tensor:
+    
+      if not torch.is_tensor(sigma):
+        sigma = sigma * torch.ones((x.shape[0],))
+  
+      return denoiser.forward(x=x, sigma=sigma, is_training=False)
+  
+    return _denoise

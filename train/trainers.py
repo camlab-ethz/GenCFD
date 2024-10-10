@@ -277,19 +277,19 @@ class DenoisingTrainer(BasicTrainer[M, SD]):
     @staticmethod
     def inference_fn_from_state_dict(
         state: SD,
+        denoiser: nn.Module,
         *args,
         use_ema: bool = True,
         **kwargs
     ):
+        denoiser.eval()
         if use_ema:
             if state.ema_model:
-                variables = state.ema_parameters
+                denoiser.load_state_dict(state.ema_parameters)
+
             else:
                 raise ValueError("EMA model is None or not initialized")
-            
-        else:
-            variables = state.model.state_dict()
 
-        return dfn_lib.DenoisingModel.inference_fn(variables, *args, **kwargs)
+        return dfn_lib.DenoisingModel.inference_fn(denoiser, *args, **kwargs)
 
     
