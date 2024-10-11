@@ -52,17 +52,7 @@ from diffusion.schedulers import (
     uniform_time
 )
 
-from model.building_blocks.unets.unets import (
-    # AxialMLPInterpConvMerge,
-    # InterpConvMerge,
-    UNet,
-)
+from model.building_blocks.unets.unets import UNet
 from model.building_blocks.unets.unets import PreconditionedDenoiser as PreconditionedDenoiserUNet
-# from model.building_blocks.unets.unets3d import PreconditionedDenoiser3d as PreconditionedDenoiserUNet3d
-# from model.building_blocks.unets.unets3d import UNet3d
-# from diffusion.vivit import ViViT
-# from diffusion.vivit_diffusion import PreconditionedDenoiser as PreconditionedDenoiserViViT
-# from diffusion.vivit_diffusion import ViViTDiffusion
 
-from model.probabilistic_diffusion.denoising_model import DenoisingModel
-# from train.trainers import DenoisingTrainer
+from model.probabilistic_diffusion.denoising_model import DenoisingBaseModel

@@ -1,6 +1,6 @@
 from torch.utils.data import DataLoader
 import os
-from dataloader.dataloader import DummyDataset
+from dataloader.dataloader import DummyDataloader
 from utils.model_utils import reshape_jax_torch
 
 def test_cloudshock_dataset():
@@ -13,8 +13,8 @@ def test_cloudshock_dataset():
     small_dataset = (0, 100)  # Start and end indices for a partial dataset
 
     try:
-
-        cloud_shock_dataset = DummyDataset(file_path=file_path, partial=small_dataset)
+        
+        cloud_shock_dataset = DummyDataloader(file_path=file_path, partial=small_dataset)
 
 
         data_item = cloud_shock_dataset.__getitem__(idx=0)

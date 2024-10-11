@@ -9,10 +9,10 @@ from torch import optim
 from train import train
 import diffusion as dfn_lib
 # from model import probabilistic_diffusion as dfn
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 from torchvision import datasets, transforms
-from utils.callbacks import Callback, TqdmProgressBar, TrainStateCheckpoint
+from utils.callbacks import TqdmProgressBar, TrainStateCheckpoint
 from train.train_states import DenoisingModelTrainState
 from solvers.sde import EulerMaruyama
 
@@ -40,7 +40,7 @@ def get_mnist_dataset(split: str, batch_size: int):
     else:
         raise ValueError(f"Unknown split: {split}")
 
-    dataloader = DataLoader(mnist_dataset, batch_size=batch_size, shuffle=(split == 'train'), num_workers=2)
+    dataloader = DataLoader(mnist_dataset, batch_size=batch_size, shuffle=(split == 'train'), num_workers=0)
     return dataloader
 
 
@@ -51,41 +51,46 @@ def get_mnist_dataset(split: str, batch_size: int):
 # of the neural network parametrization.
 DATA_STD = 0.31
 
-denoiser_model = dfn_lib.PreconditionedDenoiserUNet(
-    out_channels=1,
-    rng=RNG,
-    num_channels=(64, 128),
-    downsample_ratio=(2, 2),
-    num_blocks=4,
-    noise_embed_dim=128,
-    padding_method="circular",
-    use_attention=True,
-    use_position_encoding=True,
-    num_heads=8,
-    device=device,
-    sigma_data=DATA_STD
-)
+use_model = 'PreconditionedDenoiser'
 
-# denoiser_model = dfn_lib.UNet(
-#     out_channels=1,
-#     rng=RNG,
-#     num_channels=(64, 128),
-#     downsample_ratio=(2, 2),
-#     num_blocks=4,
-#     noise_embed_dim=128,
-#     padding_method="circular",
-#     use_attention=True,
-#     use_position_encoding=True,
-#     num_heads=8,
-#     device=device
-# )
+if use_model == 'PreconditionedDenoiser':
+    denoiser_model = dfn_lib.PreconditionedDenoiserUNet(
+        out_channels=1,
+        rng=RNG,
+        num_channels=(64, 128),
+        downsample_ratio=(2, 2),
+        num_blocks=4,
+        noise_embed_dim=128,
+        padding_method="circular",
+        use_attention=True,
+        use_position_encoding=True,
+        num_heads=8,
+        device=device,
+        sigma_data=DATA_STD
+    )
+elif use_model == 'UNet':
+    denoiser_model = dfn_lib.UNet(
+        out_channels=1,
+        rng=RNG,
+        num_channels=(64, 128),
+        downsample_ratio=(2, 2),
+        num_blocks=4,
+        noise_embed_dim=128,
+        padding_method="circular",
+        use_attention=True,
+        use_position_encoding=True,
+        num_heads=8,
+        device=device
+    )
+else:
+    raise ValueError("Not a valid model")
 
 diffusion_scheme = dfn_lib.Diffusion.create_variance_exploding(
     sigma=dfn_lib.tangent_noise_schedule(),
     data_std=DATA_STD,
 )
 
-model = dfn_lib.DenoisingModel(
+model = dfn_lib.DenoisingBaseModel(
     # `input_shape` must agree with the expected sample shape (without the batch
     # dimension), which in this case is simply the dimensions of a single MNIST
     # sample.
@@ -97,7 +102,6 @@ model = dfn_lib.DenoisingModel(
     noise_weighting=dfn_lib.edm_weighting(data_std=DATA_STD),
     rng=RNG,
     rng_diff=RNG_DIFF,
-    seed=SEED,
     device=device
 )
 
@@ -130,7 +134,7 @@ noise = torch.randn(img.shape, device=device, generator=RNG)
 noised_img = img + noise
 
 
-# dummy initialize
+# dummy initialization of the Network
 model.initialize(img.shape[0])
 
 trainer = train.trainers.DenoisingTrainer(
@@ -143,27 +147,31 @@ trainer = train.trainers.DenoisingTrainer(
     device=device
 )
 
-# train.run(
-#     train_dataloader=train_dataloader,
-#     trainer=trainer,
-#     workdir=workdir,
-#     total_train_steps=num_train_steps,
-#     metric_writer=SummaryWriter(log_dir=workdir),
-#     metric_aggregation_steps=1000,
-#     eval_dataloader=eval_dataloader,
-#     eval_every_steps=1000,
-#     num_batches_per_eval=2,
-#     # callbacks=(Callback(workdir),),
-#     callbacks=(
-#         TqdmProgressBar(
-#             total_train_steps=num_train_steps,
-#             train_monitors=("train_loss",),
-#         ),
-#         TrainStateCheckpoint(
-#             base_dir=workdir, save_every_n_step=10000
-#         ),
-#     )
-# )
+# TODO: Set to True for a training run!
+run_training = True
+
+if run_training:
+    train.run(
+        train_dataloader=train_dataloader,
+        trainer=trainer,
+        workdir=workdir,
+        total_train_steps=num_train_steps,
+        metric_writer=SummaryWriter(log_dir=workdir),
+        metric_aggregation_steps=100,
+        eval_dataloader=eval_dataloader,
+        eval_every_steps=1000,
+        num_batches_per_eval=2,
+        # callbacks=(Callback(workdir),),
+        callbacks=(
+            TqdmProgressBar(
+                total_train_steps=num_train_steps,
+                train_monitors=("train_loss",),
+            ),
+            TrainStateCheckpoint(
+                base_dir=workdir, save_every_n_step=10000
+            ),
+        )
+    )
 
 
 ########################################### INFERENCE #############################################
@@ -200,4 +208,4 @@ for i in range(4):
   im = ax[i].imshow(samples[i, 0, :, :].cpu().detach().numpy() * 255, cmap="gray", vmin=0, vmax=255)
 
 plt.tight_layout()
-plt.show()
+plt.savefig("output.jpg")

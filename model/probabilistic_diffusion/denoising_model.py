@@ -1,5 +1,4 @@
-# Copyright 2024 The swirl_dynamics Authors and adaptations made
-# by the CAM Lab at ETH Zurich.
+# Copyright 2024 The swirl_dynamics Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -13,25 +12,127 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Training a denoising model for diffusion-based generation."""
+"""Generic model class for use in gradient descent mini-batch training."""
 
 import dataclasses
-from typing import Any, Protocol, Optional, Mapping
-
+from typing import (
+    Any, 
+    Protocol, 
+    Optional, 
+    Mapping,
+    Callable,
+    Union, 
+    Tuple
+)
+from abc import ABC, abstractmethod
 import torch
 import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
 from torchmetrics import MetricCollection
 import numpy as np
-
 import diffusion as dfn_lib
-from model.base_model import base_model
 
-from GPUtil.GPUtil import getGPUs
+# from GPUtil.GPUtil import getGPUs
+
 
 Tensor = torch.Tensor
+TensorDict = Mapping[str, Tensor]
+BatchType = Mapping[str, Union[np.ndarray, Tensor]]
+ModelVariable = Union[dict, tuple[dict, ...], Mapping[str, dict]]
+PyTree = Any
+LossAndAux = tuple[Tensor, tuple[TensorDict, PyTree]]
 Metrics = dict # Placeholder for metrics that are implemented!
+
+
+class BaseModel(ABC):
+  """Base class for models.
+
+  Wraps flax module(s) to provide interfaces for variable
+  initialization, computing loss and evaluation metrics. These interfaces are
+  to be used by a trainer to perform gradient updates as it steps through the
+  batches of a dataset.
+
+  Subclasses must implement the abstract methods.
+  """
+
+  @abstractmethod
+  def initialize(self) -> ModelVariable:
+    """Initializes variables of the wrapped flax module(s).
+
+    This method by design does not take any sample input in its argument. Input
+    shapes are expected to be statically known and used to create
+    initialization input for the model. For example::
+
+      import torch.nn as nn
+      
+      class MLP(BaseModel):
+        def __init__(self, input_shape: tuple[int], hidden_size: int):
+          super().__init__()
+          self.model = nn.Sequential(
+            nn.Linear(np.prod(input_shape), hidden_size),
+            nn.ReLU(),
+            nn.Linear(hidden_size, np.pord(input_shape))
+          )
+          self.input_shape = input_shape
+
+    Returns:
+      The initial variables for this model - can be a single or a tuple/mapping
+      of PyTorch variables.
+    """
+    raise NotImplementedError
+
+  @abstractmethod
+  def loss_fn(
+      self,
+      params: Union[PyTree, tuple[PyTree, ...]],
+      batch: BatchType,
+      rng: torch.Generator,
+      mutables: PyTree,
+      **kwargs,
+  ) -> LossAndAux:
+    """Computes training loss and metrics.
+
+    It is expected that gradient would be taken (via `jax.grad`) wrt `params`
+    during training.
+
+    Arguments:
+      params: model parameters wrt which the loss would be differentiated.
+      batch: a single batch of data.
+      rng: jax random key for randomized loss if needed.
+      mutables: model variables which are not differentiated against; can be
+        mutable if so desired.
+      **kwargs: additional static configs.
+
+    Returns:
+      loss: the (scalar) loss function value.
+      aux: two-item auxiliary data consisting of
+        metric_vars: a dict with values required for metric compute and logging.
+          They can either be final metric values computed inside the function or
+          intermediate values to be further processed into metrics.
+        mutables: non-differentiated model variables whose values may change
+          during function execution (e.g. batch stats).
+    """
+    raise NotImplementedError
+
+  def eval_fn(
+      self,
+      variables: Union[tuple[PyTree, ...], PyTree],
+      batch: BatchType,
+      rng: torch.Generator,
+      **kwargs,
+  ) -> TensorDict:
+    """Computes evaluation metrics."""
+    raise NotImplementedError
+
+  @staticmethod
+  def inference_fn(variables: PyTree, **kwargs) -> Callable[..., Any]:
+    """Returns an inference function with bound variables."""
+    raise NotImplementedError
+
+
+"""Training a denoising model for diffusion-based generation."""
+
 
 class DenoisingTorchModule(Protocol):
   """Expected interface of the flax module compatible with `DenoisingModel`.
@@ -47,7 +148,7 @@ class DenoisingTorchModule(Protocol):
 
 
 @dataclasses.dataclass(frozen=True, kw_only=True)
-class DenoisingModel(base_model.BaseModel):
+class DenoisingBaseModel(BaseModel):
   """Trains a model to remove Gaussian noise from samples.
 
   Attributes:
@@ -75,16 +176,12 @@ class DenoisingModel(base_model.BaseModel):
   noise_weighting: dfn_lib.NoiseLossWeighting
   rng_diff: torch.Generator
   rng: torch.Generator
-  seed: int = 0
   num_eval_noise_levels: int = 5
   num_eval_cases_per_lvl: int = 1
   min_eval_noise_lvl: float = 1e-3
   max_eval_noise_lvl: float = 50.0
   
-  input_channel: int = 1
-  which_tspan: str = 'exponential_noise_decay'
   consistent_weight: float = 0
-  compute_crps: bool = False
   device: Any | None = None
   dtype: torch.dtype = torch.float32
 
@@ -92,19 +189,12 @@ class DenoisingModel(base_model.BaseModel):
   def initialize(self, batch_size: int):
     """Method necessary for a dummy initialization!"""
     x_sample = torch.ones((batch_size,) + self.input_shape, dtype=self.dtype, device=self.device)
-    # x = x_sample[:,self.input_channel:, ...]
-    # y = x_sample[:, :self.input_channel, ...]
-    # TODO: Include the TIME once this model is built!
-    # return self.denoiser(
-    #     x=x, y=y, time=torch.ones((1,)), sigma=torch.ones((1,)), is_training=False
-    # )
     return self.denoiser(
         x=x_sample, sigma=torch.ones((batch_size,), dtype=self.dtype, device=self.device), is_training=False
     )
 
   def loss_fn(
       self,
-      # params: dict,
       batch: dict,
       mutables: Optional[dict] = None
   ):
@@ -123,39 +213,28 @@ class DenoisingModel(base_model.BaseModel):
     Returns:
       The loss value and a tuple of training metric and mutables.
     """
-
-    # data = batch["data"]
     data = batch
 
     batch_size = len(data)
-
-    x = data[:,self.input_channel:, ...]
-    y = data[:, :self.input_channel, ...]
-
-    # x_squared = torch.square(x)
     x_squared = torch.square(data)
 
     sigma = self.noise_sampling(rng=self.rng_diff, shape=(batch_size,)).to(device=self.device)
     weights = self.noise_weighting(sigma)
-    if weights.ndim != x.ndim:
-      weights = weights.view(-1, *([1] * (x.ndim - 1)))
+    if weights.ndim != data.ndim:
+      weights = weights.view(-1, *([1] * (data.ndim - 1)))
 
     noise = torch.randn(
       data.shape, dtype=self.dtype, device=self.device, generator=self.rng
       )
 
-    # noise = x + noise * sigma
-    if sigma.ndim != x.ndim:
-      noised = data + noise * sigma.view(-1, *([1] * (x.ndim - 1))) 
+    if sigma.ndim != data.ndim:
+      noised = data + noise * sigma.view(-1, *([1] * (data.ndim - 1))) 
     else:
       noised = data + noise * sigma
     
-    # denoised = self.denoiser.forward(x=noised, y=y, time=time, sigma=sigma, is_training=True)
     denoised = self.denoiser.forward(x=noised, sigma=sigma, is_training=True)
     denoised_square = torch.square(denoised)
 
-    # rel_norm = torch.mean(torch.square(x) / torch.mean(torch.square(x_squared)))
-    # loss = torch.mean(weights * torch.square(denoised - x))
     rel_norm = torch.mean(torch.square(data) / torch.mean(torch.square(x_squared)))
     loss = torch.mean(weights * torch.square(denoised - data))
     loss += self.consistent_weight * rel_norm * \
@@ -166,14 +245,11 @@ class DenoisingModel(base_model.BaseModel):
       "mem": 0. # TODO: Placeholder for memory metric!
     }
 
-    # print(f"metric_loss: {loss.item()}")
-
     return loss, (metric, mutables)
   
 
   def eval_fn(
       self,
-      # variables: dict,
       batch: dict
   ):
     """Compute denoising metrics on an eval batch.
@@ -210,12 +286,156 @@ class DenoisingModel(base_model.BaseModel):
       )
     )
 
-    # noise = torch.randn_like(x)
-    # noised = x + noise * sigma.unsqueeze(-1)
-    # denoise_fn = self.inference_fn(variables, self.denoiser)
-    # denoised = torch.stack([denoise_fn(noised[i], y[i], inputs_time[i], sigma[i]) for i in range(len(sigma))])
+    noise = torch.randn(
+      inputs.shape, device=self.device, dtype=self.dtype, generator=self.rng
+      )
+    
+    if sigma.ndim != inputs.ndim:
+      noised = inputs + noise * sigma.view(-1, *([1] * (inputs.ndim - 1))) 
+    else:
+      noised = inputs + noise * sigma
 
-    # ema_losses = torch.sqrt(torch.mean(torch.square(denoised - x), dim=-1) / torch.mean(torch.square(x), dim=-1))
+    inference_function = self.inference_fn(self.denoiser)
+    denoised = torch.stack(
+      [inference_function(noised[i], sigma[i]) for i in range(self.num_eval_noise_levels)]
+    )
+
+    ema_losses = torch.mean(torch.square(denoised - inputs), dim=[i for i in range(1, inputs.ndim)])
+
+    eval_losses = {f"eval_denoise_lvl{i}": loss.item() for i, loss in enumerate(ema_losses)}
+    return eval_losses
+
+
+  @staticmethod
+  def inference_fn(denoiser: nn.Module) -> Tensor:
+    """Returns the inference denoising function."""
+
+    def _denoise(
+        x: Tensor, sigma: float | Tensor, cond: Mapping[str, Tensor] | None = None
+      ) -> Tensor:
+    
+      if not torch.is_tensor(sigma):
+        sigma = sigma * torch.ones((x.shape[0],))
+  
+      return denoiser.forward(x=x, sigma=sigma, is_training=False)
+  
+    return _denoise
+  
+
+
+
+
+@dataclasses.dataclass(frozen=True, kw_only=True)
+class DenoisingModel(DenoisingBaseModel):
+  """Trains a model to remove Gaussian noise from samples.
+
+  Additional Attributes:
+    denoiser: The flax module for denoising. Its `__call__` method should adhere
+      to the `DenoisingFlaxModule` interface.
+  """
+  
+  input_channel: int = 1
+  which_tspan: str = 'exponential_noise_decay'
+  compute_crps: bool = False
+
+
+  def initialize(self, batch_size: int):
+    """Method necessary for a dummy initialization!"""
+    x_sample = torch.ones((batch_size,) + self.input_shape, dtype=self.dtype, device=self.device)
+    return self.denoiser(
+        x=x_sample, sigma=torch.ones((batch_size,), dtype=self.dtype, device=self.device), is_training=False
+    )
+
+  def loss_fn(
+      self,
+      batch: dict,
+      mutables: Optional[dict] = None
+  ):
+    """Computes the denoising loss on a training batch.
+
+    Args:
+      params: The parameters of the denoising model to differentiate against.
+      batch: A batch of training data expected to contain an `x` field with a
+        shape of `(batch, *spatial_dims, channels)`, representing the unnoised
+        samples. Optionally, it may also contain a `cond` field, which is a
+        dictionary of conditional inputs.
+      rng: Random key for training use.
+      mutables: The mutable (non-diffenretiated) parameters of the denoising
+        model (e.g. batch stats); *currently assumed empty*.
+
+    Returns:
+      The loss value and a tuple of training metric and mutables.
+    """
+    data = batch
+
+    batch_size = len(data)
+    x_squared = torch.square(data)
+
+    sigma = self.noise_sampling(rng=self.rng_diff, shape=(batch_size,)).to(device=self.device)
+    weights = self.noise_weighting(sigma)
+    if weights.ndim != data.ndim:
+      weights = weights.view(-1, *([1] * (data.ndim - 1)))
+
+    noise = torch.randn(
+      data.shape, dtype=self.dtype, device=self.device, generator=self.rng
+      )
+
+    if sigma.ndim != data.ndim:
+      noised = data + noise * sigma.view(-1, *([1] * (data.ndim - 1))) 
+    else:
+      noised = data + noise * sigma
+    
+    denoised = self.denoiser.forward(x=noised, sigma=sigma, is_training=True)
+    denoised_square = torch.square(denoised)
+
+    rel_norm = torch.mean(torch.square(data) / torch.mean(torch.square(x_squared)))
+    loss = torch.mean(weights * torch.square(denoised - data))
+    loss += self.consistent_weight * rel_norm * \
+            torch.mean(weights * torch.square(denoised_square - x_squared))
+    
+    metric = {
+      "loss": loss.item(),
+      "mem": 0. # TODO: Placeholder for memory metric!
+    }
+
+    return loss, (metric, mutables)
+  
+
+  def eval_fn(
+      self,
+      batch: dict
+  ):
+    """Compute denoising metrics on an eval batch.
+
+    Randomly selects members of the batch and noise them to a number of fixed
+    levels. Each level is aggregated in terms of the average L2 error.
+
+    Args:
+      variables: Variables for the denoising module.
+      batch: A batch of evaluation data expected to contain an `x` field with a
+        shape of `(batch, *spatial_dims, channels)`, representing the unnoised
+        samples. Optionally, it may also contain a `cond` field, which is a
+        dictionary of conditional inputs.
+      rng: Random key for evaluation use.
+
+    Returns:
+      A dictionary of denoising-based evaluation metrics.
+    """
+    data = batch
+    inputs = data[
+      torch.randint(0, data.shape[0], (self.num_eval_noise_levels, self.num_eval_cases_per_lvl), 
+                    generator=self.rng, device=self.device)
+      ]
+
+    sigma = torch.exp(
+      torch.linspace(
+        np.log(self.min_eval_noise_lvl),
+        np.log(self.max_eval_noise_lvl),
+        self.num_eval_noise_levels, 
+        dtype=self.dtype,
+        device=self.device
+      )
+    )
 
     noise = torch.randn(
       inputs.shape, device=self.device, dtype=self.dtype, generator=self.rng
@@ -240,11 +460,6 @@ class DenoisingModel(base_model.BaseModel):
   def inference_fn(denoiser: nn.Module) -> Tensor:
     """Returns the inference denoising function."""
 
-    # def _denoise(x: Tensor, y: Tensor, time: float | Tensor, sigma: float | Tensor) -> Tensor:
-    #   if not torch.is_tensor(sigma):
-    #     sigma = sigma * torch.ones((x.shape[0],))
-    #   return denoiser.forward(x=x, y=y, sigma=sigma, is_training=False)
-
     def _denoise(
         x: Tensor, sigma: float | Tensor, cond: Mapping[str, Tensor] | None = None
       ) -> Tensor:
@@ -255,3 +470,4 @@ class DenoisingModel(base_model.BaseModel):
       return denoiser.forward(x=x, sigma=sigma, is_training=False)
   
     return _denoise
+

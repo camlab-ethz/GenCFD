@@ -1,10 +1,28 @@
 import torch
 import torch.fft
 import pickle
-import numpy as np
+import time
 from typing import Optional, Union, Tuple
 
 Tensor = torch.Tensor
+
+import time
+
+
+def timeit(func):
+    """
+    Decorator that reports the execution time.
+    """
+
+    def wrapper(*args, **kwargs):
+        start_time = time.time()  # Capture start time
+        result = func(*args, **kwargs)  # Call the decorated function
+        end_time = time.time()  # Capture end time
+        print(f"{func.__name__} executed in {end_time - start_time} seconds.")
+        return result
+
+    return wrapper
+
 
 def compute_updates(
         data: Tensor, 
@@ -205,7 +223,7 @@ class StatsRecorder:
 
 def downsample(u_: Tensor, N: int) -> Tensor:
     N_old = u_.shape[-2]
-    freqs = torch.fft.fftfreq(N_old, d=1/N_old, device=u_.device)
+    freqs = torch.fft.fftfreq(N_old, d=1/N_old)
     select_freqs = torch.logical_and(freqs >= -N / 2, freqs <= N / 2 - 1)
     u_fft = torch.fft.fft2(u_)
     u_fft_down = u_fft[..., select_freqs, :][..., select_freqs]

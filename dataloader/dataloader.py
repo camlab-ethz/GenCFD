@@ -12,9 +12,13 @@ import netCDF4 as nc
 import numpy as np
 
 
-class DummyDataset(Dataset):
-    def __init__(self, file_path, transform=None, partial: tuple = None):
-        self.data = nc.Dataset(file_path)
+class DummyDataloader(Dataset):
+    def __init__(self, file_path: str = None, transform: bool = None, partial: tuple = None, data: torch.Tensor = None):
+        if file_path is not None:
+            self.data = nc.Dataset(file_path)
+        else:
+            self.data = data
+
         self.num_data, self.time, self.x_dim, self.y_dim, self.channels = self.data['data'].shape
         self.transform = transform
 
@@ -45,6 +49,14 @@ class DummyDataset(Dataset):
             data = self.transform(data)
 
         return torch.tensor(data, dtype=torch.float32)
+    
+    def get_loader(self, bs: int = 32, shuffle: bool = True, num_worker: int = 0):
+        return DataLoader(
+            self.data, 
+            batch_size=bs, 
+            shuffle=shuffle, 
+            num_workers=num_worker
+        )
 
 
 # class BaseDataset(Dataset):

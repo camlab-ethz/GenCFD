@@ -27,18 +27,16 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 import numpy as np
 from torchmetrics import MetricCollection, MeanMetric
 
-from model.base_model import base_model
 from train import train_states
 import diffusion as dfn_lib
 
 Tensor = torch.Tensor 
 BatchType = Mapping[str, Tensor]
 Metrics = MetricCollection
-# PyTree = Any
 
 M = TypeVar("M")  # Model
 S = TypeVar("S", bound=train_states.BasicTrainState)  # Train state
-D = TypeVar("D", bound=dfn_lib.DenoisingModel)
+D = TypeVar("D", bound=dfn_lib.DenoisingBaseModel)
 SD = TypeVar("SD", bound=train_states.DenoisingModelTrainState)
 
 
@@ -290,6 +288,4 @@ class DenoisingTrainer(BasicTrainer[M, SD]):
             else:
                 raise ValueError("EMA model is None or not initialized")
 
-        return dfn_lib.DenoisingModel.inference_fn(denoiser, *args, **kwargs)
-
-    
+        return dfn_lib.DenoisingBaseModel.inference_fn(denoiser, *args, **kwargs)
