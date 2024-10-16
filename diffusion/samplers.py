@@ -74,6 +74,25 @@ def denoiser2score(
   return _score
 
 
+def denoise_fn_output(
+    denoise_fn: DenoiseFn, 
+    x: Tensor, 
+    sigma: Tensor, 
+    cond: TensorMapping | None = None,
+    y: Tensor = None, 
+    lead_time: Tensor = None
+) -> Tensor:
+  """Depending on the task 'y' and the 'lead_time' compute the result of the 
+  denoise_fn
+  """
+  if y is None and lead_time is None:
+    return denoise_fn(x, sigma, cond)
+  elif y is not None and lead_time is None:
+    return denoise_fn(x, sigma, y, cond)
+  elif y is not None and lead_time is not None:
+    return denoise_fn(x, sigma, y, lead_time, cond)
+
+
 # ********************
 # Samplers
 # ********************
@@ -126,6 +145,8 @@ class Sampler:
   def generate(
       self,
       num_samples: int,
+      y: Tensor = None,
+      lead_time: Tensor = None,
       cond: TensorMapping | None = None,
       guidance_inputs: TensorMapping | None = None,
   ) -> Tensor:
@@ -137,6 +158,9 @@ class Sampler:
       cond: Explicit conditioning inputs for the denoising function. These
         should be provided **without** batch dimensions (one should be added
         inside this function based on `num_samples`).
+      y: is the output and result of the solver
+      lead_time: keeps track not of the diffusion time but of the timestep of the solver
+        this is relevant for an all to all training strategy
       guidance_inputs: Inputs used to construct the guided denoising function.
         These also should in principle not include a batch dimension.
 
@@ -154,17 +178,33 @@ class Sampler:
     if cond is not None:
       # cond = jax.tree.map(lambda x: jnp.stack([x] * num_samples, axis=0), cond)
       cond = {k: v.repeat(num_samples, *([1] * (v.dim() - 1))) for k, v in cond.items()}
-
-    denoised = self.denoise(x1, self.tspan, cond, guidance_inputs)
+    
+    denoised = self.denoise(
+      noisy=x1, 
+      tspan=self.tspan,  
+      y=y, 
+      lead_time=lead_time, 
+      cond=cond, 
+      guidance_inputs=guidance_inputs
+    )
 
     samples = denoised[-1] if self.return_full_paths else denoised 
     if self.apply_denoise_at_end:
       denoise_fn = self.get_guided_denoise_fn(guidance_inputs=guidance_inputs)
-      samples = denoise_fn(
-        samples / self.scheme.scale(self.tspan[-1]),
-        self.scheme.sigma(self.tspan[-1]),
-        cond,
+      samples = denoise_fn_output(
+        denoise_fn=denoise_fn,
+        x = samples / self.scheme.scale(self.tspan[-1]),
+        sigma=self.scheme.sigma(self.tspan[-1]),
+        cond=cond,
+        y=y,
+        lead_time=lead_time
       )
+      # samples = denoise_fn(
+      #   samples / self.scheme.scale(self.tspan[-1]),
+      #   self.scheme.sigma(self.tspan[-1]),
+      #   cond,
+      # )
+
       if self.return_full_paths:
         denoised = torch.cat([denoised, samples.unsqueeze(0)], axis=0)
 
@@ -174,8 +214,10 @@ class Sampler:
       self,
       noisy: Tensor,
       tspan: Tensor,
-      cond: TensorMapping | None,
-      guidance_inputs: TensorMapping | None,
+      y: Tensor = None,
+      lead_time: Tensor = None,
+      cond: TensorMapping | None = None,
+      guidance_inputs: TensorMapping | None = None,
   ) -> Tensor:
     """Applies iterative denoising to given noisy states.
 
@@ -245,6 +287,8 @@ class SdeSampler(Sampler):
       self,
       noisy: Tensor,
       tspan: Tensor,
+      y: Tensor = None,
+      lead_time: Tensor = None,
       cond: TensorMapping | None = None,
       guidance_inputs: TensorMapping | None = None,
   ) -> Tensor:
@@ -259,9 +303,18 @@ class SdeSampler(Sampler):
       )
 
     params = dict(
-        drift=dict(guidance_inputs=guidance_inputs, cond=cond), diffusion={}
+        drift=dict(guidance_inputs=guidance_inputs, cond=cond), 
+        diffusion={}
     )
-    denoised = self.integrator(self.dynamics, noisy, tspan, params)
+
+    denoised = self.integrator(
+      dynamics=self.dynamics, 
+      x0=noisy, 
+      tspan=tspan, 
+      params=params, 
+      y=y, 
+      lead_time=lead_time
+    )
     # SDE solvers may return either the full paths or the terminal state only.
     # If the former, the lead axis should be time.
     samples = denoised if self.integrator.terminal_only else denoised[-1]
@@ -288,7 +341,13 @@ class SdeSampler(Sampler):
     respectively.
     """
 
-    def _drift(x: Tensor, t: Tensor, params: Params) -> Tensor:
+    def _drift(
+        x: Tensor,
+        t: Tensor, 
+        params: Params, 
+        y: Tensor = None, 
+        lead_time: Tensor = None
+      ) -> Tensor:
       assert t.ndim == 0, "`t` must be a scalar."
       denoise_fn = self.get_guided_denoise_fn(
           guidance_inputs=params["guidance_inputs"]
@@ -300,7 +359,16 @@ class SdeSampler(Sampler):
       dlog_sigma_dt = dlog_dt(self.scheme.sigma)(t)
       dlog_s_dt = dlog_dt(self.scheme.scale)(t)
       drift = (2 * dlog_sigma_dt + dlog_s_dt) * x
-      drift = drift - 2 * dlog_sigma_dt * s * denoise_fn(x_hat, sigma, params["cond"]) # TODO: Check if "cond" should be added!
+      denoiser_output = denoise_fn_output(
+        denoise_fn=denoise_fn,
+        x=x_hat,
+        sigma=sigma,
+        cond=params["cond"],
+        y=y,
+        lead_time=lead_time
+      )
+      # denoise_fn(x_hat, sigma, params["cond"])
+      drift = drift - 2 * dlog_sigma_dt * s * denoiser_output 
       return drift
 
     def _diffusion(x: Tensor, t: Tensor, params: Params) -> Tensor:

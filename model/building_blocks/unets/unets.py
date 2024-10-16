@@ -226,6 +226,7 @@ class PreconditionedDenoiser(UNet):
                dtype: torch.dtype = torch.float32, 
                device: Any | None = None,
                sigma_data: float = 1.0,):
+    
     super().__init__(out_channels=out_channels,
                      rng=rng,
                      resize_to_shape=resize_to_shape,
@@ -245,9 +246,15 @@ class PreconditionedDenoiser(UNet):
     
     self.sigma_data = sigma_data
     
-  # Deleted y:Tensor after x!
-  def forward(self, x: Tensor, sigma: Tensor,
-              down_only: bool = False, is_training: bool=True) -> Tensor:
+
+  def forward(
+      self, 
+      x: Tensor, 
+      sigma: Tensor, 
+      y: Tensor = None,
+      down_only: bool = False, 
+      is_training: bool = True
+    ) -> Tensor:
     """Runs preconditioned denoising."""
     if sigma.dim() < 1:
       sigma = sigma.expand(x.shape[0])
@@ -269,14 +276,18 @@ class PreconditionedDenoiser(UNet):
     c_in = c_in.view(*expand_shape).expand_as(x)
     c_out = c_out.view(*expand_shape).expand_as(x)
     c_skip = c_skip.view(*expand_shape).expand_as(x)
-
-    # Forward pass through the UNet
-    # f_x = super().forward(
-    #   torch.cat((c_in * x, y), dim=-1), c_noise, 
-    #   is_training=is_training, down_only=down_only
-    # )
-    f_x = super().forward(
-      c_in*x, c_noise, is_training=is_training, down_only=down_only
+    
+    if y is None:
+      f_x = super().forward(
+        c_in*x, c_noise, is_training=is_training, down_only=down_only
+      )
+      
+    elif y is not None:
+      f_x = super().forward(
+        torch.cat((c_in * x, y), dim=1), 
+        c_noise, 
+        is_training=is_training, 
+        down_only=down_only
       )
 
     if down_only:

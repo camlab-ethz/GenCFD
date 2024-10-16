@@ -144,8 +144,8 @@ class BasicTrainer(BaseTrainer[M, S]):
     def eval_step(self, batch: BatchType) -> Callable[[S, BatchType], Metrics]:
         self.model.denoiser.eval()
         with torch.no_grad():
-            # TODO: Change batch[0]
-            metrics = self.model.eval_fn(batch[0].to(device=self.device))
+            # TODO: Change batch[0].to(device=self.device)
+            metrics = self.model.eval_fn(batch.to(device=self.device))
 
         eval_metrics = self.EvalMetrics(self.model.num_eval_noise_levels)
         for key, value in metrics.items():
@@ -238,8 +238,8 @@ class DenoisingTrainer(BasicTrainer[M, SD]):
     def train_step(self, batch: BatchType) -> Metrics:
         
         self.model.denoiser.train()
-        #TODO: Changed to device!
-        loss, (metrics, mem) = self.model.loss_fn(batch[0].to(device=self.device))
+        # batch[0]
+        loss, (metrics, mem) = self.model.loss_fn(batch.to(device=self.device))
 
         self.optimizer.zero_grad()
         loss.backward()
@@ -278,6 +278,7 @@ class DenoisingTrainer(BasicTrainer[M, SD]):
         denoiser: nn.Module,
         *args,
         use_ema: bool = True,
+        task: str = 'solver',
         **kwargs
     ):
         denoiser.eval()
@@ -288,4 +289,6 @@ class DenoisingTrainer(BasicTrainer[M, SD]):
             else:
                 raise ValueError("EMA model is None or not initialized")
 
-        return dfn_lib.DenoisingBaseModel.inference_fn(denoiser, *args, **kwargs)
+        return dfn_lib.DenoisingModel.inference_fn(denoiser, task, *args, **kwargs)
+
+    

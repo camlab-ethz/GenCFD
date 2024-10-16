@@ -56,3 +56,4 @@ from model.building_blocks.unets.unets import UNet
 from model.building_blocks.unets.unets import PreconditionedDenoiser as PreconditionedDenoiserUNet
 
 from model.probabilistic_diffusion.denoising_model import DenoisingBaseModel
+from model.probabilistic_diffusion.denoising_model import DenoisingModel

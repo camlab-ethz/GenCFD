@@ -133,7 +133,6 @@ labels = first_batch[1].to(device)
 noise = torch.randn(img.shape, device=device, generator=RNG)
 noised_img = img + noise
 
-
 # dummy initialization of the Network
 model.initialize(img.shape[0])
 
@@ -148,7 +147,7 @@ trainer = train.trainers.DenoisingTrainer(
 )
 
 # TODO: Set to True for a training run!
-run_training = True
+run_training = False
 
 if run_training:
     train.run(
@@ -182,7 +181,7 @@ trained_state = DenoisingModelTrainState.restore_from_checkpoint(
 
 # Construct the inference function
 denoise_fn = trainer.inference_fn_from_state_dict(
-    trained_state, use_ema=True, denoiser=denoiser_model
+    trained_state, use_ema=True, denoiser=denoiser_model, task='superresolver'
 )
 
 sampler = dfn_lib.SdeSampler(

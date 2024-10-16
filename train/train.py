@@ -104,7 +104,7 @@ def run(
       callback.on_train_batches_begin(trainer)
 
     num_steps = min(total_train_steps - cur_step, metric_aggregation_steps)
-    train_metrics = trainer.train(train_iter, num_steps).compute()
+    train_metrics = trainer.train(train_iter, num_steps).compute() 
     cur_step += num_steps
     metric_writer.add_scalars('train', train_metrics, cur_step)
 

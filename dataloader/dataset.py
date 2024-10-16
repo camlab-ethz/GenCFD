@@ -16,6 +16,8 @@ from utils.dataloader_utils import (
 )
 from dataloader.dataloader import DummyDataloader
 
+Tensor = torch.Tensor
+
 
 class TrainingSetBase:
     def __init__(self,
@@ -72,11 +74,10 @@ class TrainingSetBase:
     def collate_tf(self, data):
         return data
 
-#--------------------------------------
 
 class DataIC_Vel(TrainingSetBase):
     def __init__(self, 
-                 training_samples,
+                 training_samples = 100,
                  start = 0,
                  file = None):
         
@@ -96,7 +97,7 @@ class DataIC_Vel(TrainingSetBase):
         self.mean_training_output = np.array([4.9476512e-09, -1.5097612e-10])
         self.std_training_output = np.array([0.35681796, 0.5053845])
 
-    def get_dataset(self, nsamples: int = None, data_type: str = 'train'):
+    def get_tiny_dataset(self, nsamples: int = None, data_type: str = 'train') -> Tensor:
         
         if nsamples is not None:
             data = self.file["data"][0:nsamples, ...]
@@ -127,8 +128,8 @@ class DataIC_Vel(TrainingSetBase):
         
 
     def __getitem__(self, index):
-
-        index += self.start        
+        """Load data from disk on the fly given an index"""
+        index += self.start       
         data = self.file['data'][index].data
 
         data_input = data[0, ..., :self.input_channel]
@@ -139,7 +140,10 @@ class DataIC_Vel(TrainingSetBase):
 
         inputs = np.concatenate((data_input, data_output), -1)
         
-        return inputs
+        return torch.tensor(inputs, dtype=torch.float32).permute(2, 1, 0)
+    
+    def __len__(self):
+        return self.file['data'].shape[0]
 
 
 # data = DataIC_Vel(100)
