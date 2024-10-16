@@ -11,12 +11,12 @@ directory using the following commands.
 The training which is right now only valid for the DataIC_Vel dataset can 
 be run with the following command:
 ```shell
-python -m train.train_gencfd
+python3 -m train.train_gencfd
 ```
 
 ## Inference
 The inference loop which is right now only valid for the DataIC_Vel dataset can 
 be run with the following command:
 ```shell
-python -m eval.evaluate_gencfd
+python3 -m eval.evaluate_gencfd
 ```
