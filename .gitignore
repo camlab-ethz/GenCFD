@@ -4,3 +4,4 @@ checkpoint.pth
 /outputs
 /dataset
 /dataloader/test.py
+output.jpg

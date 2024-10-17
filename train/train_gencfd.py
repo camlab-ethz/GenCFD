@@ -4,13 +4,14 @@ import time
 import os
 import torch
 from torch import optim
-from torch.utils.data import DataLoader, random_split
+# from torch.utils.data import DataLoader, random_split
 from torch.utils.tensorboard import SummaryWriter
 
 from train import training_loop
 import diffusion as dfn_lib
 from utils.callbacks import TqdmProgressBar, TrainStateCheckpoint
-from dataloader.dataset import DataIC_Vel
+from dataloader.dataset import get_dataset_loader, get_dataset
+from utils.parser_utils import train_args
 
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -24,8 +25,9 @@ sys.path.append("/usr/local/cuda/bin/ptxas")
 
 if __name__ == "__main__":
 
+    args = train_args()
+
     # Dataloader parameters set manually
-    train_batch_size = 5
     generate_during_eval = False
     ckpt_interval = 100
     max_ckpt_to_keep = 3
@@ -40,15 +42,23 @@ if __name__ == "__main__":
         num_batches_per_eval = 100 // eval_batch_size
 
 
-    dataset = DataIC_Vel()
+    # dataset = DataIC_Vel()
 
-    train_size = int(0.8 * len(dataset))  # 80% for training
-    eval_size = len(dataset) - train_size  # 20% for evaluation 
+    # train_size = int(0.8 * len(dataset))  # 80% for training
+    # eval_size = len(dataset) - train_size  # 20% for evaluation 
 
-    train_dataset, eval_dataset = random_split(dataset, [train_size, eval_size])
+    # train_dataset, eval_dataset = random_split(dataset, [train_size, eval_size])
 
-    train_dataloader = DataLoader(dataset=train_dataset, batch_size=train_batch_size, shuffle=True)
-    eval_dataloader = DataLoader(dataset=eval_dataset, batch_size=train_batch_size, shuffle=True)
+    # train_dataloader = DataLoader(dataset=train_dataset, batch_size=train_batch_size, shuffle=True)
+    # eval_dataloader = DataLoader(dataset=eval_dataset, batch_size=train_batch_size, shuffle=True)
+
+    train_dataloader, eval_dataloader = get_dataset_loader(
+        name=args.dataset, batch_size=args.batch_size, num_worker=args.worker
+    )
+
+    train_dataset = get_dataset(name=args.dataset)
+
+    breakpoint()
 
     # Model parameters set manually
     use_position_encoding = True
@@ -126,20 +136,20 @@ if __name__ == "__main__":
     )
 
     # Dummy initialize the model:
-    model.initialize(batch_size=train_batch_size)
+    model.initialize(batch_size=args.batch_size)
 
     # Print number of Parameters:
     model_params = sum(p.numel() for p in model.denoiser.parameters() if p.requires_grad)
     print(f"Total number of model parameters: {model_params}")
 
 
-    trainer = train.trainers.DenoisingTrainer(
+    trainer = training_loop.trainers.DenoisingTrainer(
         model=model,
         optimizer=optim.Adam(model.denoiser.parameters(), lr=peak_lr),
         ema_decay=ema_decay,
         device=device
     )
-
+    torch.optim.AdamW()
     start_train = time.time()
 
     training_loop.run(

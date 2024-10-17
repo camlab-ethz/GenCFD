@@ -10,9 +10,7 @@ import time
 
 
 def timeit(func):
-    """
-    Decorator that reports the execution time.
-    """
+    """Decorator that reports the execution time."""
 
     def wrapper(*args, **kwargs):
         start_time = time.time()  # Capture start time

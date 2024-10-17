@@ -4,9 +4,12 @@ import os
 import netCDF4
 import numpy as np
 import torch
+from torch.utils.data import DataLoader, random_split
+from typing import Tuple
 # import skimage
 # from tqdm import tqdm
 import time
+
 from utils.dataloader_utils import (
     StatsRecorder, 
     timeit,
@@ -18,6 +21,9 @@ from dataloader.dataloader import DummyDataloader
 
 Tensor = torch.Tensor
 
+# **********************
+# Base Dataset Class
+# **********************
 
 class TrainingSetBase:
     def __init__(self,
@@ -74,7 +80,59 @@ class TrainingSetBase:
     def collate_tf(self, data):
         return data
 
+# **********************
+# Load Dataset
+# **********************
+def get_dataset(name: str) -> TrainingSetBase:
+    """Return the correct dataset"""
 
+    if name == 'DataIC_Vel':
+        return DataIC_Vel()
+    
+    elif name == 'DataIC_Vel_Test':
+        return DataIC_Vel_Test()
+    
+
+def get_dataset_loader(
+        name: str, 
+        batch_size: int = 5,
+        num_worker: int = 0,
+        split: bool = True, 
+        split_ratio: float = 0.8
+    ) -> Tuple[DataLoader, DataLoader] | DataLoader:
+    """Return a training and evaluation dataloader or a single dataloader"""
+
+    dataset = get_dataset(name=name)
+
+    if split:
+        train_size = int(0.8 * len(dataset))
+        eval_size = len(dataset) - train_size
+        train_dataset, eval_dataset = random_split(dataset, [train_size, eval_size])
+        train_dataloader = DataLoader(
+            dataset=train_dataset, 
+            batch_size=batch_size, 
+            shuffle=True, 
+            num_workers=num_worker
+        )
+        eval_dataloader = DataLoader(
+            dataset=eval_dataset, 
+            batch_size=batch_size, 
+            shuffle=True,
+            num_workers=num_worker
+        )
+        return (train_dataloader, eval_dataloader)
+    else:
+        return DataLoader(
+            dataset=dataset, 
+            batch_size=batch_size, 
+            shuffle=True, 
+            num_workers=num_worker
+        )
+
+
+# **********************
+# ALL AVAILABLE DATASETS
+# **********************
 class DataIC_Vel(TrainingSetBase):
     def __init__(self, 
                  training_samples = 100,
