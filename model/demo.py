@@ -5,8 +5,7 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 import torch
 from torch import optim
-
-from train import train
+from train import training_loop
 import diffusion as dfn_lib
 # from model import probabilistic_diffusion as dfn
 from torch.utils.data import DataLoader
@@ -19,9 +18,6 @@ from solvers.sde import EulerMaruyama
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 SEED = 0
 RNG = torch.Generator(device=device)
-RNG.manual_seed(SEED)
-
-RNG_DIFF = torch.Generator()
 RNG.manual_seed(SEED)
 
 print(device)
@@ -101,7 +97,6 @@ model = dfn_lib.DenoisingBaseModel(
     ),
     noise_weighting=dfn_lib.edm_weighting(data_std=DATA_STD),
     rng=RNG,
-    rng_diff=RNG_DIFF,
     device=device
 )
 
@@ -136,7 +131,7 @@ noised_img = img + noise
 # dummy initialization of the Network
 model.initialize(img.shape[0])
 
-trainer = train.trainers.DenoisingTrainer(
+trainer = training_loop.trainers.DenoisingTrainer(
     model=model,
     optimizer=optim.Adam(model.denoiser.parameters(), lr=peak_lr),
     # We keep track of an exponential moving average of the model parameters
@@ -150,7 +145,7 @@ trainer = train.trainers.DenoisingTrainer(
 run_training = False
 
 if run_training:
-    train.run(
+    training_loop.run(
         train_dataloader=train_dataloader,
         trainer=trainer,
         workdir=workdir,

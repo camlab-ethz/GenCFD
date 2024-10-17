@@ -281,3 +281,31 @@ class DataIC_Vel(TrainingSetBase):
 #         if shift != 0:
 #             inputs = translate_horizontally_periodic_unbatched(inputs, shift, axis=1)
 #         return inputs
+
+
+
+
+class DataIC_Vel_Test(TrainingSetBase):
+    def __init__(self, 
+                 training_samples = 100,
+                 start = 0,
+                 file = None):
+        
+        super().__init__(training_samples, start = start)
+        
+        self.class_name = self.__class__.__name__
+        self.input_channel = 2
+        self.output_channel = 2
+
+        self.file = {'data': torch.randn((99000, 2))}
+        
+
+    def __getitem__(self, index):
+        """Load data from disk on the fly given an index"""
+        index += self.start       
+        data = self.file['data'][index].data
+
+        return data
+    
+    def __len__(self):
+        return self.file['data'].shape[0]

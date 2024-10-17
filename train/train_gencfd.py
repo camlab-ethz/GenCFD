@@ -2,18 +2,15 @@ import sys
 import time
 
 import os
-import matplotlib.pyplot as plt
 import torch
 from torch import optim
 from torch.utils.data import DataLoader, random_split
 from torch.utils.tensorboard import SummaryWriter
 
-from train import train
+from train import training_loop
 import diffusion as dfn_lib
 from utils.callbacks import TqdmProgressBar, TrainStateCheckpoint
 from dataloader.dataset import DataIC_Vel
-from train.train_states import DenoisingModelTrainState
-from solvers.sde import EulerMaruyama
 
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -145,7 +142,7 @@ if __name__ == "__main__":
 
     start_train = time.time()
 
-    train.run(
+    training_loop.run(
         train_dataloader=train_dataloader,
         trainer=trainer,
         workdir=workdir,
