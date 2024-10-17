@@ -99,11 +99,31 @@ def run(
     callback.on_train_begin(trainer)
 
   cur_step = trainer.train_state.int_step
+
+  # setup for reinitializing iterator for training and evaluation
+  if run_evaluation:
+    epoch_eval = 1
+    step_diff_eval = 1 if run_sanity_eval_batch else 0
+    eval_steps_per_epoch = len(eval_dataloader) // num_batches_per_eval * eval_every_steps
+    epochs_eval_steps = epoch_eval * eval_steps_per_epoch - step_diff_eval
+  
+  epoch_train = 1
+  step_diff_train = 0
+  epochs_train_steps = epoch_train * len(train_dataloader) - step_diff_train
+
   while cur_step < total_train_steps:
     for callback in callbacks:
       callback.on_train_batches_begin(trainer)
 
     num_steps = min(total_train_steps - cur_step, metric_aggregation_steps)
+
+    # evaluate if training dataset reinitialization is necessary
+    if cur_step + num_steps > epochs_train_steps:
+      train_iter = iter(train_dataloader)
+      epoch_train += 1
+      step_diff_train += epochs_train_steps - cur_step
+      epochs_train_steps = epoch_train * len(train_dataloader) - step_diff_train
+
     train_metrics = trainer.train(train_iter, num_steps).compute() 
     cur_step += num_steps
     metric_writer.add_scalars('train', train_metrics, cur_step)
@@ -119,6 +139,14 @@ def run(
           callback.on_eval_batches_begin(trainer)
 
         assert eval_iter is not None
+
+        # evaluate if evaluation iterator needs to be reinitialized
+        if cur_step + num_batches_per_eval > epochs_eval_steps:
+          eval_iter = iter(eval_dataloader)
+          epoch_eval += 1
+          step_diff_eval += epochs_eval_steps - cur_step
+          epochs_eval_steps = epoch_eval * eval_steps_per_epoch - step_diff_eval
+
         eval_metrics = trainer.eval(eval_iter, num_batches_per_eval).compute()
         eval_metrics_to_log = {
             k: v for k, v in eval_metrics.items() if train_utils.is_scalar(v)
