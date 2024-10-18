@@ -2,6 +2,12 @@ import torch
 import torch.nn as nn
 import numpy as np
 from typing import Sequence
+from utils.parser_utils import ArgumentParser
+
+from diffusion.diffusion import (
+    NoiseLevelSampling, 
+    NoiseLossWeighting
+)
 
 Tensor = torch.Tensor
 
@@ -94,3 +100,51 @@ def channel_to_space(inputs: Tensor, block_shape: Sequence[int]) -> Tensor:
   new_shape = np.asarray(old_shape[batch_ndim:-1]) * np.asarray(block_shape)
   new_shape = old_shape[:batch_ndim] + tuple(new_shape) + (cout,)
   return reshape_jax_torch(torch.reshape(x, new_shape))
+
+
+def get_model_args(
+    args: ArgumentParser, 
+    out_channels: int, 
+    rng: torch.Generator, 
+    device: torch.device = None
+  ) -> dict:
+  """Return a dictionary of model parameters for the UNet architecture"""
+
+  # General UNet arguments
+  args_dict = {
+    'out_channels': out_channels, 'rng': rng, 'resize_to_shape': args.resize_to_shape,
+    'use_hr_residual': args.use_hr_residual, 'num_channels': args.num_channels, 
+    'downsample_ratio': args.downsample_ratio, 'num_blocks': args.num_blocks,
+    'noise_embed_dim': args.noise_embed_dim, 'padding_method': args.padding_method,
+    'dropout_rate': args.dropout_rate, 'use_attention': args.use_attention, 
+    'use_position_encoding': args.use_position_encoding, 'num_heads': args.num_heads,
+    'normalize_qk': args.normalize_qk, 'device': device
+  }
+  if args.model_type == 'PreconditionedDenoiser':
+     args_dict.update({'sigma_data': args.sigma_data})
+  return args_dict
+
+
+# General Denoiser arguments
+def get_denoiser_args(
+    args: ArgumentParser,
+    input_shape: int,
+    input_channels: int,
+    denoiser: nn.Module,
+    noise_sampling: NoiseLevelSampling,
+    noise_weighting: NoiseLossWeighting,
+    rng: torch.Generator,
+    device: torch.device = None,
+    dtype: torch.dtype = torch.float32
+  ) -> dict:
+  """Return a dictionary of parameters for the DenoisingModel"""
+
+  return {
+     'input_shape': input_shape, 'denoiser': denoiser, 'noise_sampling': noise_sampling,
+     'noise_weighting': noise_weighting, 'rng': rng, 
+     'num_eval_noise_levels': args.num_eval_noise_levels, 
+     'num_eval_cases_per_lvl': args.num_eval_cases_per_lvl,
+     'min_eval_noise_lvl': args.min_eval_noise_lvl, 'max_eval_noise_lvl': args.max_eval_noise_lvl,
+     'consistent_weight': args.consistent_weight, 'device': device, 'dtype': dtype,
+     'input_channel': input_channels, 'task': args.task
+  }

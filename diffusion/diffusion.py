@@ -171,7 +171,6 @@ def create_variance_exploding_scheme(
   return Diffusion.create_variance_exploding(sigma, data_std, device)
 
 
-# TODO: If not working create a tensor!
 def _linear_rescale(
     in_min: float, 
     in_max: float, 

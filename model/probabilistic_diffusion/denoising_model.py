@@ -293,7 +293,7 @@ class DenoisingBaseModel(BaseModel):
     else:
       noised = inputs + noise * sigma
 
-    inference_function = self.inference_fn(self.denoiser)
+    inference_function = self.inference_fn(self.denoiser, self.task)
     denoised = torch.stack(
       [inference_function(noised[i], sigma[i]) for i in range(self.num_eval_noise_levels)]
     )
@@ -333,8 +333,9 @@ class DenoisingModel(DenoisingBaseModel):
   """
   
   input_channel: int = 1
-  tspan_method: str = 'exponential_noise_decay'
-  compute_crps: bool = False
+  task: str = 'solver'
+  # tspan_method: str = 'exponential_noise_decay'
+  # compute_crps: bool = False
 
 
   def initialize(self, batch_size: int):
@@ -342,6 +343,7 @@ class DenoisingModel(DenoisingBaseModel):
     x_sample = torch.ones((batch_size,) + self.input_shape, dtype=self.dtype, device=self.device)
     x = x_sample[:, self.input_channel:, ...]
     y = x_sample[:, :self.input_channel, ...]
+
     return self.denoiser(
         x=x, 
         y=y, 
@@ -453,7 +455,7 @@ class DenoisingModel(DenoisingBaseModel):
     else:
       noised = x + noise * sigma
 
-    denoise_fn = self.inference_fn(self.denoiser)
+    denoise_fn = self.inference_fn(self.denoiser, self.task)
 
     denoised = torch.stack(
       [denoise_fn(x=noised[i], y=y[i], sigma=sigma[i]) for i in range(self.num_eval_noise_levels)]
@@ -462,7 +464,40 @@ class DenoisingModel(DenoisingBaseModel):
     ema_losses = torch.mean(torch.square(denoised - x), dim=[i for i in range(1, inputs.ndim)])
     eval_losses = {f"eval_denoise_lvl{i}": loss.item() for i, loss in enumerate(ema_losses)}
     return eval_losses
+
+
+  @staticmethod
+  def inference_fn(denoiser: nn.Module, task: str = 'solver') -> Tensor:
+    """Returns the inference denoising function."""
+    
+    if task == 'superresolver':
+      def _denoise(
+          x: Tensor, sigma: float | Tensor, cond: Mapping[str, Tensor] | None = None
+        ) -> Tensor:
+      
+        if not torch.is_tensor(sigma):
+          sigma = sigma * torch.ones((x.shape[0],))
+    
+        return denoiser.forward(x=x, sigma=sigma, is_training=False)
+      
+    elif task == 'solver':
+      def _denoise(
+          x: Tensor, 
+          sigma: float | Tensor, 
+          y: Tensor,
+          cond: Mapping[str, Tensor] | None = None
+        ) -> Tensor:
+      
+        if not torch.is_tensor(sigma):
+          sigma = sigma * torch.ones((x.shape[0],))
+    
+        return denoiser.forward(x=x, sigma=sigma, y=y, is_training=False)
+      
+    else:
+      raise ValueError("model can either be used as a 'superresolver' or a 'solver'")
   
+    return _denoise
+
 
   # def inference_loop(
   #     self,
@@ -518,37 +553,3 @@ class DenoisingModel(DenoisingBaseModel):
   #     norm_crps_score_l = None # TODO!!!
     
   #   # TODO: Implement crps!
-
-
-  @staticmethod
-  def inference_fn(denoiser: nn.Module, task: str = 'solver') -> Tensor:
-    """Returns the inference denoising function."""
-    
-    if task == 'superresolver':
-      def _denoise(
-          x: Tensor, sigma: float | Tensor, cond: Mapping[str, Tensor] | None = None
-        ) -> Tensor:
-      
-        if not torch.is_tensor(sigma):
-          sigma = sigma * torch.ones((x.shape[0],))
-    
-        return denoiser.forward(x=x, sigma=sigma, is_training=False)
-      
-    elif task == 'solver':
-      def _denoise(
-          x: Tensor, 
-          sigma: float | Tensor, 
-          y: Tensor,
-          cond: Mapping[str, Tensor] | None = None
-        ) -> Tensor:
-      
-        if not torch.is_tensor(sigma):
-          sigma = sigma * torch.ones((x.shape[0],))
-    
-        return denoiser.forward(x=x, sigma=sigma, y=y, is_training=False)
-      
-    else:
-      raise ValueError("model can either be used as a 'superresolver' or a 'solver'")
-  
-    return _denoise
-
