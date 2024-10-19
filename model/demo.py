@@ -125,6 +125,7 @@ first_batch = next(iter(train_dataloader))
 img = first_batch[0].to(device)
 labels = first_batch[1].to(device)
 
+
 noise = torch.randn(img.shape, device=device, generator=RNG)
 noised_img = img + noise
 

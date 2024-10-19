@@ -143,8 +143,7 @@ class IterativeSdeSolver(nn.Module):
         """Solves an SDE by iterating the step function."""
         
         if not self.terminal_only:
-            # store the entire path
-            x_path = [x0]
+            x_path = [x0] # store the entire path
 
         current_state = x0
         for i in range(len(tspan) - 1):
@@ -159,7 +158,8 @@ class IterativeSdeSolver(nn.Module):
                 params=params,
                 y=y,
                 lead_time=lead_time
-            )
+            ).detach() # detach to avoid allocating memory
+
             if not self.terminal_only:
                 x_path.append(current_state)
         

@@ -25,6 +25,7 @@ def uniform_time(
     device: torch.device = None
 ) -> Tensor:
   """Time steps uniform in [t_min, t_max]."""
+  
   if (end_time is None and end_sigma is None) or (
       end_time is not None and end_sigma is not None
   ):
@@ -45,6 +46,7 @@ def exponential_noise_decay(
     device: torch.device = None
 ) -> Tensor:
   """Time steps corresponding to exponentially decaying sigma."""
+
   exponent = torch.arange(num_steps, dtype=dtype, device=device) / (num_steps - 1)
   r = end_sigma / scheme.sigma_max
   sigma_schedule = scheme.sigma_max * torch.pow(r, exponent)
@@ -60,6 +62,7 @@ def edm_noise_decay(
     device: torch.device = None
 ) -> Tensor:
   """Time steps corresponding to Eq. 5 in Karras et al."""
+
   rho_inv = torch.tensor(1.0 / rho)
   sigma_schedule = torch.arange(num_steps,dtype=dtype, device=device) / (num_steps - 1)
   sigma_schedule *= torch.pow(end_sigma, rho_inv) - torch.pow(

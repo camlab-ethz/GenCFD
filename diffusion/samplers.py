@@ -167,6 +167,7 @@ class Sampler:
     Returns:
       The generated samples.
     """
+    
     if self.tspan is None or self.tspan.ndim != 1:
       raise ValueError("`tspan` must be a 1-d Tensor.")
 
@@ -317,6 +318,7 @@ class SdeSampler(Sampler):
     )
     # SDE solvers may return either the full paths or the terminal state only.
     # If the former, the lead axis should be time.
+
     samples = denoised if self.integrator.terminal_only else denoised[-1]
     return denoised if self.return_full_paths else samples
 

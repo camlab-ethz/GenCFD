@@ -292,8 +292,6 @@ class DataIC_Vel(TrainingSetBase):
 #         return inputs
 
 
-
-
 class DataIC_Vel_Test(TrainingSetBase):
     def __init__(self, 
                  training_samples = 100,
@@ -307,6 +305,38 @@ class DataIC_Vel_Test(TrainingSetBase):
         self.output_channel = 2
 
         self.file = {'data': torch.randn((1000, 2, 32, 32, 3))}
+        
+
+    def __getitem__(self, index):
+        """Load data from disk on the fly given an index"""
+
+        index += self.start       
+        data = self.file['data'][index].data
+
+        data_input = data[0, ..., :self.input_channel]
+        data_output = data[1, ..., :self.output_channel]
+
+        inputs = torch.cat((data_input, data_output), -1)
+        
+        return inputs.permute(2, 1, 0)
+    
+    def __len__(self):
+        return self.file['data'].shape[0]
+    
+
+class MNIST_Test(TrainingSetBase):
+    def __init__(self, 
+                 training_samples = 100,
+                 start = 0,
+                 file = None):
+        
+        super().__init__(training_samples, start = start)
+        
+        self.class_name = self.__class__.__name__
+        self.input_channel = 1
+        self.output_channel = 1
+
+        self.file = {'data': torch.randn((1000, 2, 28, 28, 2))}
         
 
     def __getitem__(self, index):

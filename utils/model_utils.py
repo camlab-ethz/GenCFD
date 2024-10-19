@@ -122,6 +122,7 @@ def get_model_args(
   }
   if args.model_type == 'PreconditionedDenoiser':
      args_dict.update({'sigma_data': args.sigma_data})
+     
   return args_dict
 
 
@@ -139,12 +140,18 @@ def get_denoiser_args(
   ) -> dict:
   """Return a dictionary of parameters for the DenoisingModel"""
 
-  return {
-     'input_shape': input_shape, 'denoiser': denoiser, 'noise_sampling': noise_sampling,
-     'noise_weighting': noise_weighting, 'rng': rng, 
-     'num_eval_noise_levels': args.num_eval_noise_levels, 
-     'num_eval_cases_per_lvl': args.num_eval_cases_per_lvl,
-     'min_eval_noise_lvl': args.min_eval_noise_lvl, 'max_eval_noise_lvl': args.max_eval_noise_lvl,
-     'consistent_weight': args.consistent_weight, 'device': device, 'dtype': dtype,
-     'input_channel': input_channels, 'task': args.task
+  denoiser_args = {
+    'input_shape': input_shape, 'denoiser': denoiser, 'noise_sampling': noise_sampling,
+    'noise_weighting': noise_weighting, 'rng': rng, 
+    'num_eval_noise_levels': args.num_eval_noise_levels, 
+    'num_eval_cases_per_lvl': args.num_eval_cases_per_lvl,
+    'min_eval_noise_lvl': args.min_eval_noise_lvl, 'max_eval_noise_lvl': args.max_eval_noise_lvl,
+    'consistent_weight': args.consistent_weight, 'device': device, 'dtype': dtype
   }
+
+  if args.unconditional:
+     return denoiser_args
+  
+  denoiser_args.update({'input_channel': input_channels, 'task': args.task})
+
+  return denoiser_args

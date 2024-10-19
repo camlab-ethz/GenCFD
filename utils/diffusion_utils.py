@@ -1,6 +1,10 @@
 from argparse import ArgumentParser
 import torch
 import diffusion.diffusion as dfn_lib
+from diffusion.samplers import DenoiseFn
+from diffusion.schedulers import TimeStepScheduler
+import diffusion.schedulers as schedulers
+from solvers.sde import SdeSolver
 
 def get_diffusion_scheme(args: ArgumentParser, device: torch.device = None) -> dfn_lib.Diffusion:
     """Create the diffusion scheme"""
@@ -21,6 +25,7 @@ def get_diffusion_scheme(args: ArgumentParser, device: torch.device = None) -> d
     )
 
     return diffusion_scheme
+
 
 def get_noise_sampling(args: ArgumentParser, device: torch.device = None) -> dfn_lib.NoiseLevelSampling:
     """Create a noise sampler"""
@@ -55,3 +60,48 @@ def get_noise_weighting(args: ArgumentParser, device: torch.device = None) -> df
     )
 
     return noise_weighting
+
+
+def get_time_step_scheduler(
+        args: ArgumentParser, 
+        scheme: dfn_lib.Diffusion,
+        device: torch.device = None,
+        dtype: torch.dtype = torch.float32
+    ) -> TimeStepScheduler:
+    """Get time step scheduler"""
+
+    try:
+        tspan_fn = getattr(schedulers, args.time_step_scheduler)
+    except AttributeError:
+        raise ValueError(f"Invalid time step scheduler: {args.time_step_scheduler}")
+    
+    tspan = tspan_fn(
+        scheme=scheme, 
+        rho=args.rho, 
+        num_steps=args.sampling_steps,
+        end_sigma=1e-3,
+        dtype=dtype,
+        device=device
+    )
+
+    return tspan
+
+
+def get_sampler_args(
+        args: ArgumentParser, 
+        input_shape: tuple[int, ...], 
+        scheme: dfn_lib.Diffusion,
+        denoise_fn: DenoiseFn,
+        tspan: TimeStepScheduler,
+        integrator: SdeSolver,
+        rng: torch.Generator = None,
+        device: torch.device = None,
+        dtype: torch.dtype = torch.float32
+    ) -> dict:
+
+    return {
+        'input_shape': input_shape, 'scheme': scheme, 'denoise_fn': denoise_fn,
+        'tspan': tspan, 'integrator': integrator, 'guidance_transforms': (), 
+        'apply_denoise_at_end': args.apply_denoise_at_end, 'return_full_paths': args.return_full_paths,
+        'rng': rng, 'device': device, 'dtype': dtype
+    }

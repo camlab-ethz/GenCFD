@@ -10,7 +10,7 @@ from train import training_loop
 from utils.gencfd_utils import (
     get_dataset_loader, 
     get_dataset, 
-    create_denoiser_and_sampler,
+    create_denoiser,
     create_callbacks
 )
 from utils.parser_utils import train_args
@@ -46,17 +46,18 @@ if __name__ == "__main__":
     input_shape = dataset.__getitem__(0).shape
     out_shape = (dataset.output_channel,) + tuple(input_shape[1:])
 
-    denoising_model = create_denoiser_and_sampler(
+    denoising_model = create_denoiser(
         args=args,
         input_shape=input_shape,
         input_channels=dataset.input_channel,
         out_channels=dataset.output_channel,
         rng=RNG,
-        device=device,
-        only_denoiser=True
+        device=device
     )
 
-    # Dummy initialize the model:
+    print(" ")
+    print("Denoiser Initialization")
+
     denoising_model.initialize(batch_size=args.batch_size)
 
     # # Print number of Parameters:

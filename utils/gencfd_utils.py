@@ -1,17 +1,19 @@
 from argparse import ArgumentParser
-from typing import Tuple, Sequence
+from typing import Tuple, Sequence, Dict, Callable
 import torch
 import os
 from torch import nn
 from torch.utils.data import DataLoader, random_split
 
 from model.building_blocks.unets.unets import UNet, PreconditionedDenoiser
-from model.probabilistic_diffusion.denoising_model import DenoisingModel
+from model.probabilistic_diffusion.denoising_model import DenoisingModel, DenoisingBaseModel
 from utils.model_utils import get_model_args, get_denoiser_args
 from utils.diffusion_utils import (
     get_diffusion_scheme,
     get_noise_sampling,
-    get_noise_weighting
+    get_noise_weighting,
+    get_sampler_args,
+    get_time_step_scheduler
 )
 from diffusion.diffusion import (
     NoiseLevelSampling, 
@@ -21,9 +23,15 @@ from dataloader.dataset import (
     TrainingSetBase,
     DataIC_Vel,
     DataIC_Vel_Test,
+    MNIST_Test
 )
 from utils.callbacks import Callback ,TqdmProgressBar, TrainStateCheckpoint
+from diffusion.samplers import SdeSampler, Sampler
+from solvers.sde import EulerMaruyama
 
+Tensor = torch.Tensor
+TensorMapping = Dict[str, Tensor]
+DenoiseFn = Callable[[Tensor, Tensor, TensorMapping | None], Tensor]
 
 # ***************************
 # Load Dataset and Dataloader
@@ -37,6 +45,9 @@ def get_dataset(name: str) -> TrainingSetBase:
     
     elif name == 'DataIC_Vel_Test':
         return DataIC_Vel_Test()
+    
+    elif name == 'MNIST_Test':
+        return MNIST_Test()
     
 
 def get_dataset_loader(
@@ -76,7 +87,7 @@ def get_dataset_loader(
         )
     
 # ***************************
-# Load Denoiser and Sampler
+# Load Denoiser
 # ***************************
 
 def get_model(
@@ -124,26 +135,26 @@ def get_denoising_model(
         device=device,
         dtype=dtype
     )
+
+    if args.unconditional:
+        return DenoisingBaseModel(**denoiser_args)
     
     return DenoisingModel(**denoiser_args)
 
 
-def create_denoiser_and_sampler(
+def create_denoiser(
         args: ArgumentParser, 
         input_shape: int,
         input_channels: int,
         out_channels: int,
         rng: torch.Generator,
         device: torch.device = None,
-        dtype: torch.dtype = torch.float32,
-        only_denoiser: bool = False,
-        only_sampler: bool = False
+        dtype: torch.dtype = torch.float32
     ):
     """Get the denoiser and sampler if required"""
 
     model = get_model(args, out_channels, rng, device)
 
-    diffusion_scheme = get_diffusion_scheme(args, device)
     noise_sampling = get_noise_sampling(args, device)
     noise_weighting = get_noise_weighting(args, device)
 
@@ -159,15 +170,7 @@ def create_denoiser_and_sampler(
         dtype=dtype
     )
 
-    sampler = None
-
-    if only_denoiser:
-        return denoising_model
-    
-    elif only_sampler:
-        return sampler
-    
-    return denoising_model, sampler
+    return denoising_model
 
 
 # ***************************
@@ -193,3 +196,41 @@ def create_callbacks(args: ArgumentParser, save_dir: str) -> Sequence[Callback]:
         )
     
     return tuple(callbacks)
+
+
+# ***************************
+# Load Sampler
+# ***************************
+
+def create_sampler(
+        args: ArgumentParser,
+        input_shape: int,
+        denoise_fn: DenoiseFn,
+        rng: torch.Generator,
+        device: torch.device = None,
+        dtype: torch.dtype = torch.float32
+    ) -> Sampler:
+
+    scheme = get_diffusion_scheme(args, device)
+
+    integrator = EulerMaruyama(
+        rng=rng, 
+        time_axis_pos=args.time_axis_pos,
+        terminal_only=args.terminal_only
+    )
+
+    tspan = get_time_step_scheduler(args=args, scheme=scheme, device=device, dtype=dtype)
+
+    sampler_args = get_sampler_args(
+        args=args,
+        input_shape=input_shape,
+        scheme=scheme,
+        denoise_fn=denoise_fn,
+        tspan=tspan,
+        integrator=integrator,
+        rng=rng,
+        device=device,
+        dtype=dtype
+    )
+    
+    return SdeSampler(**sampler_args)

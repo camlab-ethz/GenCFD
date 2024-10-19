@@ -18,6 +18,10 @@ def add_base_options(parser: ArgumentParser):
                        help="If empty, will use defaults according to the specified dataset.")
     group.add_argument('--save_dir', default=None, type=str,
                        help='Specify your directory where training results should be saved')
+    group.add_argument('--model_dir', default=None, type=str,
+                       help='Set a path to a pretrained model for inference')
+    group.add_argument('--unconditional', default=False, type=bool,
+                       help='Run unconditional training and inference if set to True')
     
 
 def add_data_options(parser: ArgumentParser):
@@ -122,7 +126,7 @@ def add_trainer_options(parser: ArgumentParser):
     # EMA ... Exponential Moving Average
     group.add_argument('--ema_decay', default=0.999, type=float, 
                        help='Choose a decay rate for the EMA model parameters')
-    group.add_argument('--peak_lr', default=1e-4, type=str,
+    group.add_argument('--peak_lr', default=1e-4, type=float,
                        help="Choose a learning rate for the Adam optimizer")
     group.add_argument('--task', default='solver', type=str, 
                        choices=['solver', 'superresolver'],
@@ -147,6 +151,38 @@ def add_training_options(parser: ArgumentParser):
                        help="Saves or Loads parameters from a checkpoint")
     group.add_argument('--save_every_n_steps', default=5000, type=int,
                        help="Saves a checkpoint of the model and optimizer after every n steps")
+    
+def add_sampler_options(parser: ArgumentParser):
+    """Parser arguments for the sampler"""
+
+    group = parser.add_argument_group('sampler')
+    group.add_argument('--time_step_scheduler', default='edm_noise_decay', type=str,
+                       choices=[
+                           'edm_noise_decay',
+                           'exponential_noise_decay',
+                           'uniform_time'
+                       ],
+                       help='Choose a valid time step scheduler for solving an SDE')
+    group.add_argument('--sampling_steps', default=128, type=int,
+                       help='Define sampling steps for solving the SDE, min value should be 32')
+    group.add_argument('--apply_denoise_at_end', default=True, type=bool,
+                       help='If True applies the denoise function another time to the terminal states')
+    group.add_argument('--return_full_paths', default=False, type=bool,
+                       help='If True the output of .generate() and .denoise() will contain the complete sampling path')
+    group.add_argument('--rho', default=7, type=int,
+                       help='Set decay rate for the noise over time')
+    
+
+def add_sde_options(parser: ArgumentParser):
+    """Parser arguments for the Euler Maruyama Method"""
+
+    group = parser.add_argument_group('sde')
+    group.add_argument('--integrator', default='EulerMaruyame', type=str,
+                       help='Choose a valid SDE Solver')
+    group.add_argument('--time_axis_pos', default=0, type=int,
+                       help='Defines the index where the time axis should be placed')
+    group.add_argument('--terminal_only', default=True, type=bool,
+                       help='If set to False returns the full path otherwise only the terminal state')
 
 def train_args():
     """Define the Parser for the training"""
@@ -158,4 +194,18 @@ def train_args():
     add_denoiser_options(parser)
     add_trainer_options(parser)
     add_training_options(parser)
+    return parser.parse_args()
+
+
+def inference_args():
+    """Define the Parser for the inference"""
+
+    parser = ArgumentParser()
+    add_base_options(parser)
+    add_data_options(parser)
+    add_model_options(parser)
+    add_denoiser_options(parser)
+    add_trainer_options(parser)
+    add_sde_options(parser)
+    add_sampler_options(parser)
     return parser.parse_args()
