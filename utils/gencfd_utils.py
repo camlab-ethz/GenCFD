@@ -2,6 +2,8 @@ from argparse import ArgumentParser
 from typing import Tuple, Sequence, Dict, Callable
 import torch
 import os
+import re
+import json
 from torch import nn
 from torch.utils.data import DataLoader, random_split
 
@@ -60,6 +62,7 @@ def get_dataset_loader(
         num_worker: int = 0,
         split: bool = True, 
         split_ratio: float = 0.8,
+        rng: torch.Generator = None,
         device: torch.device = None
     ) -> Tuple[DataLoader, DataLoader] | DataLoader:
     """Return a training and evaluation dataloader or a single dataloader"""
@@ -67,20 +70,22 @@ def get_dataset_loader(
     dataset = get_dataset(name=name, device=device)
 
     if split:
-        train_size = int(0.8 * len(dataset))
+        train_size = int(split_ratio * len(dataset))
         eval_size = len(dataset) - train_size
-        train_dataset, eval_dataset = random_split(dataset, [train_size, eval_size])
+        train_dataset, eval_dataset = random_split(dataset, [train_size, eval_size], rng)
         train_dataloader = DataLoader(
             dataset=train_dataset, 
             batch_size=batch_size, 
             shuffle=True, 
-            num_workers=num_worker
+            num_workers=num_worker,
+            generator=rng
         )
         eval_dataloader = DataLoader(
             dataset=eval_dataset, 
             batch_size=batch_size, 
             shuffle=True,
-            num_workers=num_worker
+            num_workers=num_worker,
+            generator=rng
         )
         return (train_dataloader, eval_dataloader)
     else:
@@ -88,7 +93,8 @@ def get_dataset_loader(
             dataset=dataset, 
             batch_size=batch_size, 
             shuffle=True, 
-            num_workers=num_worker
+            num_workers=num_worker,
+            generator=rng
         )
     
 # ***************************
@@ -209,6 +215,95 @@ def create_callbacks(args: ArgumentParser, save_dir: str) -> Sequence[Callback]:
     
     return tuple(callbacks)
 
+
+def get_latest_checkpoint(folder_path: str):
+    """By specifying a folder path where all the checkpoints are stored 
+    the latest model can be found!
+    
+    argument: folder_path passed as a string
+    return: model path to the latest model
+    """
+
+    checkpoint_models = [
+        f for f in os.listdir(folder_path)
+    ]
+
+    latest_checkpoint = max(
+        checkpoint_models,
+        key=lambda f: int(re.search(r'(\d+)', f).group())
+    )
+
+    return os.path.join(folder_path, latest_checkpoint)
+
+
+def save_json_file(
+        args: ArgumentParser, 
+        time_cond: bool, 
+        split_ratio: float,
+        input_shape: tuple[int],
+        out_shape: tuple[int],
+        input_channel: int,
+        output_channel: int,
+        device: torch.device = None,
+        seed: int = None
+    ):
+    """Create the training configuration file to use it later for inference"""
+
+    config = {
+        # general arguments
+        "save_dir": args.save_dir,
+        # dataset arguments
+        "dataset": args.dataset,
+        "batch_size": args.batch_size,
+        "split_ratio": split_ratio,
+        "worker": args.worker,
+        "time_cond": time_cond,
+        "input_shape": input_shape,
+        "out_shape": out_shape,
+        "input_channel": input_channel,
+        "output_channel": output_channel,
+        # model arguments
+        "model_type": args.model_type,
+        "unconditional": args.unconditional,
+        "num_heads": args.num_heads,
+        # training arguments
+        "num_train_steps": args.num_train_steps,
+        "task": args.task,
+        "device": str(device) if device is not None else None,
+        "seed": seed
+    }
+
+    config_path = os.path.join(args.save_dir, "training_config.json")
+    os.makedirs(args.save_dir, exist_ok=True)
+
+    with open(config_path, "w") as f:
+        json.dump(config, f, indent=4)
+    
+    print(f"Training configuration saved to {config_path}")
+
+
+def load_json_file(config_path: str):
+    """Load the training configurations from a JSON file."""
+
+    if not os.path.exists(config_path):
+        raise FileNotFoundError(f"Configuration file not found at {config_path}")
+    
+    with open(config_path, 'r') as f:
+        try:
+            config = json.load(f)
+        except json.JSONDecodeError as e:
+            raise ValueError(f"Error decoding JSON from the file {config_path}: {e}")
+        
+    print(f"Training configurations loaded from {config_path}")
+    return config
+
+
+def replace_args(args: ArgumentParser, train_args: dict):
+    """Replace parser arguments with used arguments during training"""
+
+    for key, value in train_args.items():
+        if hasattr(args, key):
+            setattr(args, key, value)
 
 # ***************************
 # Load Sampler

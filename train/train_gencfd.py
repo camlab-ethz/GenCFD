@@ -11,7 +11,8 @@ from utils.gencfd_utils import (
     get_dataset_loader, 
     get_dataset, 
     create_denoiser,
-    create_callbacks
+    create_callbacks,
+    save_json_file
 )
 from utils.parser_utils import train_args
 
@@ -36,8 +37,14 @@ if __name__ == "__main__":
         os.makedirs(savedir)
         print(f"Created a directory to store metrics and models: {savedir}")
 
+    split_ratio = 0.8
     train_dataloader, eval_dataloader = get_dataset_loader(
-        name=args.dataset, batch_size=args.batch_size, num_worker=args.worker, device=device
+        name=args.dataset, 
+        batch_size=args.batch_size, 
+        num_worker=args.worker, 
+        split=True,
+        split_ratio=split_ratio,
+        device=device
     )
 
     dataset = get_dataset(name=args.dataset, device=device)
@@ -53,6 +60,22 @@ if __name__ == "__main__":
     
     out_shape = (dataset.output_channel,) + tuple(input_shape[1:])
 
+    # Save parameters in a JSON File
+    save_json_file(
+        args=args, 
+        time_cond=time_cond, 
+        split_ratio=split_ratio,
+        input_shape=input_shape,
+        out_shape=out_shape, 
+        input_channel=dataset.input_channel,
+        output_channel=dataset.output_channel,
+        device=device, 
+        seed=SEED
+    )
+
+    print(" ")
+    print("Denoiser Initialization")
+
     denoising_model = create_denoiser(
         args=args,
         input_shape=input_shape,
@@ -62,15 +85,11 @@ if __name__ == "__main__":
         device=device
     )
 
-    print(" ")
-    print("Denoiser Initialization")
-
     denoising_model.initialize(batch_size=args.batch_size, time_cond=time_cond)
 
     # # Print number of Parameters:
     model_params = sum(p.numel() for p in denoising_model.denoiser.parameters() if p.requires_grad)
     print(f"Total number of model parameters: {model_params}")
-
 
     trainer = training_loop.trainers.DenoisingTrainer(
         model=denoising_model,
