@@ -88,7 +88,7 @@ class DataIC_Vel(TrainingSetBase):
         else:
             self.file = file
 
-        super().__init__(start = start, device=device, training_samples=len(self.file['data'].data))
+        super().__init__(start = start, device=device, training_samples=self.file['data'].shape[0])
         
         self.mean_training_input = np.array([8.0606696e-08, 4.8213877e-11])
         self.std_training_input = np.array([0.19003302, 0.13649726])
@@ -107,11 +107,12 @@ class DataIC_Vel(TrainingSetBase):
         data_output = self.normalize_output(data_output)
 
         model_input = torch.cat(
-            [torch.as_tensor(data_input, dtype=torch.float32), 
-             torch.as_tensor(data_output, dtype=torch.float32)], 
+            [torch.as_tensor(data_input, dtype=torch.float32, device=self.device), 
+             torch.as_tensor(data_output, dtype=torch.float32, device=self.device)], 
             dim=-1
         )
-        model_input = model_input.permute(0, 3, 2, 1)
+
+        model_input = model_input.permute(2, 1, 0)
 
         return model_input
     
@@ -366,6 +367,7 @@ class DataIC_Vel_Test(TrainingSetBase):
     
     def __len__(self):
         return self.file['data'].shape[0]
+
 
 
 class MNIST_Test(TrainingSetBase):
