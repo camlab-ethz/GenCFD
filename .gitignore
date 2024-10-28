@@ -1,7 +1,13 @@
+# Don't store compiled versions of python scripts
 **/__pycache__/
+# ignore data file for the MNIST data used in the demo
 /data
-checkpoint.pth
+# ignore outputs where the model is stored
 /outputs
+# ignore the dataset folder, data can be stored here
 /dataset
 /dataloader/test.py
-output.jpg
+# Ignore all image files
+**/*.jpg
+**/*.npz
+**/*.png

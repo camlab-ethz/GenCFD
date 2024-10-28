@@ -110,19 +110,37 @@ def get_model_args(
   ) -> dict:
   """Return a dictionary of model parameters for the UNet architecture"""
 
-  # General UNet arguments
-  args_dict = {
-    'out_channels': out_channels, 'rng': rng, 'resize_to_shape': args.resize_to_shape,
-    'use_hr_residual': args.use_hr_residual, 'num_channels': args.num_channels, 
-    'downsample_ratio': args.downsample_ratio, 'num_blocks': args.num_blocks,
-    'noise_embed_dim': args.noise_embed_dim, 'padding_method': args.padding_method,
-    'dropout_rate': args.dropout_rate, 'use_attention': args.use_attention, 
-    'use_position_encoding': args.use_position_encoding, 'num_heads': args.num_heads,
-    'normalize_qk': args.normalize_qk, 'device': device
-  }
-  if args.model_type == 'PreconditionedDenoiser':
-     args_dict.update({'sigma_data': args.sigma_data})
-     
+  if args.model_type in ['UNet', 'PreconditionedDenoiser']:
+    # General UNet arguments for the 2D case
+    args_dict_2d = {
+      'out_channels': out_channels, 'rng': rng, 'resize_to_shape': args.resize_to_shape,
+      'use_hr_residual': args.use_hr_residual, 'num_channels': args.num_channels, 
+      'downsample_ratio': args.downsample_ratio, 'num_blocks': args.num_blocks,
+      'noise_embed_dim': args.noise_embed_dim, 'padding_method': args.padding_method,
+      'dropout_rate': args.dropout_rate, 'use_attention': args.use_attention, 
+      'use_position_encoding': args.use_position_encoding, 'num_heads': args.num_heads,
+      'normalize_qk': args.normalize_qk, 'device': device
+    }
+    if args.model_type == 'PreconditionedDenoiser':
+      args_dict_2d.update({'sigma_data': args.sigma_data})
+
+    args_dict = args_dict_2d
+  
+  if args.model_type in ['UNet3D', 'PreconditionedDenoiser3D']:
+    args_dict_3d = {
+      'out_channels': out_channels, 'rng': rng, 'num_channels': (64, 128, 256), 
+      'downsample_ratio': (2, 2, 2), 'num_blocks': args.num_blocks,
+      'noise_embed_dim': args.noise_embed_dim, 'input_proj_channels': args.noise_embed_dim,
+      'output_proj_channels': args.noise_embed_dim, 'padding_method': args.padding_method,
+      'dropout_rate': args.dropout_rate, 'use_spatial_attention': (False, False, True),
+      'use_position_encoding': args.use_position_encoding, 'num_heads': args.num_heads,
+      'normalize_qk': args.normalize_qk, 'dtype': args.dtype, 'device': device
+    }
+    if args.model_type == 'PreconditionedDenoiser3D':
+      args_dict_3d.update({'sigma_data': args.sigma_data})
+    
+    args_dict = args_dict_3d
+      
   return args_dict
 
 

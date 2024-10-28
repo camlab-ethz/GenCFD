@@ -42,13 +42,20 @@ if __name__=="__main__":
         name=args.dataset, 
         batch_size=args.batch_size, 
         num_worker=args.worker, 
-        split=False
+        split=False,
+        device=device
     )
 
-    dataset = get_dataset(name=args.dataset)
+    dataset = get_dataset(name=args.dataset, device=device)
     
     # Get input shape ant output shape
-    input_shape = dataset.__getitem__(0).shape
+    if 'lead_time' in dataset.file.variables:
+        lead_time, inputs = dataset.__getitem__(0)
+        input_shape = inputs.shape
+        time_cond = True
+    else:
+        input_shape = dataset.__getitem__(0).shape
+        time_cond = False
     out_shape = (dataset.output_channel,) + tuple(input_shape[1:])
 
     denoising_model = create_denoiser(
@@ -63,7 +70,7 @@ if __name__=="__main__":
     print(" ")
     print("Denoiser Initialization")
 
-    denoising_model.initialize(batch_size=args.batch_size)
+    denoising_model.initialize(batch_size=args.batch_size, time_cond=time_cond)
 
 
     trainer = DenoisingTrainer(
@@ -79,12 +86,16 @@ if __name__=="__main__":
     print("Load Model Parameters")
 
     trained_state = DenoisingModelTrainState.restore_from_checkpoint(
-        f"{model_dir}/checkpoint_45000.pth", model=denoising_model.denoiser, optimizer=trainer.optimizer
+        f"{model_dir}/checkpoint_35000.pth", model=denoising_model.denoiser, optimizer=trainer.optimizer
     )
 
     # Construct the inference function
     denoise_fn = trainer.inference_fn_from_state_dict(
-        trained_state, use_ema=True, denoiser=denoising_model.denoiser, task=args.task
+        trained_state, 
+        use_ema=True, 
+        denoiser=denoising_model.denoiser, 
+        task=args.task,
+        lead_time=time_cond
     )
 
     print(" ")
@@ -100,29 +111,60 @@ if __name__=="__main__":
     rand_idx = random.randint(0, len(dataset))
 
     # generate = functools.partial(sampler.generate, num_samples=1)
-    normalized_tiny_dataset = dataset.__getitem__(0).to(device=device)
+    if time_cond:
+        time, normalized_tiny_dataset = dataset.__getitem__(0)
+    else:
+        normalized_tiny_dataset = dataset.__getitem__(0)
+        time=None
+
     u0 = normalized_tiny_dataset[:dataset.output_channel, ...].unsqueeze(0)
     u = normalized_tiny_dataset[dataset.output_channel:, ...].unsqueeze(0)
 
-    samples = sampler.generate(num_samples=1, y=u0)
+    # Only necessary if num_samples > 1 uncomment the following line
+    # u0_norm_rep = u0.unsqueeze(1).repeat(1, 1, 1, 1, 1) 
+
+    # for i in range(i_max):
+    #     samples = sampler.generate(num_samples=1, y=u0[i].unsqueeze(0))
+    #     result.append(samples)
+
+    samples = sampler.generate(num_samples=1, y=u0, lead_time=time)
+
+    # TODO: for tracking memory!
+    # print(torch.cuda.memory_summary())
 
     visualize = True
 
     if visualize:
         # TODO: Denormalize results
-        gen_sample = samples[0].permute(1, 2, 0).cpu().detach().numpy()
-        gt_sample = u[0].permute(1, 2, 0).cpu().detach().numpy()
+        import pyvista as pv
+        import numpy as np
 
-        err = gen_sample - gt_sample
-        fig, axes = plt.subplots(1, 2, figsize=(10, 5))
+        gen_sample = samples[0].permute(1, 2, 3, 0).cpu().detach().numpy()
+        gt_sample = u[0].permute(1, 2, 3, 0).cpu().detach().numpy()
 
-        axes[0].imshow(gen_sample[..., 0])
-        axes[0].set_title("Generated")
-        axes[0].axis('off')
+        np.savez('solutions.npz', gen_sample=gen_sample, gt_sample=gt_sample)
 
-        axes[1].imshow(gt_sample[..., 0])
-        axes[1].set_title("Groundtruth")
-        axes[1].axis('off')
+        # volume = pv.wrap(gen_sample[..., 0])
+        # plotter = pv.Plotter(off_screen=True)
+        # plotter.add_volume(volume, opacity="sigmoid", cmap="viridis", shade=True)
+        # plotter.screenshot("gen_3d_image.png")
+        
+    
+    # if visualize:
+    #     # TODO: Denormalize results
+    #     gen_sample = samples[0].permute(1, 2, 0).cpu().detach().numpy()
+    #     gt_sample = u[0].permute(1, 2, 0).cpu().detach().numpy()
 
-        plt.tight_layout()
-        plt.savefig("output.jpg")
+    #     err = gen_sample - gt_sample
+    #     fig, axes = plt.subplots(1, 2, figsize=(10, 5))
+
+    #     axes[0].imshow(gen_sample[..., 0])
+    #     axes[0].set_title("Generated")
+    #     axes[0].axis('off')
+
+    #     axes[1].imshow(gt_sample[..., 0])
+    #     axes[1].set_title("Groundtruth")
+    #     axes[1].axis('off')
+
+    #     plt.tight_layout()
+    #     plt.savefig("output.jpg")

@@ -1,13 +1,7 @@
 import os
-
-# import h5py
 import netCDF4
 import numpy as np
 import torch
-from typing import Tuple
-# import skimage
-# from tqdm import tqdm
-import time
 
 from utils.dataloader_utils import (
     StatsRecorder, 
@@ -20,38 +14,35 @@ from dataloader.dataloader import DummyDataloader
 
 Tensor = torch.Tensor
 
-# **********************
-# Base Dataset Class
-# **********************
+DIR_PATH_LOADER = '/cluster/work/math/camlab-data/data/diffusion_project'
 
 class TrainingSetBase:
     def __init__(self,
-                 training_samples,
-                 start=0):
+                 training_samples: int,
+                 start: int = 0,
+                 device: torch.device = None) -> None:
         
         self.start = start
         self.training_samples = training_samples
+        self.device = device
         self.rand_gen = np.random.RandomState(seed = 4)
     
         self.mean_training_input = None
         self.std_training_input = None
         self.mean_training_output = None
         self.std_training_output = None
-        
-        self.input_channel = 1  # Placeholder redefine it in the child class
-        self.output_channel = 1  # Placeholder redefine it in the child class
 
     def __len__(self):
         return self.training_samples
 
-    def normalize_input(self, u_, ):
+    def normalize_input(self, u_):
 
         if self.mean_training_input is not None:
             return (u_ - self.mean_training_input) / (self.std_training_input + 1e-12)
         else:
             return u_
 
-    def denormalize_input(self, u_, ):
+    def denormalize_input(self, u_):
         
         if self.mean_training_input is not None:
             return u_ * (self.std_training_input + 1e-12) + self.mean_training_input
@@ -64,7 +55,7 @@ class TrainingSetBase:
         else:
             return u_
 
-    def denormalize_output(self, u_, ):
+    def denormalize_output(self, u_):
         if self.mean_training_output is not None:
             return u_ * (self.std_training_output + 1e-12) + self.mean_training_output
         else:
@@ -79,66 +70,34 @@ class TrainingSetBase:
     def collate_tf(self, data):
         return data
 
+#--------------------------------------
 
-
-# **********************
-# ALL AVAILABLE DATASETS
-# **********************
 class DataIC_Vel(TrainingSetBase):
     def __init__(self, 
-                 training_samples = 100,
-                 start = 0,
-                 file = None):
-        
-        super().__init__(training_samples, start = start)
+                 start: int = 0,
+                 file: str = None,
+                 device: torch.device = None):
         
         self.class_name = self.__class__.__name__
         self.input_channel = 2
         self.output_channel = 2
-
+        self.spatial_dim = 2
+        
         if file is None:
-            self.file = netCDF4.Dataset(f'/cluster/work/math/camlab-data/data/diffusion_project/ddsl_fast_nothing_128_tr2.nc', mode='r')
+            self.file = netCDF4.Dataset(f'{DIR_PATH_LOADER}/ddsl_fast_nothing_128_tr2.nc', mode='r')
         else:
             self.file = file
 
+        super().__init__(start = start, device=device, training_samples=len(self.file['data'].data))
+        
         self.mean_training_input = np.array([8.0606696e-08, 4.8213877e-11])
         self.std_training_input = np.array([0.19003302, 0.13649726])
         self.mean_training_output = np.array([4.9476512e-09, -1.5097612e-10])
         self.std_training_output = np.array([0.35681796, 0.5053845])
 
-    def get_tiny_dataset(self, nsamples: int = None, data_type: str = 'train') -> Tensor:
-        
-        if nsamples is not None:
-            data = self.file["data"][0:nsamples, ...]
-        else:
-            data = self.file["data"]
-
-        if data_type == 'train':
-            data = data[:nsamples//2, ...]
-
-        elif data_type == 'eval':
-            data = data[nsamples//2:nsamples, ...]
-        else:
-            raise ValueError("The dataset type can only be 'train' or 'eval'!")
-
-        data_inp = data[:, 0, ..., :self.input_channel]
-        data_out = data[:, 1, ..., :self.output_channel]
-
-        data_inp = self.normalize_input(data_inp)
-        data_out = self.normalize_output(data_out)
-
-        model_input = torch.cat(
-            [torch.as_tensor(data_inp, dtype=torch.float32), 
-             torch.as_tensor(data_out, dtype=torch.float32)], 
-            dim=-1
-        )
-        model_input = model_input.permute(0, 3, 2, 1)
-        return model_input
-        
-
     def __getitem__(self, index):
-        """Load data from disk on the fly given an index"""
-        index += self.start       
+
+        index += self.start        
         data = self.file['data'][index].data
 
         data_input = data[0, ..., :self.input_channel]
@@ -147,149 +106,234 @@ class DataIC_Vel(TrainingSetBase):
         data_input = self.normalize_input(data_input)
         data_output = self.normalize_output(data_output)
 
-        inputs = np.concatenate((data_input, data_output), -1)
-        
-        return torch.tensor(inputs, dtype=torch.float32).permute(2, 1, 0)
+        model_input = torch.cat(
+            [torch.as_tensor(data_input, dtype=torch.float32), 
+             torch.as_tensor(data_output, dtype=torch.float32)], 
+            dim=-1
+        )
+        model_input = model_input.permute(0, 3, 2, 1)
+
+        return model_input
     
-    def __len__(self):
-        return self.file['data'].shape[0]
+
+class DataIC_3D_Time(TrainingSetBase):
+    def __init__(
+            self,
+            start=0,
+            device=None,
+            file = None
+        ):
+
+        self.input_channel = 3
+        self.output_channel = 3
+
+        if file is None:
+            if start == 0:
+                self.file_path = '/cluster/work/math/camlab-data/data/diffusion_project/shear_layer_3D_64_all_time_2.nc'
+            else:
+                self.file_path = '/cluster/work/math/camlab-data/data/diffusion_project/shear_layer_3D_64_smaller.nc'
+
+        self.file = netCDF4.Dataset(self.file_path, 'r')
+
+        super().__init__(start=start, device=device, training_samples=self.file.variables['data'].shape[0])
+
+        self.n_all_steps = 10
+        self.start = self.start // self.n_all_steps
+
+        self.mean_training_input = np.array([1.5445266e-08, 1.2003070e-08, -3.2182508e-09])
+        self.mean_training_output = np.array([-8.0223117e-09, -3.3674191e-08, 1.5241447e-08])
+
+        self.std_training_input = np.array([0.20691067, 0.15985465, 0.15808222])
+        self.std_training_output = np.array([0.2706984, 0.24893111, 0.24169469])
 
 
-# data = DataIC_Vel(100)
-# dataset = data.get_dataset(200)
+    def __getitem__(self, index):
+        index += self.start
+        data = self.file.variables['data'][index].data
+        if self.start == 0:
+            lead_time = self.file.variables['lead_time'][index].data
+        else:
+            lead_time = 1.
 
-# import os
+        data_input = self.normalize_input(data[0])
+        data_output = self.normalize_output(data[1])
 
-# import h5py
-# import netCDF4
-# import numpy as np
-# import skimage
-# from tqdm import tqdm
+        inputs = np.concatenate((data_input, data_output), -1)
 
-# from decorators import timeit
-# from utilis_stats import StatsRecorderNew as StatsRecorder
-# from utils.dataloader_utils import downsample, translate_horizontally_periodic_unbatched, upsample
-# from dataloader.dataloader import DummyDataset
+        return (
+            torch.tensor(lead_time, dtype=torch.float32, device=self.device), 
+            torch.tensor(inputs, dtype=torch.float32, device=self.device).permute(3, 2, 1, 0)
+        )
 
+    def collate_tf(self, time, data):
+        return {"lead_time": time, "data": data}
 
-# ########################################################################################################################################
-# #### Base Class ####
-# ########################################################################################################################################
-# class TrainingSetBase:
-#     def __init__(self,
-#                  size,
-#                  n_spatial_dim,
-#                  which,
-#                  training_samples,
-#                  learn_residual,
-#                  training_variable=None,
-#                  mean_training_=None,
-#                  std_training_=None,
-#                  start=0,
-#                  aug_data=0,
-#                  mc_samples=None,
-#                  workdir=None,
-#                  plot=False,
-#                  p_dropout=0,
-#                  scalar_norm=True):
-#         self.size = size
-#         self.n_spatial_dim = n_spatial_dim
-#         self.which = which
-#         self.start = start
-#         self.training_samples = training_samples
-#         self.aug_data = aug_data
-#         self.tot_samples = training_samples + aug_data if mc_samples is None else mc_samples
-#         self.learn_residual = learn_residual
-#         self.low_sizes = []
-#         self.training_variable = training_variable
-#         self.rand_gen = np.random.RandomState(seed=42)
-#         self.mean_training_ = mean_training_
-#         self.std_training_ = std_training_
-#         self.mean_training_input = None
-#         self.std_training_input = None
-#         self.mean_training_output = None
-#         self.std_training_output = None
-#         self.training_stats_path = workdir
-#         self.plot = plot
-#         self.input_channel = 1  # Placeholder redefine it in the child class
-#         self.output_channel = 1  # Placeholder redefine it in the child class
-#         self.stat_size = None
-#         self.p_dropout = 0
-#         self.use_scalar_norm = scalar_norm
-#         print(f"Training Samples: {training_samples}. Starting from {start} with additional {aug_data} translational data")
-#         print(f"Total Samples: {self.tot_samples}")
-#         print(f"MC Samples: {mc_samples}")
-
-#     def __len__(self):
-#         return self.tot_samples
-
-#     def normalize_input(self, u_, ):
-#         if self.mean_training_input is not None:
-#             # return (u_ - self.mean_training_input) / (self.std_training_input + 1e-16)
-#             return (u_ - self.mean_training_input) / (self.std_training_input + 1e-16)
-#         else:
-#             return u_
-
-#     def normalize_output(self, u_, ):
-#         if self.mean_training_output is not None:
-#             # return (u_ - self.mean_training_output) / (self.std_training_output + 1e-16)
-#             return (u_ - self.mean_training_output) / (self.std_training_output + 1e-16)
-#         else:
-#             return u_
-
-#     def __getitem__(self, item):
-#         raise NotImplementedError()
-
-#     def get_index_shift(self, index):
-#         if index < self.training_samples or index > self.training_samples + self.aug_data:
-#             return index, 0
-#         else:
-#             return index % self.training_samples, self.rand_gen.randint(0, self.size)
+    def get_proc_data(self, data):
+        return data["data"]
 
 
-#     def classifier_free_diffusion(self, inputs):
-#         p = self.rand_gen.random()
-#         if p < self.p_dropout:
-#             inputs[:] = 0
-#         return inputs
+#----------------------------------
+
+class ConditionalBase(TrainingSetBase):
+
+    def __init__(self,
+                 training_samples: int,
+                 start: int = 0,
+                 device: torch.device = None,
+                 micro_perturbation: int = 0,
+                 macro_perturbation: int = 0,
+                 file_path: str = None,
+                 stat_folder: str = None,
+                 t_final: int = None) -> None : 
+
+        super().__init__(training_samples=training_samples, start=start, device=device)
+
+        self.micro_perturbation = micro_perturbation
+        self.macro_perturbation = macro_perturbation
+        self.file_path = file_path
+        self.stat_folder = stat_folder
+        self.t_final = t_final
+        self.mean_down, self.std_down, self.kk, self.spectrum, self.energy, self.idx_wass, self.sol_wass = None, None, None, None, None, None, None
+
+    def set_true_stats_for_macro(self, 
+                                 macro_idx: int):
+
+        '''
+            macro_idx : macro index to be tested on
+    
+            There must exist a folder self.stat_folder with files Stats_{macro_idx}.nc in it.
+            Each Stats_{macro_idx}.nc file must have the following variables:
+            
+              - mean_     : target mean of the distribution
+              - std_      : target std of the distribution
+              - spectrum_ : target spectra of each variable
+              - energy_   : target energy of each variable
+              - idx       : locations at which we compute wasserstein distance
+                            -- while computing statistics:
+                            -- ns  = 1000
+                            -- ids = np.random.choice(size ** spatial_dim, min(ns, size ** spatial_dim), replace=False)
+              - sol_      : values of the samples at idx points
+        '''
+        
+        assert self.stat_folder is not None
+        
+        file_name = f"{self.stat_folder}/Stats_{macro_idx}.nc"
+        if not os.path.isfile(file_name):
+            raise FileNotFoundError(f"Statistics file {file_name} not found. Run ComputeTrueStatistics.py")
+        
+        f = netCDF4.Dataset(file_name, 'r')
+        mean = np.array(f.variables['mean_'][:])
+        std = np.array(f.variables['std_'][:])
+        spectrum = np.array(f.variables['spectrum_'][:])
+        energy = np.array(f.variables['energy_'][:])
+        idx_wass = np.array(f.variables['idx'][:])
+        sol_wass = np.array(f.variables['sol_'][:])
+        kk = np.arange(1, spectrum.shape[0] + 1)
+
+        self.mean_down, self.std_down, self.kk, self.spectrum, self.energy, self.idx_wass, self.sol_wass = mean, std, kk, spectrum, energy, idx_wass, sol_wass
+
+    def len(self):
+        return self.micro_perturbation * self.macro_perturbation
+
+    def get_macro_index(self, index):
+        return index // self.micro_perturbation
+
+    def get_micro_index(self, index):
+        return index % self.micro_perturbation
+
+#--------------------------------------
+
+class ConditionalDataIC_Vel(ConditionalBase):
+    def __init__(self, device: torch.device = None):
+        
+        self.input_channel = 2
+        self.output_channel = 2
+        self.spatial_dim = 2
+        
+        file_path = f'{DIR_PATH_LOADER}/macro_micro_id_2d.nc'
+        stat_folder = f'{DIR_PATH_LOADER}/GroundTruthStats_ConditionalDataIC_Vel_nothing_128_10000'
+
+        self.file = netCDF4.Dataset(file_path, mode='r')
+        self.start_index = 0    
+
+        samples_shape = self.file.variables['data'].shape
+        training_samples = samples_shape[0] * samples_shape[1] # macro * micro perturbations
+
+        super().__init__(training_samples=training_samples,
+                         start=self.start_index,
+                         device=device,
+                         micro_perturbation = 1000,
+                         macro_perturbation = 10,
+                         file_path = file_path,
+                         stat_folder = stat_folder)    
+    
+    def __getitem__(self, index):
+        macro_idx = self.get_macro_index(index + self.start_index)
+        micro_idx = self.get_micro_index(index + self.start_index)
+        datum = self.file.variables['data'][macro_idx, micro_idx].data # TODO: check if .data here is correct?
+
+        data_input = datum[0, ..., :self.input_channel]
+        data_output = datum[-1, ..., :self.output_channel]
+
+        model_input = torch.cat(
+            [torch.as_tensor(data_input, dtype=torch.float32), 
+             torch.as_tensor(data_output, dtype=torch.float32)], 
+            dim=-1
+        )
+        model_input = model_input.permute(0, 3, 2, 1)
+
+        return model_input
 
 
+class ConditionalDataIC_3D(ConditionalBase):
+    def __init__(self, device: torch.device = None):
 
-# class DataIC_Vel(TrainingSetBase):
-#     def __init__(self, size, n_spatial_dim, which, training_samples, learn_residual, training_variable=None, mean_training_=None, std_training_=None, start=0, aug_data=0, mc_samples=None, workdir=None, plot=False, p_dropout=0, scalar_norm=True, compute_mean=True):
-#         super().__init__(size, n_spatial_dim, which, training_samples, learn_residual, training_variable, mean_training_, std_training_, start, aug_data, mc_samples, workdir, plot, p_dropout, scalar_norm)
-#         self.class_name = self.__class__.__name__
-#         self.input_channel = 2
-#         self.output_channel = 2
-#         self.stat_size = size
-#         self.use_low_res_stats = False
-#         self.p_dropout = p_dropout
-#         # self.chunks = {'member': 1000, 'time': -1, 'c': -1, 'x': -1, 'y': -1}
-#         self.ds = netCDF4.Dataset(f'/cluster/work/math/camlab-data/data/diffusion_project/ddsl_fast_{which}_{size}_tr2.nc', mode='r')
+        self.input_channel = 3
+        self.output_channel = 3
 
+        self.macro_perturbation = 10
+        self.micro_perturbation = 1000
 
-#     # @functools.lru_cache(maxsize=10000)
-#     def __getitem__(self, index):
+        self.time_step = -1
 
-#         index += self.start
+        self.file_path = '/cluster/work/math/camlab-data/data/diffusion_project/macro_micro_id_3d.nc'
+        self.data = netCDF4.Dataset(self.file_path, 'r')
 
-#         (index, shift) = self.get_index_shift(index) if self.start == 0 else (index, 0)
-#         data = self.ds['data'][index].data
+        '''self.mean_training_input = np.array([0., 0., 0.])
+        self.mean_training_output = np.array([0., 0., 0.])
+        self.std_training_input = np.array([0.20302151, 0.15827903, 0.15821475])
+        self.std_training_output = np.array([0.264808, 0.23864195, 0.23852104])
 
-#         data_input = data[0, ..., :self.input_channel]
-#         data_output = data[1, ..., :self.output_channel]
+        print(self.mean_training_input, self.mean_training_output, self.std_training_input, self.std_training_output)
+        print(f"Means shapes: {self.mean_training_input.shape}, {self.mean_training_output.shape}")
+        print(f"Stds shapes {self.std_training_input.shape}, {self.std_training_output.shape}")'''
 
-#         data_input = self.normalize_input(data_input)
+        # shape of the dataset: (macro, micro, time, x, y, z, c)
+        data_shape = self.data['data'].shape
+        training_samples = data_shape[0] * data_shape[1]
+        micro_perturbations = data_shape[1]
+        macro_perturbations = data_shape[0]
 
-#         if self.p_dropout != 0:
-#             data_input = self.classifier_free_diffusion(data_input)
+        super().__init__(
+            training_samples=training_samples,
+            device=device,
+            micro_perturbation=micro_perturbations,
+            macro_perturbation=macro_perturbations,
+            file_path=self.file_path,
+            # stat_folder=stat_folder,
+        )
 
-#         data_output = self.normalize_output(data_output)
+    def __getitem__(self, index):
+        macro_idx = self.get_macro_index(index)
+        micro_idx = self.get_micro_index(index)
+        datum = self.data.variables['data'][macro_idx, micro_idx, (0, self.time_step)].data
 
-#         inputs = np.concatenate((data_input, data_output), -1)
-#         if shift != 0:
-#             inputs = translate_horizontally_periodic_unbatched(inputs, shift, axis=1)
-#         return inputs
+        data_input = datum[0]
+        data_output = datum[-1]
+
+        inputs = np.concatenate((data_input, data_output), -1)
+
+        return inputs
 
 
 class DataIC_Vel_Test(TrainingSetBase):
@@ -322,7 +366,7 @@ class DataIC_Vel_Test(TrainingSetBase):
     
     def __len__(self):
         return self.file['data'].shape[0]
-    
+
 
 class MNIST_Test(TrainingSetBase):
     def __init__(self, 

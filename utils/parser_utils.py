@@ -1,5 +1,6 @@
 from argparse import ArgumentParser
 from typing import Tuple
+import torch
 
 def parse_tuple(value):
     if value is None or value.lower() == "none":
@@ -22,6 +23,8 @@ def add_base_options(parser: ArgumentParser):
                        help='Set a path to a pretrained model for inference')
     group.add_argument('--unconditional', default=False, type=bool,
                        help='Run unconditional training and inference if set to True')
+    group.add_argument('--dtype', default=torch.float32, type=torch.dtype,
+                       help="Set the precision for PyTorch tensors by defining the dtype")
     
 
 def add_data_options(parser: ArgumentParser):
@@ -29,7 +32,7 @@ def add_data_options(parser: ArgumentParser):
 
     group = parser.add_argument_group('dataset')
     group.add_argument("--dataset", default='DataIC_Vel', type=str,
-                       # choices=['DataIC_Vel'], # TODO: Implement all possible choices!
+                       choices=['DataIC_Vel', 'DataIC_3D_Time'],
                        help="Name of the dataset, available choices")
     group.add_argument("--batch_size", default=5, type=int, help="Choose a batch size")
     group.add_argument("--worker", default=0, type=int,
@@ -42,7 +45,10 @@ def add_model_options(parser: ArgumentParser):
     group = parser.add_argument_group('model')
     # Model settings
     group.add_argument("--model_type", default='PreconditionedDenoiser', type=str,
-                       choices=["PreconditionedDenoiser", "UNet"], # TODO: ADD further models!
+                       choices=[
+                           "PreconditionedDenoiser", "UNet",
+                           "PreconditionedDenoiser3D", "UNet3D"
+                        ], 
                        help="Choose a valid Neural Network Model architecture")
     group.add_argument("--num_channels", default=(64, 128), type=parse_tuple, 
                        help="Number of channels for down and upsampling")
@@ -139,9 +145,9 @@ def add_training_options(parser: ArgumentParser):
     group = parser.add_argument_group('training')
     group.add_argument('--num_train_steps', default=10_000, type=int,
                        help='Choose number of training steps')
-    group.add_argument('--metric_aggregation_steps', default=100, type=int,
+    group.add_argument('--metric_aggregation_steps', default=500, type=int,
                        help='trainer runs this number of steps until training metrics are aggregated')
-    group.add_argument('--eval_every_steps', default=100, type=int, 
+    group.add_argument('--eval_every_steps', default=500, type=int, 
                        help='Period at which an evaluation loop runs')
     group.add_argument('--num_batches_per_eval', default=2, type=int,
                        help='Number of steps until evaluation metrics are aggregated')

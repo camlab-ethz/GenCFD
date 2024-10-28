@@ -17,6 +17,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 from typing import Any
 
+Tensor = torch.Tensor
+
 class MultiHeadDotProductAttention(nn.Module):
     """Mulit Head Dot Product Attention with querry and key normalization"""
     
@@ -56,7 +58,22 @@ class MultiHeadDotProductAttention(nn.Module):
             self.multihead_attention.out_proj.weight, generator=self.rng
             )
 
-    def forward(self, query, key, value):
+    def forward(
+            self, query: Tensor, key: Tensor = None, value: Tensor = None
+        ) -> Tensor:
+
+        if key is None and value is None:
+            key = value = query
+
+        elif key is None:
+            if value is not None:
+                raise ValueError("value can not be not None if key is None")
+            key = query
+        
+        if value is None:
+            value = key
+
+        # Required shape for multihead attention is: (width*height, bs, c/emb_dim)
         if self.normalize_qk:
             query = F.normalize(query, p=2, dim=-1)
             key = F.normalize(key, p=2, dim=-1)

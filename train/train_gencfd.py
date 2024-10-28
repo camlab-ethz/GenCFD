@@ -17,7 +17,7 @@ from utils.parser_utils import train_args
 
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-SEED = 0
+SEED = 100
 RNG = torch.Generator(device=device)
 RNG.manual_seed(SEED)
 
@@ -37,13 +37,20 @@ if __name__ == "__main__":
         print(f"Created a directory to store metrics and models: {savedir}")
 
     train_dataloader, eval_dataloader = get_dataset_loader(
-        name=args.dataset, batch_size=args.batch_size, num_worker=args.worker
+        name=args.dataset, batch_size=args.batch_size, num_worker=args.worker, device=device
     )
 
-    dataset = get_dataset(name=args.dataset)
+    dataset = get_dataset(name=args.dataset, device=device)
 
-    # Get input shape ant output shape
-    input_shape = dataset.__getitem__(0).shape
+    # Get input shape ant output shape and check whether the lead time is included
+    if 'lead_time' in dataset.file.variables:
+        lead_time, inputs = dataset.__getitem__(0)
+        input_shape = inputs.shape
+        time_cond = True
+    else:
+        input_shape = dataset.__getitem__(0).shape
+        time_cond = False
+    
     out_shape = (dataset.output_channel,) + tuple(input_shape[1:])
 
     denoising_model = create_denoiser(
@@ -58,7 +65,7 @@ if __name__ == "__main__":
     print(" ")
     print("Denoiser Initialization")
 
-    denoising_model.initialize(batch_size=args.batch_size)
+    denoising_model.initialize(batch_size=args.batch_size, time_cond=time_cond)
 
     # # Print number of Parameters:
     model_params = sum(p.numel() for p in denoising_model.denoiser.parameters() if p.requires_grad)

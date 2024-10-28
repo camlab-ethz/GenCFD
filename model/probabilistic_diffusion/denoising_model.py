@@ -218,7 +218,7 @@ class DenoisingBaseModel(BaseModel):
     batch_size = len(data)
     x_squared = torch.square(data)
 
-    sigma = self.noise_sampling(rng=self.rng, shape=(batch_size,)).to(device=self.device)
+    sigma = self.noise_sampling(rng=self.rng, shape=(batch_size,))
     weights = self.noise_weighting(sigma)
     if weights.ndim != data.ndim:
       weights = weights.view(-1, *([1] * (data.ndim - 1)))
@@ -338,18 +338,28 @@ class DenoisingModel(DenoisingBaseModel):
   # compute_crps: bool = False
 
 
-  def initialize(self, batch_size: int):
+  def initialize(self, batch_size: int, time_cond: bool = False):
     """Method necessary for a dummy initialization!"""
     x_sample = torch.ones((batch_size,) + self.input_shape, dtype=self.dtype, device=self.device)
     x = x_sample[:, self.input_channel:, ...]
     y = x_sample[:, :self.input_channel, ...]
 
-    return self.denoiser(
-        x=x, 
-        y=y, 
+    if time_cond:
+      time = torch.ones((batch_size,), dtype=self.dtype, device=self.device)
+      return self.denoiser(
+        x=x,
+        y=y,
         sigma=torch.ones((batch_size,), dtype=self.dtype, device=self.device), 
+        time=time,
         is_training=False
-    )
+      )
+    else:
+      return self.denoiser(
+          x=x, 
+          y=y, 
+          sigma=torch.ones((batch_size,), dtype=self.dtype, device=self.device), 
+          is_training=False
+      )
 
   def loss_fn(
       self,
@@ -369,14 +379,20 @@ class DenoisingModel(DenoisingBaseModel):
     Returns:
       The loss value and a tuple of training metric and mutables.
     """
-    data = batch
-    x = batch[:, self.input_channel:, ...] # Input
-    y = batch[:, :self.input_channel, ...] # Output
+    if isinstance(batch, list):
+      time = batch[0]
+      data = batch[1]
+    else:
+      data = batch
+      time = None
+
+    x = data[:, self.input_channel:, ...] # Input
+    y = data[:, :self.input_channel, ...] # Output
 
     batch_size = len(data)
     x_squared = torch.square(x)
 
-    sigma = self.noise_sampling(rng=self.rng, shape=(batch_size,)).to(device=self.device)
+    sigma = self.noise_sampling(rng=self.rng, shape=(batch_size,))
 
     weights = self.noise_weighting(sigma)
     if weights.ndim != data.ndim:
@@ -391,7 +407,11 @@ class DenoisingModel(DenoisingBaseModel):
     else:
       noised = x + noise * sigma
     
-    denoised = self.denoiser.forward(x=noised, y=y, sigma=sigma, is_training=True)
+    if time is not None:
+      denoised = self.denoiser.forward(x=noised, y=y, sigma=sigma, time=time, is_training=True)
+    else:
+      denoised = self.denoiser.forward(x=noised, y=y, sigma=sigma, is_training=True)
+
     denoised_squared = torch.square(denoised)
 
     rel_norm = torch.mean(torch.square(x) / torch.mean(torch.square(x_squared)))
@@ -427,11 +447,23 @@ class DenoisingModel(DenoisingBaseModel):
     Returns:
       A dictionary of denoising-based evaluation metrics.
     """
-    data = batch
-    inputs = data[
-      torch.randint(0, data.shape[0], (self.num_eval_noise_levels, self.num_eval_cases_per_lvl), 
-                    generator=self.rng, device=self.device)
-      ]
+    if isinstance(batch, list):
+      time = batch[0]
+      data = batch[1]
+    else:
+      data = batch
+      time = None
+
+    rand_idx_set = torch.randint(
+      0, data.shape[0], 
+      (self.num_eval_noise_levels, self.num_eval_cases_per_lvl), 
+      generator=self.rng, device=self.device
+    )
+
+    inputs = data[rand_idx_set]
+
+    if time is not None:
+      time_inputs = time[rand_idx_set]
 
     sigma = torch.exp(
       torch.linspace(
@@ -455,11 +487,16 @@ class DenoisingModel(DenoisingBaseModel):
     else:
       noised = x + noise * sigma
 
-    denoise_fn = self.inference_fn(self.denoiser, self.task)
+    denoise_fn = self.inference_fn(denoiser=self.denoiser, task=self.task, lead_time=False if time is None else True)
 
-    denoised = torch.stack(
-      [denoise_fn(x=noised[i], y=y[i], sigma=sigma[i]) for i in range(self.num_eval_noise_levels)]
-    )
+    if time is not None:
+      denoised = torch.stack(
+        [denoise_fn(x=noised[i], y=y[i], sigma=sigma[i], time=time_inputs[i]) for i in range(self.num_eval_noise_levels)]
+      )
+    else:
+      denoised = torch.stack(
+        [denoise_fn(x=noised[i], y=y[i], sigma=sigma[i]) for i in range(self.num_eval_noise_levels)]
+      )
 
     ema_losses = torch.mean(torch.square(denoised - x), dim=[i for i in range(1, inputs.ndim)])
     eval_losses = {f"eval_denoise_lvl{i}": loss.item() for i, loss in enumerate(ema_losses)}
@@ -467,8 +504,20 @@ class DenoisingModel(DenoisingBaseModel):
 
 
   @staticmethod
-  def inference_fn(denoiser: nn.Module, task: str = 'solver') -> Tensor:
-    """Returns the inference denoising function."""
+  def inference_fn(denoiser: nn.Module, task: str = 'solver', lead_time: bool = False) -> Tensor:
+    """Returns the inference denoising function.
+    Args:
+      denoiser: Neural Network (NN) Module for the forward pass
+      task: defines what the NN model should be used for as an N to N model 
+        or as a superresolver. Where the superresolver task setting can also
+        be used for a model which runs without any conditioning
+      lead_time: If set to True it can be used for datasets which have time 
+        included. This time value can then be used for conditioning. Commonly
+        done for an All2All training strategy.
+    
+    Return:
+      _denoise: corresponding denoise function
+    """
     
     if task == 'superresolver':
       def _denoise(
@@ -480,7 +529,7 @@ class DenoisingModel(DenoisingBaseModel):
     
         return denoiser.forward(x=x, sigma=sigma, is_training=False)
       
-    elif task == 'solver':
+    elif task == 'solver' and lead_time == False:
       def _denoise(
           x: Tensor, 
           sigma: float | Tensor, 
@@ -492,6 +541,23 @@ class DenoisingModel(DenoisingBaseModel):
           sigma = sigma * torch.ones((x.shape[0],))
     
         return denoiser.forward(x=x, sigma=sigma, y=y, is_training=False)
+    
+    elif task == 'solver' and lead_time == True:
+      def _denoise(
+          x: Tensor, 
+          sigma: float | Tensor, 
+          y: Tensor,
+          time: float | Tensor,
+          cond: Mapping[str, Tensor] | None = None
+        ) -> Tensor:
+      
+        if not torch.is_tensor(sigma):
+          sigma = sigma * torch.ones((x.shape[0],))
+
+        if not torch.is_tensor(time):
+          time = time * torch.ones((x.shape[0],))
+    
+        return denoiser.forward(x=x, sigma=sigma, y=y, time=time, is_training=False)
       
     else:
       raise ValueError("model can either be used as a 'superresolver' or a 'solver'")

@@ -26,7 +26,6 @@ from model.building_blocks.embeddings.fourier_emb import FourierEmbedding
 from model.building_blocks.layers.residual import CombineResidualWithSkip
 from model.building_blocks.layers.convolutions import ConvLayer
 
-
 Tensor = torch.Tensor
 
 
@@ -53,7 +52,8 @@ class UNet(nn.Module):
                num_heads: int = 8,
                normalize_qk: bool = False, 
                dtype: torch.dtype = torch.float32, 
-               device: Any | None = None):
+               device: Any | None = None
+    ):
     super(UNet, self).__init__()
 
     self.out_channels = out_channels

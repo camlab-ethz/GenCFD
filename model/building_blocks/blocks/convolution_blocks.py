@@ -207,7 +207,7 @@ class ConvBlock(nn.Module):
       project_skip=True,
       dtype=self.dtype,
       device=self.device
-      )
+    )
 
   def forward(self, x: Tensor, emb: Tensor, is_training: bool) -> Tensor:
     h = x.clone()
@@ -240,7 +240,3 @@ class ConvBlock(nn.Module):
     h = self.dropout_layer(h) if is_training else h
     h = self.conv2(h)
     return self.res_layer(residual=h, skip=x)
-
-
-
-    

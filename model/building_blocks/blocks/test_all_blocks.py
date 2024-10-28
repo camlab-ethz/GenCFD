@@ -1,8 +1,6 @@
 import torch
-from model.building_blocks.blocks.adaptive_scaling import AdaptiveScale
-from model.building_blocks.blocks.convolution_blocks import ResConv1x, ConvBlock
-from model.building_blocks.blocks.attention_block import AttentionBlock
-from utils.model_utils import reshape_jax_torch
+from model.building_blocks.blocks.convolution_blocks import ResConv1x, ConvBlock, AdaptiveScale
+from model.building_blocks.blocks.attention_block import AttentionBlock, AxialSelfAttentionBlock
 import unittest
 
 SEED = 0
@@ -102,6 +100,21 @@ class AttenionBlockTest(unittest.TestCase):
                 inputs = torch.randn(input_shape)
                 model = AttentionBlock(rng=RNG)
                 out = model(inputs, False)
+                self.assertEqual(out.shape, inputs.shape)
+
+class AxialAttenionBlockTest(unittest.TestCase):
+
+    def test_attention_block(self):
+        test_cases = [
+            (20, 3, 40, 40),
+            (2, 4, 8), (4, 8, 16)
+        ]
+        for input_shape in test_cases:
+            with self.subTest(input_shape=input_shape):
+                inputs = torch.randn(input_shape)
+                model = AxialSelfAttentionBlock(rng=RNG)
+                out = model(inputs, False)
+                self.assertEqual(out.shape, inputs.shape)
     
 if __name__ == "__main__":
   unittest.main()

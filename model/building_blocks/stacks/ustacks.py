@@ -34,7 +34,6 @@ class UStack(nn.Module):
         channels_per_head: Number of channels per head.
         dtype: Data type.
     """
-    # TODO: Think of how to add padding tuple or int?
     def __init__(self, num_channels: tuple[int, ...], 
                  num_res_blocks: tuple[int, ...],
                  upsample_ratio: tuple[int, ...],
@@ -61,8 +60,6 @@ class UStack(nn.Module):
         self.dtype = dtype
         self.device = device
         self.rng = rng
-
-        # self.padding = kwargs.get('padding', 0) # TODO: MAYBE use this padding if necessary!
 
         self.residual_blocks = nn.ModuleList()
         self.conv_blocks = nn.ModuleList()
@@ -127,13 +124,15 @@ class UStack(nn.Module):
                 
                 if self.conv_blocks[level][block_id] is None:
                     self.conv_blocks[level][block_id] = ConvBlock(
+                        in_channels = h.shape[1],
                         out_channels=channel,
                         kernel_size=kernel_dim * (3,),
                         rng=self.rng,
                         padding_mode= self.padding_method,
+                        padding=1,
+                        case=len(h.shape)-2,
                         dtype=self.dtype,
                         device=self.device,
-                        **{'padding': 1, 'in_channels': h.shape[1], 'case': len(h.shape)-2}
                         )
 
                 h = self.residual_blocks[level][block_id](residual=h, skip=skips.pop())
@@ -390,4 +389,3 @@ class UpsampleFourierGaussian(nn.Module):
             )
         
         return h_up, h
-    

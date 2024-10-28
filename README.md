@@ -21,7 +21,12 @@ can be added manually as well
 ```shell
 python3 -m train.train_gencfd --dataset DataIC_Vel --save_dir outputs --checkpoints False --num_train_steps 10000
 ```
-
+### Train a 3D model
+Furthermore, to run a 3D model and dataset it is best to set the number of heads to a maximum of 4. With 8 even on the 
+lowest layer only applied the required GPU memory succeeds 32 Gigabytes. The model can be trained as follows:
+```shell
+python3 -m train.train_gencfd --dataset DataIC_3D_Time --model_type PreconditionedDenoiser3D --save_dir outputs --batch_size 2 --num_heads 4
+```
 ## Inference
 The inference loop can be run with the following command, where a model directory needs to be set. The default command 
 looks as follows.
@@ -32,4 +37,9 @@ Further the number of time steps for the Euler Maruyama method to solve the SDE 
 manually as follows. The number of sampling steps should be preferably above 30 to reach convergence.
 ```shell
 python3 -m eval.evaluate_gencfd --dataset DataIC_Vel --model_dir outputs/checkpoints --sampling_steps 80
+```
+### Run Inference for the 3D model
+As a result, for the 3D model trained with the arguments presented above. Inference can be achieved as follows:
+```shell
+python3 -m eval.evaluate_gencfd --dataset DataIC_3D_Time --model_type PreconditionedDenoiser3D --model_dir outputs/checkpoints --batch_size 2 --num_heads 4
 ```

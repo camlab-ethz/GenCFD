@@ -87,8 +87,10 @@ def denoise_fn_output(
   """
   if y is None and lead_time is None:
     return denoise_fn(x, sigma, cond)
+  
   elif y is not None and lead_time is None:
     return denoise_fn(x, sigma, y, cond)
+  
   elif y is not None and lead_time is not None:
     return denoise_fn(x, sigma, y, lead_time, cond)
 
@@ -167,7 +169,6 @@ class Sampler:
     Returns:
       The generated samples.
     """
-    
     if self.tspan is None or self.tspan.ndim != 1:
       raise ValueError("`tspan` must be a 1-d Tensor.")
 
@@ -318,7 +319,6 @@ class SdeSampler(Sampler):
     )
     # SDE solvers may return either the full paths or the terminal state only.
     # If the former, the lead axis should be time.
-
     samples = denoised if self.integrator.terminal_only else denoised[-1]
     return denoised if self.return_full_paths else samples
 

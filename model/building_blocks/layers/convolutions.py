@@ -334,7 +334,9 @@ class DownsampleConv(nn.Module):
       )
       # Initialize with variance_scaling
       # Only use this if the activation function is ReLU or smth. similar
-      torch.nn.init.kaiming_uniform_(self.conv2d.weight, a=np.sqrt(5))
+      torch.nn.init.kaiming_uniform_(
+        self.conv2d.weight, a=np.sqrt(5), generator=self.rng
+      )
     
     elif len(ratios) == 3:
       self.conv3d = nn.Conv3d(
@@ -377,4 +379,4 @@ class DownsampleConv(nn.Module):
     elif len(inputs.shape) == 3:
       return self.conv1d(inputs)
     else:
-      raise ValueError(f"Input Dimension must be either 4D (bs, c, y, x) or 5D (bs, c, z, y, x)")
+      raise ValueError(f"Input Dimension must be either 3D (bs, c, x), 4D (bs, c, y, x) or 5D (bs, c, z, y, x)")

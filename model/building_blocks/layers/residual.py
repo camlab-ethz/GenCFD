@@ -54,8 +54,8 @@ class CombineResidualWithSkip(nn.Module):
       if self.skip_projection is None:
         # linear projection layer to match the number of channels
         self.skip_projection = nn.Linear(
-          reshape_jax_torch(skip).size(-1), 
-          reshape_jax_torch(residual).size(-1),
+          skip.shape[1], 
+          residual.shape[1],
           device=self.device,
           dtype=self.dtype
           )
