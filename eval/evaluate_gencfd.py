@@ -136,7 +136,7 @@ if __name__=="__main__":
     #     samples = sampler.generate(num_samples=1, y=u0[i].unsqueeze(0))
     #     result.append(samples)
 
-    samples = sampler.generate(num_samples=1, y=u0, lead_time=time[0])
+    samples = sampler.generate(num_samples=1, y=u0, lead_time=time[0] if time is not None else time)
 
     # TODO: for tracking memory!
     # print(torch.cuda.memory_summary())
