@@ -15,11 +15,11 @@ and metrics needs to be passed
 python3 -m train.train_gencfd --save_dir outputs
 ```
 
-If you want to specify a specific dataset and not use the default DataIC_Vel this can be done as 
-follows. Also to avoid saving checkpoints this can be also set to False and the number of training steps
-can be added manually as well
+### Train a 2D model
+To run training for a 2D dataset, this can be achieved as follows for the dataset DataIC_Vel. In this case the 
+default model PreconditionedDenoiser is used for training.
 ```shell
-python3 -m train.train_gencfd --dataset DataIC_Vel --save_dir outputs --checkpoints False --num_train_steps 10000
+python3 -m train.train_gencfd --dataset DataIC_Vel --save_dir outputs --num_train_steps 10000
 ```
 ### Train a 3D model
 Furthermore, to run a 3D model and dataset it is best to set the number of heads to a maximum of 4. With 8 even on the 
@@ -27,19 +27,32 @@ lowest layer only applied the required GPU memory succeeds 32 Gigabytes. The mod
 ```shell
 python3 -m train.train_gencfd --dataset DataIC_3D_Time --model_type PreconditionedDenoiser3D --save_dir outputs --batch_size 2 --num_heads 4
 ```
-## Inference
+## Inference and Evaluation
 The inference loop can be run with the following command, where a model directory needs to be set. The default command 
-looks as follows.
+looks as follows. To run inference there are two options. First option is to set the flag --compute_metrics to True. In this 
+case a default of 100 Monte Carlo Simulations is run to generate metrics such as the relative mean and standard deviation for each channel.
+Second option is to set the flag --visualize to True. This allows a single inference run and visualizes the first generated sample of the
+provided dataset.
+
+Instead of the dataset used for training we want to compute metrics with a perturbed dataset called ConditionalDataIC_i, where i should relate to the dataset used for training.
 ```shell
 python3 -m eval.evaluate_gencfd --dataset DataIC_Vel --model_dir outputs/checkpoints
 ```
-Further the number of time steps for the Euler Maruyama method to solve the SDE can be set 
-manually as follows. The number of sampling steps should be preferably above 30 to reach convergence.
+Furthermore another flag that can be used is --sampling_steps, this sets the number of time steps for the 
+Euler Maruyama method to solve the SDE. The number of sampling steps should be preferably above 30 to reach convergence.
 ```shell
 python3 -m eval.evaluate_gencfd --dataset DataIC_Vel --model_dir outputs/checkpoints --sampling_steps 80
 ```
+
+### Run Inference for the 2D model
+For a trained 2D model to run the results, the directory where the relevant checkpoint folder with the models should be provided. In 
+the following case the models can be found in outputs/checkpoints/. It is enough to only provide the relative path from the root directory.
+```shell
+python3 -m eval.evaluate_gencfd --dataset ConditionalDataIC_Vel --model_dir outputs --compute_metrics True --monte_carlo_samples 1000 
+```
+
 ### Run Inference for the 3D model
 As a result, for the 3D model trained with the arguments presented above. Inference can be achieved as follows:
 ```shell
-python3 -m eval.evaluate_gencfd --dataset DataIC_3D_Time --model_type PreconditionedDenoiser3D --model_dir outputs/checkpoints --batch_size 2 --num_heads 4
+python3 -m eval.evaluate_gencfd --dataset ConditionalDataIC_3D --model_type PreconditionedDenoiser3D --model_dir outputs --compute_metrics True --monte_carlo_samples 1000
 ```
