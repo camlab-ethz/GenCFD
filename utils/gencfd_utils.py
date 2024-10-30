@@ -26,7 +26,8 @@ from dataloader.dataset import (
     TrainingSetBase,
     DataIC_Vel,
     DataIC_3D_Time,
-    DataIC_Vel_Test
+    ConditionalDataIC_Vel,
+    ConditionalDataIC_3D
 )
 from utils.callbacks import Callback ,TqdmProgressBar, TrainStateCheckpoint
 from diffusion.samplers import SdeSampler, Sampler
@@ -40,21 +41,40 @@ DenoiseFn = Callable[[Tensor, Tensor, TensorMapping | None], Tensor]
 # Load Dataset and Dataloader
 # ***************************
 
-def get_dataset(name: str, device: torch.device = None) -> TrainingSetBase:
-    """Return the correct dataset"""
+def get_dataset(
+        name: str, 
+        device: torch.device = None,
+        time_dependence: bool = False
+    ) -> TrainingSetBase:
+    """Returns the correct dataset and if the dataset has a time dependency
+    This is necessary for the evaluation pipeline if there is no json file 
+    provided.
+    """
 
     if name == 'DataIC_Vel':
-        return DataIC_Vel(device=device)
+        dataset = DataIC_Vel(device=device)
+        time_cond = False
     
     elif name == 'DataIC_3D_Time':
-        return DataIC_3D_Time(device=device)
+        dataset = DataIC_3D_Time(device=device)
+        time_cond = True
     
-    elif name == 'DataIC_Vel_Test':
-        return DataIC_Vel_Test(device=device)
+    elif name == 'ConditionalDataIC_Vel':
+        dataset = ConditionalDataIC_Vel(device=device)
+        time_cond = False
+    
+    elif name == 'ConditionalDataIC_3D':
+        dataset = ConditionalDataIC_3D(device=device)
+        time_cond = True
     
     else:
         raise ValueError(f"Dataset {name} doesn't exist")
     
+    if time_dependence:
+        return dataset, time_cond
+    else:
+        return dataset
+
 
 def get_dataset_loader(
         name: str, 
@@ -285,23 +305,22 @@ def save_json_file(
 def load_json_file(config_path: str):
     """Load the training configurations from a JSON file."""
 
-    if not os.path.exists(config_path):
-        raise FileNotFoundError(f"Configuration file not found at {config_path}")
-    
-    with open(config_path, 'r') as f:
-        try:
-            config = json.load(f)
-        except json.JSONDecodeError as e:
-            raise ValueError(f"Error decoding JSON from the file {config_path}: {e}")
-        
-    print(f"Training configurations loaded from {config_path}")
-    return config
+    try:
+        with open(config_path, 'r') as f:
+            return json.load(f)
+    except FileNotFoundError:
+        print(
+            f"Configuration file not found at {config_path}. Using passed arguments"
+        )
+        return None
 
 
 def replace_args(args: ArgumentParser, train_args: dict):
     """Replace parser arguments with used arguments during training"""
 
     for key, value in train_args.items():
+        if key == "dataset":
+            continue
         if hasattr(args, key):
             setattr(args, key, value)
 

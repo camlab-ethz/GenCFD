@@ -32,7 +32,10 @@ def add_data_options(parser: ArgumentParser):
 
     group = parser.add_argument_group('dataset')
     group.add_argument("--dataset", default='DataIC_Vel', type=str,
-                       choices=['DataIC_Vel', 'DataIC_3D_Time'],
+                       choices=[
+                           'DataIC_Vel', 'DataIC_3D_Time',
+                           'ConditionalDataIC_Vel', 'ConditionalDataIC_3D'
+                        ],
                        help="Name of the dataset, available choices")
     group.add_argument("--batch_size", default=5, type=int, help="Choose a batch size")
     group.add_argument("--worker", default=0, type=int,
@@ -189,6 +192,16 @@ def add_sde_options(parser: ArgumentParser):
                        help='Defines the index where the time axis should be placed')
     group.add_argument('--terminal_only', default=True, type=bool,
                        help='If set to False returns the full path otherwise only the terminal state')
+    
+def add_evaluation_options(parser: ArgumentParser):
+    """Parser arguments to compute Metrics for the inference pipeline"""
+    group = parser.add_argument_group('evaluation')
+    group.add_argument('--compute_metrics', default=False, type=bool,
+                       help='If True metrics like mean and std will be computed')
+    group.add_argument('--monte_carlo_samples', default=100, type=int,
+                       help='Choose a number of monte carlo samples to compute statistical metrics')
+    group.add_argument('--visualize', default=False, type=bool,
+                       help="If True an image of a single generated result will be stored")
 
 def train_args():
     """Define the Parser for the training"""
@@ -214,4 +227,5 @@ def inference_args():
     add_trainer_options(parser)
     add_sde_options(parser)
     add_sampler_options(parser)
+    add_metrics_options(parser)
     return parser.parse_args()

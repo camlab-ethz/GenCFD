@@ -2,19 +2,15 @@ import os
 import netCDF4
 import numpy as np
 import torch
-
-from utils.dataloader_utils import (
-    StatsRecorder, 
-    timeit,
-    downsample,
-    upsample,
-    translate_horizontally_periodic_unbatched
-)
-from dataloader.dataloader import DummyDataloader
-
-Tensor = torch.Tensor
+from typing import Union
 
 DIR_PATH_LOADER = '/cluster/work/math/camlab-data/data/diffusion_project'
+
+# data = netCDF4.Dataset('/cluster/home/yramic/swirl-dynamics-torch/datasets/Stats_0.nc', 'r')
+
+array = np.ndarray
+Tensor = torch.Tensor
+
 
 class TrainingSetBase:
     def __init__(self,
@@ -35,29 +31,51 @@ class TrainingSetBase:
     def __len__(self):
         return self.training_samples
 
-    def normalize_input(self, u_):
+    def normalize_input(self, u_: Union[array, Tensor]) -> Union[array, Tensor]:
 
         if self.mean_training_input is not None:
-            return (u_ - self.mean_training_input) / (self.std_training_input + 1e-12)
+            mean_training_input = self.mean_training_input
+            std_training_input = self.std_training_input
+            if isinstance(u_, Tensor):
+                mean_training_input = torch.as_tensor(mean_training_input, dtype=u_.dtype, device=u_.device)
+                std_training_input = torch.as_tensor(std_training_input, dtype=u_.dtype, device=u_.device)
+            return (u_ - mean_training_input) / (std_training_input + 1e-12)
         else:
             return u_
 
-    def denormalize_input(self, u_):
+    def denormalize_input(self, u_: Union[array, Tensor]) -> Union[array, Tensor]:
         
         if self.mean_training_input is not None:
-            return u_ * (self.std_training_input + 1e-12) + self.mean_training_input
+            mean_training_input = self.mean_training_input
+            std_training_input = self.std_training_input
+            if isinstance(u_, Tensor):
+                mean_training_input = torch.as_tensor(mean_training_input, dtype=u_.dtype, device=u_.device)
+                std_training_input = torch.as_tensor(std_training_input, dtype=u_.dtype, device=u_.device)
+            return u_ * (std_training_input + 1e-12) + mean_training_input
         else:
             return u_
 
-    def normalize_output(self, u_, ):
+    def normalize_output(self, u_: Union[array, Tensor]) -> Union[array, Tensor]:
+
         if self.mean_training_output is not None:
-            return (u_ - self.mean_training_output) / (self.std_training_output + 1e-12)
+            mean_training_output = self.mean_training_output
+            std_training_output = self.std_training_output
+            if isinstance(u_, Tensor):
+                mean_training_output = torch.as_tensor(mean_training_output, dtype=u_.dtype, device=u_.device)
+                std_training_output = torch.as_tensor(std_training_output, dtype=u_.dtype, device=u_.device)
+            return (u_ - mean_training_output) / (std_training_output + 1e-12)
         else:
             return u_
 
-    def denormalize_output(self, u_):
+    def denormalize_output(self, u_: Union[array, Tensor]) -> Union[array, Tensor]:
+        
         if self.mean_training_output is not None:
-            return u_ * (self.std_training_output + 1e-12) + self.mean_training_output
+            mean_training_output = self.mean_training_output
+            std_training_output = self.std_training_output
+            if isinstance(u_, Tensor):
+                mean_training_output = torch.as_tensor(mean_training_output, dtype=u_.dtype, device=u_.device)
+                std_training_output = torch.as_tensor(std_training_output, dtype=u_.dtype, device=u_.device)
+            return u_ * (std_training_output + 1e-12) + mean_training_output
         else:
             return u_
 
@@ -196,8 +214,7 @@ class ConditionalBase(TrainingSetBase):
         self.t_final = t_final
         self.mean_down, self.std_down, self.kk, self.spectrum, self.energy, self.idx_wass, self.sol_wass = None, None, None, None, None, None, None
 
-    def set_true_stats_for_macro(self, 
-                                 macro_idx: int):
+    def set_true_stats_for_macro(self, macro_idx: int):
 
         '''
             macro_idx : macro index to be tested on
@@ -266,12 +283,17 @@ class ConditionalDataIC_Vel(ConditionalBase):
                          micro_perturbation = 1000,
                          macro_perturbation = 10,
                          file_path = file_path,
-                         stat_folder = stat_folder)    
+                         stat_folder = stat_folder)  
+         
+        self.mean_training_input = np.array([8.0606696e-08, 4.8213877e-11])
+        self.std_training_input = np.array([0.19003302, 0.13649726])
+        self.mean_training_output = np.array([4.9476512e-09, -1.5097612e-10])
+        self.std_training_output = np.array([0.35681796, 0.5053845]) 
     
     def __getitem__(self, index):
         macro_idx = self.get_macro_index(index + self.start_index)
         micro_idx = self.get_micro_index(index + self.start_index)
-        datum = self.file.variables['data'][macro_idx, micro_idx].data # TODO: check if .data here is correct?
+        datum = self.file.variables['data'][macro_idx, micro_idx].data
 
         data_input = datum[0, ..., :self.input_channel]
         data_output = datum[-1, ..., :self.output_channel]
@@ -281,10 +303,10 @@ class ConditionalDataIC_Vel(ConditionalBase):
              torch.as_tensor(data_output, dtype=torch.float32)], 
             dim=-1
         )
-        model_input = model_input.permute(0, 3, 2, 1)
+        model_input = model_input.permute(2, 1, 0)
 
         return model_input
-
+    
 
 class ConditionalDataIC_3D(ConditionalBase):
     def __init__(self, device: torch.device = None):
@@ -299,15 +321,6 @@ class ConditionalDataIC_3D(ConditionalBase):
 
         self.file_path = '/cluster/work/math/camlab-data/data/diffusion_project/macro_micro_id_3d.nc'
         self.data = netCDF4.Dataset(self.file_path, 'r')
-
-        '''self.mean_training_input = np.array([0., 0., 0.])
-        self.mean_training_output = np.array([0., 0., 0.])
-        self.std_training_input = np.array([0.20302151, 0.15827903, 0.15821475])
-        self.std_training_output = np.array([0.264808, 0.23864195, 0.23852104])
-
-        print(self.mean_training_input, self.mean_training_output, self.std_training_input, self.std_training_output)
-        print(f"Means shapes: {self.mean_training_input.shape}, {self.mean_training_output.shape}")
-        print(f"Stds shapes {self.std_training_input.shape}, {self.std_training_output.shape}")'''
 
         # shape of the dataset: (macro, micro, time, x, y, z, c)
         data_shape = self.data['data'].shape
@@ -324,6 +337,14 @@ class ConditionalDataIC_3D(ConditionalBase):
             # stat_folder=stat_folder,
         )
 
+        # Set the same mean and std values as for training DataIC_3D_Time
+        self.mean_training_input = np.array([1.5445266e-08, 1.2003070e-08, -3.2182508e-09])
+        self.mean_training_output = np.array([-8.0223117e-09, -3.3674191e-08, 1.5241447e-08])
+
+        self.std_training_input = np.array([0.20691067, 0.15985465, 0.15808222])
+        self.std_training_output = np.array([0.2706984, 0.24893111, 0.24169469])
+
+
     def __getitem__(self, index):
         macro_idx = self.get_macro_index(index)
         micro_idx = self.get_micro_index(index)
@@ -332,9 +353,14 @@ class ConditionalDataIC_3D(ConditionalBase):
         data_input = datum[0]
         data_output = datum[-1]
 
-        inputs = np.concatenate((data_input, data_output), -1)
+        model_input = torch.cat(
+            [torch.as_tensor(data_input, dtype=torch.float32), 
+             torch.as_tensor(data_output, dtype=torch.float32)], 
+            dim=-1
+        )
+        model_input = model_input.permute(3, 2, 1, 0)
 
-        return inputs
+        return model_input
 
 
 class DataIC_Vel_Test(TrainingSetBase):
@@ -367,7 +393,6 @@ class DataIC_Vel_Test(TrainingSetBase):
     
     def __len__(self):
         return self.file['data'].shape[0]
-
 
 
 class MNIST_Test(TrainingSetBase):
