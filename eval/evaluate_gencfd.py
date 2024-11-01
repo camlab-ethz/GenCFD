@@ -55,7 +55,7 @@ if __name__=="__main__":
     if train_args is None:
         # json file does not exist and train_args is None
         dataset, time_cond = get_dataset(
-            name=args.dataset, device=device, time_dependence=True
+            name=args.dataset, device=device, is_time_dependent=True
         )
         if 'lead_time' in dataset.file.variables:
             lead_time, inputs = dataset.__getitem__(0)
@@ -164,7 +164,8 @@ if __name__=="__main__":
         time_cond=time_cond,
         compute_metrics=args.compute_metrics,
         visualize=args.visualize,
-        device=device
+        device=device,
+        save_dir=args.save_dir
     )
 
     # Uncomment the following line for tracking memory!
@@ -173,4 +174,4 @@ if __name__=="__main__":
     end_train = time.time()
     elapsed_train = end_train - start_train
     print(" ")
-    print(f"Done training. Elapsed time {elapsed_train / 3600} h")
+    print(f"Done evaluation. Elapsed time {elapsed_train / 3600} h")

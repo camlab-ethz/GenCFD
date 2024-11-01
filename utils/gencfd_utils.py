@@ -26,6 +26,7 @@ from dataloader.dataset import (
     TrainingSetBase,
     DataIC_Vel,
     DataIC_3D_Time,
+    DataIC_3D_Time_TG,
     ConditionalDataIC_Vel,
     ConditionalDataIC_3D
 )
@@ -44,7 +45,7 @@ DenoiseFn = Callable[[Tensor, Tensor, TensorMapping | None], Tensor]
 def get_dataset(
         name: str, 
         device: torch.device = None,
-        time_dependence: bool = False
+        is_time_dependent: bool = False
     ) -> TrainingSetBase:
     """Returns the correct dataset and if the dataset has a time dependency
     This is necessary for the evaluation pipeline if there is no json file 
@@ -58,6 +59,10 @@ def get_dataset(
     elif name == 'DataIC_3D_Time':
         dataset = DataIC_3D_Time(device=device)
         time_cond = True
+
+    elif name == 'DataIC_3D_Time_TG':
+        dataset = DataIC_3D_Time_TG(device=device)
+        time_cond = True
     
     elif name == 'ConditionalDataIC_Vel':
         dataset = ConditionalDataIC_Vel(device=device)
@@ -70,7 +75,7 @@ def get_dataset(
     else:
         raise ValueError(f"Dataset {name} doesn't exist")
     
-    if time_dependence:
+    if is_time_dependent:
         return dataset, time_cond
     else:
         return dataset
@@ -125,12 +130,21 @@ def get_model(
         args: ArgumentParser, 
         out_channels: int, 
         rng: torch.Generator,
-        device: torch.device = None
+        device: torch.device = None,
+        mean_training_input: Tensor = None,
+        mean_training_output: Tensor = None,
+        std_training_input: Tensor = None,
+        std_training_output: Tensor = None
     ) -> nn.Module:
     """Get the correct model"""
     
     model_args = get_model_args(
-        args=args, out_channels=out_channels, rng=rng, device=device
+        args=args, out_channels=out_channels, 
+        rng=rng, device=device,
+        mean_training_input=mean_training_input, 
+        mean_training_output=mean_training_output,
+        std_training_input=std_training_input, 
+        std_training_output=std_training_output
     )
 
     if args.model_type == 'UNet':
@@ -180,6 +194,7 @@ def get_denoising_model(
     return DenoisingModel(**denoiser_args)
 
 
+
 def create_denoiser(
         args: ArgumentParser, 
         input_shape: int,
@@ -187,11 +202,22 @@ def create_denoiser(
         out_channels: int,
         rng: torch.Generator,
         device: torch.device = None,
-        dtype: torch.dtype = torch.float32
+        dtype: torch.dtype = torch.float32,
+        mean_training_input: Tensor = None,
+        mean_training_output: Tensor = None,
+        std_training_input: Tensor = None,
+        std_training_output: Tensor = None
     ):
     """Get the denoiser and sampler if required"""
 
-    model = get_model(args, out_channels, rng, device)
+    model = get_model(
+        args, out_channels, 
+        rng, device,
+        mean_training_input,
+        mean_training_output,
+        std_training_input,
+        std_training_output
+    )
 
     noise_sampling = get_noise_sampling(args, device)
     noise_weighting = get_noise_weighting(args, device)

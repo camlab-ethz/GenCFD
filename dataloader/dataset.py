@@ -1,3 +1,13 @@
+"""
+File contains all the used datasets. The keyword IC is a characterization of 
+incompressible flows. 
+
+List of used Datasets:
+- 2D Incompressible Flow
+- 3D Shear Layer
+- 3D Taylor Green Vortex
+"""
+
 import os
 import netCDF4
 import numpy as np
@@ -5,8 +15,6 @@ import torch
 from typing import Union
 
 DIR_PATH_LOADER = '/cluster/work/math/camlab-data/data/diffusion_project'
-
-# data = netCDF4.Dataset('/cluster/home/yramic/swirl-dynamics-torch/datasets/Stats_0.nc', 'r')
 
 array = np.ndarray
 Tensor = torch.Tensor
@@ -88,7 +96,7 @@ class TrainingSetBase:
     def collate_tf(self, data):
         return data
 
-#--------------------------------------
+#################### IC TO HIGH RESOLUTION ####################
 
 class DataIC_Vel(TrainingSetBase):
     def __init__(self, 
@@ -134,6 +142,7 @@ class DataIC_Vel(TrainingSetBase):
 
         return model_input
     
+#################### 3D SHEAR LAYER DATASETS ####################
 
 class DataIC_3D_Time(TrainingSetBase):
     def __init__(
@@ -189,9 +198,109 @@ class DataIC_3D_Time(TrainingSetBase):
 
     def get_proc_data(self, data):
         return data["data"]
+    
 
 
-#----------------------------------
+#################### 3D TAYLOR GREEN VORTEX DATASET ####################
+
+class DataIC_3D_Time_TG(TrainingSetBase):
+    
+    def __init__(
+            self,
+            start: int = 0,
+            device: torch.device = None,
+            file: str = None,
+            min_time: int = 0,
+            max_time: int = 5
+    ):
+
+        if file is None:
+            self.file_path = '/cluster/work/math/camlab-data/data/incompressible/tg/N128_64.nc'
+
+        self.file = netCDF4.Dataset(self.file_path, 'r')
+
+        super().__init__(start=start, device=device, training_samples=self.file.variables['u'].shape[0])
+
+        self.input_channel = 3
+        self.output_channel = 3
+
+        # these stats can be used to get the mean and std for normalization
+        training_stats_path = f"/cluster/work/math/camlab-data/data/diffusion_project/TrainingStats_nothing_DataIC_3D_Time_TG"
+        mean_stats_path = os.path.join(training_stats_path, 'mean_99000_0_64_False.npy') # pixel wise mean over every cahnnel
+        std_stats_path = os.path.join(training_stats_path, 'std_99000_0_64_False.npy') # pixel wise std over every channel
+        mean_data = np.load(mean_stats_path)
+        std_data = np.load(std_stats_path)
+
+        mean_vals = mean_data.mean(axis=(0, 1, 2)) # mean over all channels
+        std_vals = std_data.std(axis=(0, 1, 2)) # std over all channels
+
+        # first 3 channels are for the initial conditions
+        self.mean_training_input = mean_vals[:self.input_channel] 
+        self.std_training_input = std_vals[:self.input_channel] 
+        # last 3 channels are for the output (results)
+        self.mean_training_output = mean_vals[self.input_channel:]
+        self.std_training_output = std_vals[self.input_channel:]
+
+        self.min_time = min_time
+        self.max_time = max_time
+
+        # Precompute all possible (t_initial, t_final) pairs within the specified range.
+        self.time_pairs = [(i, j) for i in range(self.min_time, self.max_time) for j in range(i + 1, self.max_time + 1)]
+        self.total_pairs = len(self.time_pairs)
+        
+    def __len__(self):
+        # Return the total number of data points times the number of pairs.
+        return len(self.file.variables['u']) * self.total_pairs
+
+    def __getitem__(self, index):
+        # Determine the data point and the (t_initial, t_final) pair
+        data_index = index // self.total_pairs
+        pair_index = index % self.total_pairs
+        t_initial, t_final = self.time_pairs[pair_index]
+
+        # Load the data for the given index
+        u_data = self.file.variables['u'][data_index]  # Shape: (6, 64, 64, 64)
+        v_data = self.file.variables['v'][data_index]
+        w_data = self.file.variables['w'][data_index]
+
+        # Stack along the new last dimension (axis=-1)
+        combined_data = np.stack((u_data, v_data, w_data), axis=-1)  # Shape: (6, 64, 64, 64, 3)
+
+        # Extract initial and final conditions
+        initial_condition = self.normalize_input(
+            combined_data[t_initial])  # Shape: (64, 64, 64, 3)
+        final_condition = self.normalize_output(
+            combined_data[t_final])  # Shape: (64, 64, 64, 3)
+        
+        # Concatenate along the last axis to form the output tensor
+        output_tensor = np.concatenate(
+            (initial_condition, final_condition), axis=-1)  # Shape: (64, 64, 64, 6)
+        
+        # Linearly remap the lead_time in the interval [0.25, 2.0].
+        lead_time = float(t_final - t_initial)
+        lead_time_normalized = 0.25 + 0.4375 * (lead_time - 1)
+
+        return (
+            torch.tensor(lead_time_normalized, dtype=torch.float32, device=self.device), 
+            torch.tensor(output_tensor, dtype=torch.float32, device=self.device).permute(3, 2, 1, 0) #(c, z, y, x)
+        )
+
+    def collate_tf(self, time, data):
+        return {"lead_time": time, "data": data}
+
+    def get_proc_data(self, data):
+        return data["data"]
+
+
+#################### CONDITIONAL DATASETS FOR EVALUATON ####################
+"""
+These datasets have some macro and micro perturbations incorporated. Those
+can be used for evaluation or fine tuning. This allows for a out of distribution
+prediction. Finetuning is typically done only with macro perturbations.
+
+Macro perturbations are bigger shifts in the initial conditions, while micro
+perturbations are in the area of 1 grid cell.
+"""
 
 class ConditionalBase(TrainingSetBase):
 
@@ -361,67 +470,3 @@ class ConditionalDataIC_3D(ConditionalBase):
         model_input = model_input.permute(3, 2, 1, 0)
 
         return model_input
-
-
-class DataIC_Vel_Test(TrainingSetBase):
-    def __init__(self, 
-                 training_samples = 100,
-                 start = 0,
-                 file = None):
-        
-        super().__init__(training_samples, start = start)
-        
-        self.class_name = self.__class__.__name__
-        self.input_channel = 2
-        self.output_channel = 2
-
-        self.file = {'data': torch.randn((1000, 2, 32, 32, 3))}
-        
-
-    def __getitem__(self, index):
-        """Load data from disk on the fly given an index"""
-
-        index += self.start       
-        data = self.file['data'][index].data
-
-        data_input = data[0, ..., :self.input_channel]
-        data_output = data[1, ..., :self.output_channel]
-
-        inputs = torch.cat((data_input, data_output), -1)
-        
-        return inputs.permute(2, 1, 0)
-    
-    def __len__(self):
-        return self.file['data'].shape[0]
-
-
-class MNIST_Test(TrainingSetBase):
-    def __init__(self, 
-                 training_samples = 100,
-                 start = 0,
-                 file = None):
-        
-        super().__init__(training_samples, start = start)
-        
-        self.class_name = self.__class__.__name__
-        self.input_channel = 1
-        self.output_channel = 1
-
-        self.file = {'data': torch.randn((1000, 2, 28, 28, 2))}
-        
-
-    def __getitem__(self, index):
-        """Load data from disk on the fly given an index"""
-
-        index += self.start       
-        data = self.file['data'][index].data
-
-        data_input = data[0, ..., :self.input_channel]
-        data_output = data[1, ..., :self.output_channel]
-
-        inputs = torch.cat((data_input, data_output), -1)
-        
-        return inputs.permute(2, 1, 0)
-    
-    def __len__(self):
-        return self.file['data'].shape[0]

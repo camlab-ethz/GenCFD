@@ -106,7 +106,11 @@ def get_model_args(
     args: ArgumentParser, 
     out_channels: int, 
     rng: torch.Generator, 
-    device: torch.device = None
+    device: torch.device = None,
+    mean_training_input: Tensor = None,
+    mean_training_output: Tensor = None,
+    std_training_input: Tensor = None,
+    std_training_output: Tensor = None
   ) -> dict:
   """Return a dictionary of model parameters for the UNet architecture"""
 
@@ -119,7 +123,9 @@ def get_model_args(
       'noise_embed_dim': args.noise_embed_dim, 'padding_method': args.padding_method,
       'dropout_rate': args.dropout_rate, 'use_attention': args.use_attention, 
       'use_position_encoding': args.use_position_encoding, 'num_heads': args.num_heads,
-      'normalize_qk': args.normalize_qk, 'device': device
+      'normalize_qk': args.normalize_qk, 'device': device, 
+      'mean_training_input': mean_training_input, 'mean_training_output': mean_training_output, 
+      'std_training_input': std_training_input, 'std_training_output': std_training_output
     }
     if args.model_type == 'PreconditionedDenoiser':
       args_dict_2d.update({'sigma_data': args.sigma_data})
@@ -134,7 +140,9 @@ def get_model_args(
       'output_proj_channels': args.noise_embed_dim, 'padding_method': args.padding_method,
       'dropout_rate': args.dropout_rate, 'use_spatial_attention': (False, False, True),
       'use_position_encoding': args.use_position_encoding, 'num_heads': args.num_heads,
-      'normalize_qk': args.normalize_qk, 'dtype': args.dtype, 'device': device
+      'normalize_qk': args.normalize_qk, 'dtype': args.dtype, 'device': device,
+      'mean_training_input': mean_training_input, 'mean_training_output': mean_training_output, 
+      'std_training_input': std_training_input, 'std_training_output': std_training_output
     }
     if args.model_type == 'PreconditionedDenoiser3D':
       args_dict_3d.update({'sigma_data': args.sigma_data})
@@ -142,7 +150,6 @@ def get_model_args(
     args_dict = args_dict_3d
       
   return args_dict
-
 
 # General Denoiser arguments
 def get_denoiser_args(

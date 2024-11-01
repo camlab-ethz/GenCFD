@@ -47,18 +47,23 @@ if __name__ == "__main__":
         device=device
     )
 
-    dataset = get_dataset(name=args.dataset, device=device)
+    dataset, time_cond = get_dataset(name=args.dataset, device=device, is_time_dependent=True)
 
     # Get input shape ant output shape and check whether the lead time is included
-    if 'lead_time' in dataset.file.variables:
+    if time_cond:
         lead_time, inputs = dataset.__getitem__(0)
         input_shape = inputs.shape
-        time_cond = True
     else:
         input_shape = dataset.__getitem__(0).shape
-        time_cond = False
     
     out_shape = (dataset.output_channel,) + tuple(input_shape[1:])
+
+    # extract normalization values from the used dataset, these can also be computed if not provided!
+    # these values are then stored inside the NN model in buffers, so they don't get updated
+    mean_training_input = torch.as_tensor(dataset.mean_training_input, dtype=torch.float32, device=device)
+    mean_training_output = torch.as_tensor(dataset.mean_training_output, dtype=torch.float32, device=device)
+    std_training_input = torch.as_tensor(dataset.std_training_input, dtype=torch.float32, device=device)
+    std_training_output = torch.as_tensor(dataset.std_training_output, dtype=torch.float32, device=device)
 
     # Save parameters in a JSON File
     save_json_file(
@@ -82,7 +87,11 @@ if __name__ == "__main__":
         input_channels=dataset.input_channel,
         out_channels=dataset.output_channel,
         rng=RNG,
-        device=device
+        device=device,
+        mean_training_input=mean_training_input,
+        mean_training_output=mean_training_output,
+        std_training_input=std_training_input,
+        std_training_output=std_training_output
     )
 
     denoising_model.initialize(batch_size=args.batch_size, time_cond=time_cond)
@@ -90,6 +99,7 @@ if __name__ == "__main__":
     # # Print number of Parameters:
     model_params = sum(p.numel() for p in denoising_model.denoiser.parameters() if p.requires_grad)
     print(f"Total number of model parameters: {model_params}")
+
 
     trainer = training_loop.trainers.DenoisingTrainer(
         model=denoising_model,

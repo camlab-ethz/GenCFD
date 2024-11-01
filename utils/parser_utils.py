@@ -18,7 +18,7 @@ def add_base_options(parser: ArgumentParser):
     group.add_argument("--work_dir", default="datasets", type=str,
                        help="If empty, will use defaults according to the specified dataset.")
     group.add_argument('--save_dir', default=None, type=str,
-                       help='Specify your directory where training results should be saved')
+                       help='Specify your directory where training or evaluation results should be saved')
     group.add_argument('--model_dir', default=None, type=str,
                        help='Set a path to a pretrained model for inference')
     group.add_argument('--unconditional', default=False, type=bool,
@@ -33,7 +33,7 @@ def add_data_options(parser: ArgumentParser):
     group = parser.add_argument_group('dataset')
     group.add_argument("--dataset", default='DataIC_Vel', type=str,
                        choices=[
-                           'DataIC_Vel', 'DataIC_3D_Time',
+                           'DataIC_Vel', 'DataIC_3D_Time', 'DataIC_3D_Time_TG',
                            'ConditionalDataIC_Vel', 'ConditionalDataIC_3D'
                         ],
                        help="Name of the dataset, available choices")

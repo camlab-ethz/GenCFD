@@ -1,3 +1,4 @@
+import numpy as np
 import torch
 import torch.fft
 import pickle
@@ -5,6 +6,8 @@ import time
 from typing import Optional, Union, Tuple
 
 Tensor = torch.Tensor
+Array = np.ndarray
+Container = Union[Array, Tensor]
 
 import time
 
@@ -20,6 +23,54 @@ def timeit(func):
         return result
 
     return wrapper
+
+
+def normalize(u_: Container, mean: Container = None, std: Container = None) -> Container:
+    """"Normalizes data input by subtracting mean and dividing by std.
+    
+    Args:
+        u_ (Tensor or ndarray): The input data to normalize.
+        mean (Tensor or ndarray, optional): Mean values for normalization. Should be of same type as u_.
+        std (Tensor or ndarray, optional): Std values for normalization. Should be of same type as u_.
+    
+    Returns:
+        Tensor or ndarray: Normalized data in same type as input u_.
+    """
+
+    if mean is not None and std is not None:
+        if isinstance(u_, Tensor) and all(isinstance(var, Array) for var in (mean, std)):
+            mean = torch.tensor(mean, dtype=u_.dtype, device=u_.device)
+            std = torch.tensor(std, dtype=u_.dtype, device=u_.device)
+        elif isinstance(u_, Array) and all(isinstance(var, Tensor) for var in (mean, std)):
+            mean = mean.cpu().numpy()
+            std = std.cpu().numpy() 
+        return (u_ - mean) / (std + 1e-12)
+    else:
+        return u_
+
+
+def denormalize(u_: Container, mean: Container = None, std: Container = None) -> Container:
+    """Denormalizes data by applying std and mean used for normalization.
+    
+    Args:
+        u_ (Tensor or ndarray): The normalized data to revert.
+        mean (Tensor or ndarray, optional): Mean values used for normalization.
+        std (Tensor or ndarray, optional): Std values used for normalization.
+    
+    Returns:
+        Tensor or ndarray: Denormalized data in the same type as input u_.
+    """
+    
+    if mean is not None and std is not None:
+        if isinstance(u_, Tensor) and all(isinstance(var, Array) for var in (mean, std)):
+            mean = torch.tensor(mean, dtype=u_.dtype, device=u_.device)
+            std = torch.tensor(std, dtype=u_.dtype, device=u_.device)
+        elif isinstance(u_, Array) and all(isinstance(var, Tensor) for var in (mean, std)):
+            mean = mean.cpu().numpy()
+            std = std.cpu().numpy() 
+        return u_ * (std + 1e-12) + mean
+    else:
+        return u_
 
 
 def compute_updates(

@@ -1,3 +1,4 @@
+import os
 import numpy as np
 import torch
 from torch.utils.data import DataLoader
@@ -22,6 +23,7 @@ def run(
     compute_metrics: bool = False,
     visualize: bool = False,
     device: torch.device = None,
+    save_dir: str = None
 
 ) -> None:
     """Runs a benchmark evaluation.
@@ -35,10 +37,16 @@ def run(
     Args: 
     """
     batch_size = dataloader.batch_size
-
     # first check if the correct dataset is used to compute statistics
     if dataset_module not in ['ConditionalDataIC_Vel', 'ConditionalDataIC_3D']:
         raise ValueError(f"To compute statistics use a conditional dataset, not {dataset_module}!")
+    
+    # To store either visualization or metric results a save_dir needs to be specified
+    cwd = os.getcwd()
+    save_dir = os.path.join(cwd, 'outputs' if save_dir is None else save_dir)
+    if not os.path.exists(save_dir):
+        os.makedirs(save_dir)
+        print(f"Created a directory to store metrics and visualizations: {save_dir}")
     
     # check whether problem requires a conditioning on the lead time
     if time_cond:
@@ -103,7 +111,7 @@ def run(
 
         # save results!
         np.savez(
-            f'eval_results_{monte_carlo_samples}_samples.npz', 
+            os.path.join(save_dir, f'eval_results_{monte_carlo_samples}_samples.npz'), 
             rel_mean=rel_mean.cpu().numpy(), 
             rel_std=rel_std.cpu().numpy(),
             abs_mean=abs_mean.cpu().numpy(),

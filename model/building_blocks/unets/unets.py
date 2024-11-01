@@ -52,9 +52,19 @@ class UNet(nn.Module):
                num_heads: int = 8,
                normalize_qk: bool = False, 
                dtype: torch.dtype = torch.float32, 
-               device: Any | None = None
+               device: Any | None = None,
+               mean_training_input: Tensor = None,
+               mean_training_output: Tensor = None,
+               std_training_input: Tensor = None,
+               std_training_output: Tensor = None
     ):
     super(UNet, self).__init__()
+
+    # Store normalization parameters as buffers!
+    self.register_buffer('mean_training_input', mean_training_input)
+    self.register_buffer('mean_training_output', mean_training_output)
+    self.register_buffer('std_training_input', std_training_input)
+    self.register_buffer('std_training_output', std_training_output)
 
     self.out_channels = out_channels
     self.resize_to_shape = resize_to_shape
@@ -225,6 +235,10 @@ class PreconditionedDenoiser(UNet):
                normalize_qk: bool = False, 
                dtype: torch.dtype = torch.float32, 
                device: Any | None = None,
+               mean_training_input: Tensor = None,
+               mean_training_output: Tensor = None,
+               std_training_input: Tensor = None,
+               std_training_output: Tensor = None,
                sigma_data: float = 1.0,):
     
     super().__init__(out_channels=out_channels,
@@ -242,7 +256,11 @@ class PreconditionedDenoiser(UNet):
                      num_heads=num_heads,
                      normalize_qk=normalize_qk,
                      dtype=dtype,
-                     device=device)
+                     device=device,
+                     mean_training_input=mean_training_input,
+                     mean_training_output=mean_training_output,
+                     std_training_input=std_training_input,
+                     std_training_output=std_training_output)
     
     self.sigma_data = sigma_data
     

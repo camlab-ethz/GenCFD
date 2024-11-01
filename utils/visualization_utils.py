@@ -38,15 +38,29 @@ def reshape_to_numpy(sample: Union[Tensor, array]) -> Union[Tensor, array]:
         return sample.transpose(1, 2, 0)
     else:
         raise TypeError("Input must be a numpy array or PyTorch tensor.")
+    
+
+def check_save_dir(save_dir: str = None):
+    """Checks whether the given path exists to save the image"""
+
+    if save_dir is None:
+        raise ValueError("To store results provide an existing path.")
+    elif save_dir is not None:
+        os.makedirs(save_dir, exist_ok=True)
 
 
 def plot_2d_sample(
         gen_sample: Union[Tensor, array], 
         gt_sample: Union[Tensor, array], 
         axis: int = 0,
-        save: bool = True
+        save: bool = True,
+        save_dir: str = None
     ):
     """Plots the 2D results"""
+
+    # check whether path exists
+    if save == True:
+        check_save_dir(save_dir)
 
     gen_sample = reshape_to_numpy(gen_sample)
     gt_sample = reshape_to_numpy(gt_sample)
@@ -64,21 +78,33 @@ def plot_2d_sample(
     plt.tight_layout()
 
     if save:
-        plt.savefig("gen_gt_sample.png")
+        save_path = os.path.join(save_dir, "gen_gt_sample.png")
+        plt.savefig(save_path)
     else:
         plt.show()
 
 
-def plotter_3d(sample: array, axis: int=0, save: bool = True):
+def plotter_3d(
+        sample: Union[array, Tensor], 
+        axis: int=0, 
+        save: bool = True, 
+        save_dir: str = None
+    ):
     """3D plotter to visualize generated or ground truth 3D data"""
+
+    if save == True:
+        check_save_dir(save_dir)
+
+    sample = reshape_to_numpy(sample)
 
     volume = pv.wrap(sample[..., axis])
     plotter = pv.Plotter(off_screen=True)
     plotter.add_volume(volume, opacity="sigmoid", cmap="viridis", shade=True)
     if save:
-        plotter.screenshot("gen_sample.png")
+        save_path = os.path.join(save_dir, "gen_sample.png")
+        plotter.screenshot(save_path)
     else:
-        plotter.screenshot()
+        plotter.show()
     plotter.close()
 
 
@@ -86,8 +112,15 @@ def gen_gt_plotter_3d(
         gt_sample: array, 
         gen_sample: array, 
         axis: int=0, 
-        save: bool = True):
+        save: bool = True,
+        save_dir: str = None):
     """3D plotter to visualize generated and ground truth 3D data side by side"""
+
+    if save == True:
+        check_save_dir(save_dir)
+
+    gt_sample = reshape_to_numpy(gt_sample)
+    gen_sample = reshape_to_numpy(gen_sample)
 
     volume_gen = pv.wrap(gen_sample[..., axis])
     volume_gt = pv.wrap(gt_sample[..., axis])
@@ -104,7 +137,8 @@ def gen_gt_plotter_3d(
     plotter.add_text("Ground Truth Sample", position='upper_edge', font_size=12, color='black')
 
     if save:
-        plotter.screenshot("gen_gt_sample.png")
+        save_path = os.path.join(save_dir, "gen_gt_sample.png")
+        plotter.screenshot(save_path)
     else:
-        plotter.screenshot()
+        plotter.show()
     plotter.close()
