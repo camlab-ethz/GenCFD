@@ -150,7 +150,7 @@ def add_training_options(parser: ArgumentParser):
                        help='Choose number of training steps')
     group.add_argument('--metric_aggregation_steps', default=500, type=int,
                        help='trainer runs this number of steps until training metrics are aggregated')
-    group.add_argument('--eval_every_steps', default=500, type=int, 
+    group.add_argument('--eval_every_steps', default=1000, type=int, 
                        help='Period at which an evaluation loop runs')
     group.add_argument('--num_batches_per_eval', default=2, type=int,
                        help='Number of steps until evaluation metrics are aggregated')

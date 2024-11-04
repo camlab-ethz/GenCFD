@@ -44,8 +44,8 @@ class MultiHeadDotProductAttention(nn.Module):
                 "Embedding Dimension must be divisible through the number of heads"
                 )
         self.multihead_attention = nn.MultiheadAttention(
-            self.emb_dim, self.num_heads, dropout=dropout,
-            device=self.device, dtype=self.dtype
+            embed_dim=self.emb_dim, num_heads=self.num_heads, 
+            dropout=dropout, device=self.device, dtype=self.dtype
             )
         
         self._init_weights()

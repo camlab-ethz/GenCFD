@@ -22,7 +22,7 @@ SEED = 100
 RNG = torch.Generator(device=device)
 RNG.manual_seed(SEED)
 
-sys.path.append("/usr/local/cuda/bin/ptxas")
+# sys.path.append("/usr/local/cuda/bin/ptxas")
 # os.environ["WANDB__SERVICE_WAIT"] = "300"
 
 if __name__ == "__main__":
@@ -60,10 +60,10 @@ if __name__ == "__main__":
 
     # extract normalization values from the used dataset, these can also be computed if not provided!
     # these values are then stored inside the NN model in buffers, so they don't get updated
-    mean_training_input = torch.as_tensor(dataset.mean_training_input, dtype=torch.float32, device=device)
-    mean_training_output = torch.as_tensor(dataset.mean_training_output, dtype=torch.float32, device=device)
-    std_training_input = torch.as_tensor(dataset.std_training_input, dtype=torch.float32, device=device)
-    std_training_output = torch.as_tensor(dataset.std_training_output, dtype=torch.float32, device=device)
+    mean_training_input = torch.tensor(dataset.mean_training_input, dtype=torch.float32, device=device)
+    mean_training_output = torch.tensor(dataset.mean_training_output, dtype=torch.float32, device=device)
+    std_training_input = torch.tensor(dataset.std_training_input, dtype=torch.float32, device=device)
+    std_training_output = torch.tensor(dataset.std_training_output, dtype=torch.float32, device=device)
 
     # Save parameters in a JSON File
     save_json_file(
@@ -96,7 +96,7 @@ if __name__ == "__main__":
 
     denoising_model.initialize(batch_size=args.batch_size, time_cond=time_cond)
 
-    # # Print number of Parameters:
+    # Print number of Parameters:
     model_params = sum(p.numel() for p in denoising_model.denoiser.parameters() if p.requires_grad)
     print(f"Total number of model parameters: {model_params}")
 

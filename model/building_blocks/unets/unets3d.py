@@ -164,7 +164,7 @@ class UNet3D(nn.Module):
          num_channels=self.num_channels[::-1],
          num_res_blocks=len(self.num_channels) * (self.num_blocks,),
          upsample_ratio=self.downsample_ratio[::-1],
-         use_spatial_attention=self.use_spatial_attention,
+         use_spatial_attention=self.use_spatial_attention[::-1],
          rng=self.rng,
          num_output_proj_channels=self.output_proj_channels,
          padding_method=self.padding_method,
@@ -197,7 +197,7 @@ class UNet3D(nn.Module):
         sigma: The noise level, which either shares the same batch dimension as
           `x` or is a scalar (will be broadcasted accordingly).
         cond: The conditional inputs as a dictionary. Currently, only channelwise
-          conditioning is supported.
+          conditioning is supported. Can be used for additonal conditioning
         is_training: A boolean flag that indicates whether the module runs in
           training mode.
 

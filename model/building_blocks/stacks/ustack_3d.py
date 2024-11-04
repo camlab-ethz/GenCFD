@@ -61,23 +61,24 @@ class UStack(nn.Module):
         self.rng = rng
 
         self.residual_blocks = nn.ModuleList()
-        self.conv_blocks = nn.ModuleList()
-        self.attention_blocks = nn.ModuleList()
+        self.conv_blocks = nn.ModuleList() # ConvBlock
+        self.attention_blocks = nn.ModuleList() # AxialSelfAttentionBlock
         self.conv_layers = nn.ModuleList()
 
         for level, channel in enumerate(self.num_channels):
             self.conv_blocks.append(nn.ModuleList())
+            self.attention_blocks.append(nn.ModuleList()) 
             self.residual_blocks.append(nn.ModuleList())
 
             for block_id in range(self.num_res_blocks[level]):
                 self.residual_blocks[level].append(None)
                 self.conv_blocks[level].append(None)
 
-                if self.use_spatial_attention:
+                if self.use_spatial_attention[level]:
                     # attention requires input shape: (bs, x, y, z, c)
                     attn_axes = [1, 2, 3] # attention along all spatial dimensions
 
-                    self.attention_blocks.append(
+                    self.attention_blocks[level].append(
                         AxialSelfAttentionBlock(
                             rng=self.rng,
                             attention_axes=attn_axes,
@@ -133,7 +134,7 @@ class UStack(nn.Module):
                 h = self.conv_blocks[level][block_id](h, emb, is_training=is_training)
 
                 if self.use_spatial_attention[level]:
-                    h = self.attention_blocks[block_id](h, is_training)
+                    h = self.attention_blocks[level][block_id](h, is_training)
 
             # upsampling
             up_ratio = self.upsample_ratio[level]

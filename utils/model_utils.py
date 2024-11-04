@@ -138,7 +138,7 @@ def get_model_args(
       'downsample_ratio': (2, 2, 2), 'num_blocks': args.num_blocks,
       'noise_embed_dim': args.noise_embed_dim, 'input_proj_channels': args.noise_embed_dim,
       'output_proj_channels': args.noise_embed_dim, 'padding_method': args.padding_method,
-      'dropout_rate': args.dropout_rate, 'use_spatial_attention': (False, False, True),
+      'dropout_rate': args.dropout_rate, 'use_spatial_attention': (True, True, True),
       'use_position_encoding': args.use_position_encoding, 'num_heads': args.num_heads,
       'normalize_qk': args.normalize_qk, 'dtype': args.dtype, 'device': device,
       'mean_training_input': mean_training_input, 'mean_training_output': mean_training_output, 
