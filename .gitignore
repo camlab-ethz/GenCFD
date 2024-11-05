@@ -2,8 +2,12 @@
 **/__pycache__/
 # ignore data file for the MNIST data used in the demo
 /data
+# ignore data file for the MNIST data used in the demo
+/datasets
 # ignore outputs where the model is stored
 /outputs
+# ignore visualization where the visualization results and further analysis is stored
+/visualize
 # ignore the dataset folder, data can be stored here
 /dataset
 /dataloader/test.py
