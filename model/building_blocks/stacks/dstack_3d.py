@@ -135,9 +135,6 @@ class DStack(nn.Module):
             h = self.conv_blocks[level][block_id](h, emb, is_training=is_training)
 
             if self.use_spatial_attention[level]:  
-                # h = reshape_jax_torch(
-                #     self.attention_blocks[level][block_id](reshape_jax_torch(h), is_training)
-                # )
                 h = self.attention_blocks[level][block_id](h, is_training)
             
             skips.append(h)

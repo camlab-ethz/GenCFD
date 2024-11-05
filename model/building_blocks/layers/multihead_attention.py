@@ -45,7 +45,8 @@ class MultiHeadDotProductAttention(nn.Module):
                 )
         self.multihead_attention = nn.MultiheadAttention(
             embed_dim=self.emb_dim, num_heads=self.num_heads, 
-            dropout=dropout, device=self.device, dtype=self.dtype
+            dropout=dropout, batch_first=True,
+            device=self.device, dtype=self.dtype
             )
         
         self._init_weights()
@@ -73,8 +74,12 @@ class MultiHeadDotProductAttention(nn.Module):
         if value is None:
             value = key
 
-        # Required shape for multihead attention is: (width*height, bs, c/emb_dim)
+        # Required shape for multihead attention is: 
+        # 2D case: (bs, width*height, emb_dim)
+        # 3D case: (bs, length, emb_dim) 
+        # where the length is just the height, width or depth. Used for axial self attention
         if self.normalize_qk:
+            # normalization across the feature dimension
             query = F.normalize(query, p=2, dim=-1)
             key = F.normalize(key, p=2, dim=-1)
 

@@ -1,6 +1,7 @@
 import os
 import numpy as np
 import torch
+from tqdm import tqdm
 from torch.utils.data import DataLoader
 
 from eval.metrics.stats_recorder import StatsRecorder
@@ -65,7 +66,7 @@ def run(
         n_iter = monte_carlo_samples // batch_size
         # initialize stats_recorder to keep track of metrics
         
-        for i in range(n_iter):
+        for i in tqdm(range(n_iter), desc="Evaluating Monte Carlo Samples"):
             # run n_iter number of iterations
             batch = next(dataloader)
             u0 = batch[:, :dataset.output_channel, ...].to(device=device)

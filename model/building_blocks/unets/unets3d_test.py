@@ -38,19 +38,19 @@ class NetworksTest(unittest.TestCase):
                 batch, channels = 2, 3
                 x = torch.ones((batch, channels, *spatial_dims))
                 y = torch.ones((batch, channels, *spatial_dims))
-                time = torch.linspace(0, 10, batch)
+                time = torch.linspace(0, 1, batch)
                 sigma = torch.linspace(0, 1, batch)
                 
                 model = PreconditionedDenoiser3D(
                     out_channels=channels,
                     rng=RNG,
-                    num_channels=(4, 8, 12),
+                    num_channels=(32, 64, 128),
                     downsample_ratio=ds_ratio,
                     num_blocks=2,
                     padding_method=padding_method,
                     num_heads=2,
                     use_position_encoding=True,
-                    use_spatial_attention=(False, True, True)
+                    use_spatial_attention=(True, True, True)
                 )
 
                 out = model.forward(x=x, sigma=sigma, y=y, time=time, is_training=True)

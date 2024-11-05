@@ -103,14 +103,13 @@ if __name__ == "__main__":
 
     trainer = training_loop.trainers.DenoisingTrainer(
         model=denoising_model,
-        optimizer=optim.Adam(
+        optimizer=optim.AdamW(
             denoising_model.denoiser.parameters(), 
-            lr=args.peak_lr),
+            lr=args.peak_lr,
+            weight_decay=args.weight_decay),
         ema_decay=args.ema_decay,
         device=device
     )
-    # TODO: Implement the following optimizer!
-    # torch.optim.AdamW()
 
     start_train = time.time()
 

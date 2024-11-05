@@ -96,115 +96,52 @@ class TrainingSetBase:
     def collate_tf(self, data):
         return data
 
-# class DataIC_3D_Time(TrainingSetBase):
-#     def __init__(self,
-#                  start: int = 0,
-#                  file: str = None,
-#                  device: torch.device = None):
-#         self.class_name = self.__class__.__name__
-#         self.input_channel = 3
-#         self.output_channel = 3
-#         self.spatial_dim = 3
 
-#         self.resolution = 8
-#         self.n_samples = 1000
+#################### IC TO HIGH RESOLUTION ####################
 
-#         initial_cond = np.random.randn(
-#             *(
-#                 self.n_samples, 
-#                 self.resolution, 
-#                 self.resolution, 
-#                 self.resolution, 
-#                 self.input_channel
-#             )
-#         )
-#         data = np.random.randn(
-#             *(
-#                 self.n_samples, 
-#                 self.resolution, 
-#                 self.resolution, 
-#                 self.resolution, 
-#                 self.input_channel
-#             )
-#         )
-#         lead_time = np.ones((self.n_samples,))
-#         self.file = {
-#             'initial_data': initial_cond, 
-#             'result_data': data, 
-#             'lead_time': lead_time
-#         }
-
-#         super().__init__(
-#             start=start, 
-#             device=device, 
-#             training_samples=self.n_samples
-#         )
-
-#         self.mean_training_input = np.array([0, 0, 0])
-#         self.mean_training_output = np.array([0, 0, 0])
-#         self.std_training_input = np.array([1, 1, 1])
-#         self.std_training_output = np.array([1, 1, 1])
-
-#     def __getitem__(self, index):
-#         index += self.start
-#         initial_data = self.file['initial_data'][index]
-#         output_data = self.file['result_data'][index]
-#         lead_time = self.file['lead_time'][index]
-
-
-#         inputs = np.concatenate((initial_data, output_data), -1)
-
-#         return (
-#             torch.tensor(lead_time, dtype=torch.float32, device=self.device), 
-#             torch.tensor(inputs, dtype=torch.float32, device=self.device).permute(3, 2, 1, 0)
-#         )
-
-
-# #################### IC TO HIGH RESOLUTION ####################
-
-# class DataIC_Vel(TrainingSetBase):
-#     def __init__(self, 
-#                  start: int = 0,
-#                  file: str = None,
-#                  device: torch.device = None):
+class DataIC_Vel(TrainingSetBase):
+    def __init__(self, 
+                 start: int = 0,
+                 file: str = None,
+                 device: torch.device = None):
         
-#         self.class_name = self.__class__.__name__
-#         self.input_channel = 2
-#         self.output_channel = 2
-#         self.spatial_dim = 2
+        self.class_name = self.__class__.__name__
+        self.input_channel = 2
+        self.output_channel = 2
+        self.spatial_dim = 2
         
-#         if file is None:
-#             self.file = netCDF4.Dataset(f'{DIR_PATH_LOADER}/ddsl_fast_nothing_128_tr2.nc', mode='r')
-#         else:
-#             self.file = file
+        if file is None:
+            self.file = netCDF4.Dataset(f'{DIR_PATH_LOADER}/ddsl_fast_nothing_128_tr2.nc', mode='r')
+        else:
+            self.file = file
 
-#         super().__init__(start = start, device=device, training_samples=self.file['data'].shape[0])
+        super().__init__(start = start, device=device, training_samples=self.file['data'].shape[0])
         
-#         self.mean_training_input = np.array([8.0606696e-08, 4.8213877e-11])
-#         self.std_training_input = np.array([0.19003302, 0.13649726])
-#         self.mean_training_output = np.array([4.9476512e-09, -1.5097612e-10])
-#         self.std_training_output = np.array([0.35681796, 0.5053845])
+        self.mean_training_input = np.array([8.0606696e-08, 4.8213877e-11])
+        self.std_training_input = np.array([0.19003302, 0.13649726])
+        self.mean_training_output = np.array([4.9476512e-09, -1.5097612e-10])
+        self.std_training_output = np.array([0.35681796, 0.5053845])
 
-#     def __getitem__(self, index):
+    def __getitem__(self, index):
 
-#         index += self.start        
-#         data = self.file['data'][index].data
+        index += self.start        
+        data = self.file['data'][index].data
 
-#         data_input = data[0, ..., :self.input_channel]
-#         data_output = data[1, ..., :self.output_channel]
+        data_input = data[0, ..., :self.input_channel]
+        data_output = data[1, ..., :self.output_channel]
 
-#         data_input = self.normalize_input(data_input)
-#         data_output = self.normalize_output(data_output)
+        data_input = self.normalize_input(data_input)
+        data_output = self.normalize_output(data_output)
 
-#         model_input = torch.cat(
-#             [torch.as_tensor(data_input, dtype=torch.float32, device=self.device), 
-#              torch.as_tensor(data_output, dtype=torch.float32, device=self.device)], 
-#             dim=-1
-#         )
+        model_input = torch.cat(
+            [torch.as_tensor(data_input, dtype=torch.float32, device=self.device), 
+             torch.as_tensor(data_output, dtype=torch.float32, device=self.device)], 
+            dim=-1
+        )
 
-#         model_input = model_input.permute(2, 1, 0)
+        model_input = model_input.permute(2, 1, 0)
 
-#         return model_input
+        return model_input
     
 #################### 3D SHEAR LAYER DATASETS ####################
 
@@ -534,3 +471,71 @@ class ConditionalDataIC_3D(ConditionalBase):
         model_input = model_input.permute(3, 2, 1, 0)
 
         return model_input
+
+
+#################### CONDITIONAL DATASETS FOR EVALUATON ####################
+""" These datasets can be used for debugging purposes!
+"""
+
+# class DataIC_3D_Time(TrainingSetBase):
+#     def __init__(self,
+#                  start: int = 0,
+#                  file: str = None,
+#                  device: torch.device = None):
+#         self.class_name = self.__class__.__name__
+#         self.input_channel = 3
+#         self.output_channel = 3
+#         self.spatial_dim = 3
+
+#         self.resolution = 8
+#         self.n_samples = 1000
+
+#         initial_cond = np.random.randn(
+#             *(
+#                 self.n_samples, 
+#                 self.resolution, 
+#                 self.resolution, 
+#                 self.resolution, 
+#                 self.input_channel
+#             )
+#         )
+#         data = np.random.randn(
+#             *(
+#                 self.n_samples, 
+#                 self.resolution, 
+#                 self.resolution, 
+#                 self.resolution, 
+#                 self.input_channel
+#             )
+#         )
+#         lead_time = np.ones((self.n_samples,))
+#         self.file = {
+#             'initial_data': initial_cond, 
+#             'result_data': data, 
+#             'lead_time': lead_time
+#         }
+
+#         super().__init__(
+#             start=start, 
+#             device=device, 
+#             training_samples=self.n_samples
+#         )
+
+#         self.mean_training_input = np.array([0, 0, 0])
+#         self.mean_training_output = np.array([0, 0, 0])
+#         self.std_training_input = np.array([1, 1, 1])
+#         self.std_training_output = np.array([1, 1, 1])
+
+#     def __getitem__(self, index):
+#         index += self.start
+#         initial_data = self.file['initial_data'][index]
+#         output_data = self.file['result_data'][index]
+#         lead_time = self.file['lead_time'][index]
+
+
+#         inputs = np.concatenate((initial_data, output_data), -1)
+
+#         return (
+#             torch.tensor(lead_time, dtype=torch.float32, device=self.device), 
+#             torch.tensor(inputs, dtype=torch.float32, device=self.device).permute(3, 2, 1, 0)
+#         )

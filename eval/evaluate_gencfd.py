@@ -98,7 +98,12 @@ if __name__=="__main__":
         input_channels=dataset.input_channel,
         out_channels=dataset.output_channel,
         rng=RNG,
-        device=device
+        device=device,
+        # Initialize the mean and std values with dummy values
+        mean_training_input=torch.zeros((dataset.input_channel,)),
+        mean_training_output=torch.zeros((dataset.output_channel,)),
+        std_training_input=torch.ones((dataset.input_channel,)),
+        std_training_output=torch.ones((dataset.output_channel,))
     )
 
     print(" ")
@@ -108,9 +113,10 @@ if __name__=="__main__":
 
     trainer = DenoisingTrainer(
         model=denoising_model,
-        optimizer=optim.Adam(
+        optimizer=optim.AdamW(
             denoising_model.denoiser.parameters(), 
-            lr=args.peak_lr),
+            lr=args.peak_lr,
+            weight_decay=args.weight_decay),
         ema_decay=args.ema_decay,
         device=device
     )

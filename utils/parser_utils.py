@@ -137,6 +137,8 @@ def add_trainer_options(parser: ArgumentParser):
                        help='Choose a decay rate for the EMA model parameters')
     group.add_argument('--peak_lr', default=1e-4, type=float,
                        help="Choose a learning rate for the Adam optimizer")
+    group.add_argument('--weight_decay', default=0.01, type=float,
+                       help='Regularization strength for the optimizer')
     group.add_argument('--task', default='solver', type=str, 
                        choices=['solver', 'superresolver'],
                        help='Decide whether the model should be used as a solver or superresolver')
@@ -227,5 +229,5 @@ def inference_args():
     add_trainer_options(parser)
     add_sde_options(parser)
     add_sampler_options(parser)
-    add_metrics_options(parser)
+    add_evaluation_options(parser)
     return parser.parse_args()
