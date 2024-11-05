@@ -51,7 +51,8 @@ if __name__ == "__main__":
 
     # Get input shape ant output shape and check whether the lead time is included
     if time_cond:
-        lead_time, inputs = dataset.__getitem__(0)
+        batch = dataset.__getitem__(0)
+        lead_time, inputs = batch['lead_time'], batch['data']
         input_shape = inputs.shape
     else:
         input_shape = dataset.__getitem__(0).shape

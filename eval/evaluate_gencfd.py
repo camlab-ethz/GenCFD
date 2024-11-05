@@ -1,6 +1,3 @@
-""""
-Main file to run evaluation for the gencfd model
-"""
 import sys
 import random
 import time
@@ -58,7 +55,8 @@ if __name__=="__main__":
             name=args.dataset, device=device, is_time_dependent=True
         )
         if 'lead_time' in dataset.file.variables:
-            lead_time, inputs = dataset.__getitem__(0)
+            batch = dataset.__getitem__(0)
+            lead_time, inputs = batch['lead_time'], batch['data']
             input_shape = inputs.shape
         else:
             input_shape = dataset.__getitem__(0).shape
@@ -130,6 +128,12 @@ if __name__=="__main__":
         latest_model_path, model=denoising_model.denoiser, optimizer=trainer.optimizer
     )
 
+    # Retrieve the normalization buffer (mean and std tensors)
+    buffers = dict(denoising_model.denoiser.named_buffers())
+    for key, tensor in buffers.items():
+        if tensor is not None:  # put tensor on same device!
+            buffers[key] = tensor.to(device=device)
+
     # Construct the inference function
     denoise_fn = trainer.inference_fn_from_state_dict(
         trained_state, 
@@ -162,6 +166,7 @@ if __name__=="__main__":
 
     evaluation_loop.run(
         sampler=sampler,
+        buffers=buffers,
         monte_carlo_samples=args.monte_carlo_samples,
         stats_recorder=stats_recorder,
         dataloader=dataloader,
@@ -173,9 +178,6 @@ if __name__=="__main__":
         device=device,
         save_dir=args.save_dir
     )
-
-    # Uncomment the following line for tracking memory!
-    # print(torch.cuda.memory_summary())
 
     end_train = time.time()
     elapsed_train = end_train - start_train

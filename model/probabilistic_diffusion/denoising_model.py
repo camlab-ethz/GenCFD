@@ -379,9 +379,9 @@ class DenoisingModel(DenoisingBaseModel):
     Returns:
       The loss value and a tuple of training metric and mutables.
     """
-    if isinstance(batch, list):
-      time = batch[0]
-      data = batch[1]
+    if isinstance(batch, dict):
+      time = batch['lead_time']
+      data = batch['data']
     else:
       data = batch
       time = None
@@ -447,9 +447,9 @@ class DenoisingModel(DenoisingBaseModel):
     Returns:
       A dictionary of denoising-based evaluation metrics.
     """
-    if isinstance(batch, list):
-      time = batch[0]
-      data = batch[1]
+    if isinstance(batch, dict):
+      time = batch['lead_time']
+      data = batch['data']
     else:
       data = batch
       time = None

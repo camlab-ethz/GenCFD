@@ -143,7 +143,8 @@ class DStack(nn.Module):
           b, *hw, c = h.shape
           h = self.attention_blocks[block_id](h.reshape(b, -1, c), is_training)
           # reshaping h first to get (bs, c, *hw), then in the end reshape again to get (bs, c, h, w)
-          h = reshape_jax_torch(self.res_conv_blocks[block_id](reshape_jax_torch(h)).reshape(b, *hw, c))
+          h = reshape_jax_torch(self.res_conv_blocks[block_id](reshape_jax_torch(h))).reshape(b, *hw, c)
+          h = reshape_jax_torch(h)
         
         skips.append(h)
 

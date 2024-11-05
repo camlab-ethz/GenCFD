@@ -189,10 +189,10 @@ class DataIC_3D_Time(TrainingSetBase):
 
         inputs = np.concatenate((data_input, data_output), -1)
 
-        return (
-            torch.tensor(lead_time, dtype=torch.float32, device=self.device), 
-            torch.tensor(inputs, dtype=torch.float32, device=self.device).permute(3, 2, 1, 0)
-        )
+        return {
+            'lead_time': torch.tensor(lead_time, dtype=torch.float32, device=self.device), 
+            'data': torch.tensor(inputs, dtype=torch.float32, device=self.device).permute(3, 2, 1, 0)
+        }
 
     def collate_tf(self, time, data):
         return {"lead_time": time, "data": data}
@@ -281,10 +281,10 @@ class DataIC_3D_Time_TG(TrainingSetBase):
         lead_time = float(t_final - t_initial)
         lead_time_normalized = 0.25 + 0.4375 * (lead_time - 1)
 
-        return (
-            torch.tensor(lead_time_normalized, dtype=torch.float32, device=self.device), 
-            torch.tensor(output_tensor, dtype=torch.float32, device=self.device).permute(3, 2, 1, 0) #(c, z, y, x)
-        )
+        return {
+            'lead_time': torch.tensor(lead_time_normalized, dtype=torch.float32, device=self.device), 
+            'data': torch.tensor(output_tensor, dtype=torch.float32, device=self.device).permute(3, 2, 1, 0) #(c, z, y, x)
+        }
 
     def collate_tf(self, time, data):
         return {"lead_time": time, "data": data}
@@ -473,7 +473,7 @@ class ConditionalDataIC_3D(ConditionalBase):
         return model_input
 
 
-#################### CONDITIONAL DATASETS FOR EVALUATON ####################
+#################### DATASETS FOR DEBUGGING ####################
 """ These datasets can be used for debugging purposes!
 """
 
@@ -535,7 +535,65 @@ class ConditionalDataIC_3D(ConditionalBase):
 
 #         inputs = np.concatenate((initial_data, output_data), -1)
 
-#         return (
-#             torch.tensor(lead_time, dtype=torch.float32, device=self.device), 
-#             torch.tensor(inputs, dtype=torch.float32, device=self.device).permute(3, 2, 1, 0)
+#         return {
+#             'lead_time': torch.tensor(lead_time, dtype=torch.float32, device=self.device), 
+#             'data': torch.tensor(inputs, dtype=torch.float32, device=self.device).permute(3, 2, 1, 0)
+#         }
+    
+# class ConditionalDataIC_3D(TrainingSetBase):
+#     def __init__(self,
+#                  start: int = 0,
+#                  file: str = None,
+#                  device: torch.device = None):
+#         self.class_name = self.__class__.__name__
+#         self.input_channel = 3
+#         self.output_channel = 3
+#         self.spatial_dim = 3
+
+#         self.resolution = 8
+#         self.n_samples = 1000
+
+#         initial_cond = np.random.randn(
+#             *(
+#                 self.n_samples, 
+#                 self.resolution, 
+#                 self.resolution, 
+#                 self.resolution, 
+#                 self.input_channel
+#             )
 #         )
+#         data = np.random.randn(
+#             *(
+#                 self.n_samples, 
+#                 self.resolution, 
+#                 self.resolution, 
+#                 self.resolution, 
+#                 self.input_channel
+#             )
+#         )
+#         lead_time = np.ones((self.n_samples,))
+#         self.file = {
+#             'initial_data': initial_cond, 
+#             'result_data': data, 
+#             'lead_time': lead_time
+#         }
+
+#         super().__init__(
+#             start=start, 
+#             device=device, 
+#             training_samples=self.n_samples
+#         )
+
+#         self.mean_training_input = np.array([0, 0, 0])
+#         self.mean_training_output = np.array([0, 0, 0])
+#         self.std_training_input = np.array([1, 1, 1])
+#         self.std_training_output = np.array([1, 1, 1])
+
+#     def __getitem__(self, index):
+#         index += self.start
+#         initial_data = self.file['initial_data'][index]
+#         output_data = self.file['result_data'][index]
+
+#         inputs = np.concatenate((initial_data, output_data), -1)
+
+#         return torch.tensor(inputs, dtype=torch.float32, device=self.device).permute(3, 2, 1, 0)

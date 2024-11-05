@@ -77,8 +77,8 @@ class StatsRecorder:
         # new number of observations would then be m + n
         mean_gt_data = gt_data.mean(dim=0)
         mean_gen_data = gen_data.mean(dim=0)
-        std_gt_data = gt_data.std(dim=0)
-        std_gen_data = gen_data.std(dim=0)
+        std_gt_data = gt_data.std(dim=0) if gt_data.size(0) > 1 else gt_data.std(dim=0, correction=0)
+        std_gen_data = gen_data.std(dim=0) if gen_data.size(0) > 1 else gen_data.std(dim=0, correction=0)
 
         # first we will update the standard deviation before we update the mean
         var_gt = (

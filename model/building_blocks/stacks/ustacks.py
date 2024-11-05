@@ -143,7 +143,8 @@ class UStack(nn.Module):
                     b, *hw, c = h.shape
                     
                     h = self.attention_blocks[block_id](h.reshape(b, -1, c), is_training)
-                    h = reshape_jax_torch(self.res_conv_blocks[block_id](reshape_jax_torch(h)).reshape(b, *hw, c))
+                    h = reshape_jax_torch(self.res_conv_blocks[block_id](reshape_jax_torch(h))).reshape(b, *hw, c)
+                    h = reshape_jax_torch(h) # (bs, c, width, height)
 
             # upsampling
             up_ratio = self.upsample_ratio[level]

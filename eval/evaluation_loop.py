@@ -1,12 +1,13 @@
 import os
 import numpy as np
 import torch
-from tqdm import tqdm
 from torch.utils.data import DataLoader
+from tqdm import tqdm
 
 from eval.metrics.stats_recorder import StatsRecorder
 from eval.metrics.probabilistic_forecast import relative_L2_norm, absolute_L2_norm
 from dataloader.dataset import TrainingSetBase
+from utils.dataloader_utils import normalize, denormalize
 from utils.model_utils import reshape_jax_torch
 from utils.visualization_utils import plot_2d_sample, gen_gt_plotter_3d
 from diffusion.samplers import Sampler
@@ -15,6 +16,7 @@ from diffusion.samplers import Sampler
 def run(
     *,
     sampler: Sampler,
+    buffers: dict,
     monte_carlo_samples: int,
     stats_recorder: StatsRecorder,
     dataloader: DataLoader,
@@ -27,15 +29,31 @@ def run(
     save_dir: str = None
 
 ) -> None:
-    """Runs a benchmark evaluation.
+    """Run benchmark evaluation on the specified dataset.
 
-    This function runs the benchmark evaluation in bunches, or "groups of
-    batches" (where group size = `num_aggregation_batches`). After a group is done
-    evaluating, the results are (optionally) saved/checkpointed. At the end of the
-    whole evaluation (either by reaching `max_eval_batches` or the dataloader
-    raising `StopIteration`), the aggregated metrics are saved.
+    This function performs benchmark evaluation in batches using the 
+    provided denoising sampler. It can compute metrics through a Monte Carlo 
+    simulation and optionally visualize results.
 
-    Args: 
+    Args:
+        sampler (Sampler): The denoising-based diffusion sampler used for inference.
+        buffers (dict): Buffers stored during training, including normalization arrays and tensors.
+        monte_carlo_samples (int): The number of Monte Carlo samples to use for metric computation, 
+            helping to mitigate computational demand during inference.
+        stats_recorder (StatsRecorder): An object for recording evaluation statistics.
+        dataloader (DataLoader): Initialized PyTorch DataLoader for batching the dataset.
+        dataset (TrainingSetBase): The dataset class containing input and output channels.
+        dataset_module (str): The name of the dataset module being used.
+        time_cond (bool): Flag indicating whether the dataset has a time dependency.
+        compute_metrics (bool, optional): If True, performs the Monte Carlo simulation to compute and 
+            store metrics in the specified directory. Defaults to False.
+        visualize (bool, optional): If True, renders samples for 3D datasets or plots for 2D datasets.
+            Defaults to False.
+        device (torch.device, optional): The device on which to run the evaluation, either 'cuda' or 'cpu'.
+        save_dir (str, optional): Path to the directory where metrics and visualization results will be saved.
+
+    Returns:
+        None
     """
     batch_size = dataloader.batch_size
     # first check if the correct dataset is used to compute statistics
@@ -66,6 +84,7 @@ def run(
         n_iter = monte_carlo_samples // batch_size
         # initialize stats_recorder to keep track of metrics
         
+        # for i in range(n_iter):
         for i in tqdm(range(n_iter), desc="Evaluating Monte Carlo Samples"):
             # run n_iter number of iterations
             batch = next(dataloader)
@@ -73,7 +92,14 @@ def run(
             u = batch[:, dataset.output_channel:, ...].to(device=device)
 
             # normalize inputs (initial conditions) and outputs (solutions)
-            u0_norm = reshape_jax_torch(dataset.normalize_input(reshape_jax_torch(u0)))
+            # u0_norm = reshape_jax_torch(dataset.normalize_input(reshape_jax_torch(u0)))
+            u0_norm = reshape_jax_torch(
+                normalize(
+                    reshape_jax_torch(u0),
+                    mean=buffers['mean_training_input'],
+                    std=buffers['std_training_input']
+                )
+            )
             
             gen_batch = torch.empty(u.shape, device=device)
             for batch in range(batch_size):
@@ -85,7 +111,14 @@ def run(
 
                 gen_batch[batch] = gen_sample.squeeze(0)
             # update relevant metrics and denormalize the generated results
-            u_gen = reshape_jax_torch(dataset.denormalize_output(reshape_jax_torch(gen_batch)))
+            # u_gen = reshape_jax_torch(dataset.denormalize_output(reshape_jax_torch(gen_batch)))
+            u_gen = reshape_jax_torch(
+                denormalize(
+                    reshape_jax_torch(gen_batch),
+                    mean=buffers['mean_training_output'],
+                    std=buffers['std_training_output']
+                )
+            )
 
             # solutions are stored with shape (bs, c, z, y, x)
             stats_recorder.update_step(u_gen, u)
@@ -110,7 +143,7 @@ def run(
         print("Absolute RMSE for each metric and channel")
         print(f"Mean Metric: {abs_mean}    STD Metric {abs_std}")
 
-        # save results!
+        # save results
         np.savez(
             os.path.join(save_dir, f'eval_results_{monte_carlo_samples}_samples.npz'), 
             rel_mean=rel_mean.cpu().numpy(), 
@@ -127,7 +160,13 @@ def run(
         u = batch[:, dataset.output_channel:, ...].to(device=device)
 
         # normalize inputs (initial conditions) and outputs (solutions)
-        u0_norm = reshape_jax_torch(dataset.normalize_input(reshape_jax_torch(u0)))
+        u0_norm = reshape_jax_torch(
+            normalize(
+                reshape_jax_torch(u0),
+                mean=buffers['mean_training_input'],
+                std=buffers['std_training_input']
+            )
+        )
         
         gen_batch = torch.empty(u.shape, device=device)
         for batch in range(batch_size):
@@ -139,12 +178,25 @@ def run(
 
             gen_batch[batch] = gen_sample.squeeze(0)
         # update relevant metrics and denormalize the generated results
-        u_gen = reshape_jax_torch(dataset.denormalize_output(reshape_jax_torch(gen_batch)))
+        # u_gen = reshape_jax_torch(dataset.denormalize_output(reshape_jax_torch(gen_batch)))
+        u_gen = reshape_jax_torch(
+            denormalize(
+                reshape_jax_torch(gen_batch),
+                mean=buffers['mean_training_output'],
+                std=buffers['std_training_output']
+            )
+        )
 
         ndim = u_gen.ndim
         if ndim == 4:
             # plot 2D results
-            plot_2d_sample(gen_sample=u_gen[0], gt_sample=u[0], axis=0)
+            plot_2d_sample(
+                gen_sample=u_gen[0], gt_sample=u[0], 
+                axis=0, save=True, save_dir=save_dir
+            )
         elif ndim == 5:
             # plot 3D results
-            gen_gt_plotter_3d(gt_sample=u[0], gen_sample=u_gen[0], axis=0)
+            gen_gt_plotter_3d(
+                gt_sample=u[0], gen_sample=u_gen[0], axis=0, 
+                save=True, save_dir=save_dir
+            )
