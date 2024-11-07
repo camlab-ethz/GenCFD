@@ -17,11 +17,12 @@
 
 """Convolution layers."""
 
-from typing import Literal, Sequence, Any
+from typing import Literal, Sequence, Any, Callable
 import numpy as np
 import torch
 from torch import nn
 import torch.nn.functional as F
+import functools
 
 Tensor = torch.Tensor
 
@@ -36,6 +37,8 @@ def ConvLayer(
     use_bias: bool = True,
     use_local: bool = False,
     case: int = 2,
+    kernel_init: Callable = None,
+    bias_init: Callable = torch.nn.init.zeros_,
     dtype: torch.dtype = torch.float32,
     device: Any | None = None,
     **kwargs
@@ -77,9 +80,8 @@ def ConvLayer(
       dtype=dtype
     )
   else:
-    # TODO: Write a class to not repeat this for other classes as well!
     if case == 1:
-      return nn.Conv1d(
+      conv_layer = nn.Conv1d(
         in_channels=in_channels,
         out_channels=out_channels,
         kernel_size=kernel_size,
@@ -91,7 +93,7 @@ def ConvLayer(
         dtype=dtype
       )
     elif case == 2:
-      return nn.Conv2d(
+      conv_layer = nn.Conv2d(
         in_channels=in_channels,
         out_channels=out_channels,
         kernel_size=kernel_size,
@@ -103,7 +105,7 @@ def ConvLayer(
         dtype=dtype
       )
     elif case == 3:
-      return nn.Conv3d(
+      conv_layer = nn.Conv3d(
         in_channels=in_channels,
         out_channels=out_channels,
         kernel_size=kernel_size,
@@ -114,6 +116,13 @@ def ConvLayer(
         device=device,
         dtype=dtype
       )
+
+  # Initialize weights and biases
+  if kernel_init is not None:
+    kernel_init(conv_layer.weight)
+    bias_init(conv_layer.bias)
+
+  return conv_layer
 
 
 class ConvLocal2d(nn.Module):
@@ -280,8 +289,6 @@ class LatLonConv(nn.Module):
     # Edge padding to latitudinal (lat) axis
     padded_inputs = F.pad(padded_inputs, [lat_pad, lat_pad, 0, 0], mode='replicate')
 
-    # TODO: Check if CircularPad2d or 3d should be used instead!
-
     return self.conv(padded_inputs)
 
 
@@ -294,6 +301,8 @@ class DownsampleConv(nn.Module):
                ratios: Sequence[int],
                rng: torch.Generator, 
                use_bias: bool = True,
+               kernel_init: Callable = torch.nn.init.kaiming_uniform_,
+               bias_init: Callable = torch.nn.init.zeros_,
                device: Any | None = None,
                dtype: torch.dtype = torch.float32, 
                **kwargs):
@@ -301,10 +310,16 @@ class DownsampleConv(nn.Module):
     self.in_channels = in_channels
     self.out_channels = out_channels
     self.ratios = ratios
-    self.use_bias = use_bias
+    self.bias_init = bias_init
     self.dtype = dtype
     self.device = device
     self.rng = rng
+
+    self.use_bias = use_bias
+    if kernel_init is torch.nn.init.kaiming_uniform_:
+      self.kernel_init = functools.partial(kernel_init, a=np.sqrt(5), generator=self.rng)
+    else:
+      self.kernel_init = kernel_init
 
     # For downsampling padding = 0 and stride > 1
     if len(ratios) == 1:
@@ -318,9 +333,9 @@ class DownsampleConv(nn.Module):
         device=self.device,
         dtype=self.dtype
       )
-      torch.nn.init.kaiming_uniform_(
-        self.conv1d.weight, a=np.sqrt(5), generator=self.rng
-        )
+      self.kernel_init(self.conv1d.weight)
+      self.bias_init(self.conv1d.bias)
+
     elif len(ratios) == 2:
       self.conv2d = nn.Conv2d(
         in_channels=self.in_channels,
@@ -334,10 +349,9 @@ class DownsampleConv(nn.Module):
       )
       # Initialize with variance_scaling
       # Only use this if the activation function is ReLU or smth. similar
-      torch.nn.init.kaiming_uniform_(
-        self.conv2d.weight, a=np.sqrt(5), generator=self.rng
-      )
-    
+      self.kernel_init(self.conv2d.weight)
+      self.bias_init(self.conv2d.bias)
+
     elif len(ratios) == 3:
       self.conv3d = nn.Conv3d(
         in_channels=self.in_channels,
@@ -349,11 +363,11 @@ class DownsampleConv(nn.Module):
         device=self.device,
         dtype=self.dtype
       )
-      torch.nn.init.kaiming_uniform_(
-        self.conv3d.weight, a=np.sqrt(5), generator=self.rng
-        )
+      self.kernel_init(self.conv3d.weight)
+      self.bias_init(self.conv3d.bias)
     else:
       raise ValueError(f"Ratio lengths should either be 1D, 2D or 3D")
+    
     
   def forward(self, inputs):
     """Applies strided convolution for downsampling."""

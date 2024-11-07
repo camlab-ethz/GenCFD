@@ -61,14 +61,8 @@ class CombineResidualWithSkip(nn.Module):
           )
         torch.nn.init.kaiming_uniform_(
           self.skip_projection.weight, a=np.sqrt(5), generator=self.rng
-          )
-
-        if self.skip_projection.bias is not None:
-          fan_in, _ = torch.nn.init._calculate_fan_in_and_fan_out(self.skip_projection.weight)
-          bound = 1 / math.sqrt(fan_in)
-          torch.nn.init.uniform_(
-            self.skip_projection.bias, -bound, bound, generator=self.rng
-            )
+        )
+        torch.nn.init.zeros_(self.skip_projection.bias)
 
       skip = reshape_jax_torch(self.skip_projection(reshape_jax_torch(skip)))
     # combine skip and residual connections

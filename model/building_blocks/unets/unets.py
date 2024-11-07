@@ -19,7 +19,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from typing import Any
 
-# from model.layers.resize import FilteredResize
+from utils.model_utils import default_init
 from model.building_blocks.stacks.dtstack import DStack
 from model.building_blocks.stacks.ustacks import UpsampleFourierGaussian, UStack
 from model.building_blocks.embeddings.fourier_emb import FourierEmbedding
@@ -196,6 +196,7 @@ class UNet(nn.Module):
         rng=self.rng,
         padding=1,
         case=kernel_dim,
+        kernel_init=default_init(),
         dtype=self.dtype,
         device=self.device
       )

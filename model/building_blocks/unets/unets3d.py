@@ -26,6 +26,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from utils.model_utils import default_init
 from model.building_blocks.stacks.dstack_3d import DStack
 from model.building_blocks.stacks.ustack_3d import UStack
 from model.building_blocks.embeddings.fourier_emb import FourierEmbedding
@@ -270,6 +271,7 @@ class UNet3D(nn.Module):
             padding=1,
             rng=self.rng,
             case=kernel_dim,
+            kernel_init=default_init(),
             dtype=self.dtype,
             device=self.device
           )
@@ -363,9 +365,9 @@ class PreconditionedDenoiser3D(UNet3D):
 
     expand_shape = [-1] + [1] * (x.dim() - 1)
     # Expand dimensions of the coefficients
-    c_in = c_in.view(*expand_shape).expand_as(x)
-    c_out = c_out.view(*expand_shape).expand_as(x)
-    c_skip = c_skip.view(*expand_shape).expand_as(x)
+    c_in = c_in.view(*expand_shape)
+    c_out = c_out.view(*expand_shape)
+    c_skip = c_skip.view(*expand_shape)
 
     if y is None and time is None:
       # no conditioning

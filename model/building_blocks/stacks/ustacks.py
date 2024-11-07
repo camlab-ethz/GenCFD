@@ -11,7 +11,7 @@ from model.building_blocks.layers.residual import CombineResidualWithSkip
 from model.building_blocks.layers.convolutions import ConvLayer
 from model.building_blocks.blocks.convolution_blocks import ConvBlock, ResConv1x
 from model.building_blocks.blocks.attention_block import AttentionBlock
-from utils.model_utils import channel_to_space, reshape_jax_torch
+from utils.model_utils import channel_to_space, reshape_jax_torch, default_init
 
 Tensor = torch.Tensor
 
@@ -158,6 +158,7 @@ class UStack(nn.Module):
                     rng=self.rng,
                     padding=1,
                     case=len(h.shape)-2,
+                    kernel_init=default_init(1.0),
                     dtype=self.dtype,
                     device=self.device
                 )
@@ -181,6 +182,7 @@ class UStack(nn.Module):
                 rng=self.rng,
                 padding=1,
                 case=len(h.shape)-2,
+                kernel_init=default_init(1.0),
                 dtype=self.dtype,
                 device=self.device,
             )
@@ -375,6 +377,7 @@ class UpsampleFourierGaussian(nn.Module):
                 rng=self.rng,
                 padding=1,
                 case=kernel_dim,
+                kernel_init=default_init(),
                 dtype=self.dtype,
                 device=self.device,
             )

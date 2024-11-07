@@ -34,7 +34,7 @@ class AttentionBlock(nn.Module):
             rng=self.rng,
             dtype=self.dtype, 
             device=self.device
-            )
+        )
     
     def forward(self, x: Tensor, is_training: bool) -> Tensor:
         # Input x -> (bs, widht*height, c)
@@ -43,7 +43,7 @@ class AttentionBlock(nn.Module):
                 min(max(x.shape[-1] // 4, 1), 32), x.shape[-1],
                 device=self.device,
                 dtype=self.dtype
-                )
+            )
         if self.multihead_attention is None:
             self.multihead_attention = MultiHeadDotProductAttention(
                 emb_dim=x.shape[-1], 
@@ -52,7 +52,7 @@ class AttentionBlock(nn.Module):
                 dropout=0.1 if is_training else 0.0,
                 device=self.device, 
                 dtype=self.dtype
-                )
+            )
 
         h = x.clone()
         # GroupNorm requires x -> (bs, c, widht*height)
@@ -164,6 +164,7 @@ class AxialSelfAttentionBlock(nn.Module):
                     dtype=self.dtype
                 )
                 default_init(1.0)(self.dense_layers[level].weight)
+                torch.nn.init.zeros_(self.dense_layers[level].bias)
 
             h = reshape_jax_torch(self.dense_layers[level](reshape_jax_torch(h)))
 

@@ -5,7 +5,7 @@ from model.building_blocks.layers.residual import CombineResidualWithSkip
 from model.building_blocks.layers.convolutions import ConvLayer
 from model.building_blocks.blocks.convolution_blocks import ConvBlock
 from model.building_blocks.blocks.attention_block import AxialSelfAttentionBlock
-from utils.model_utils import channel_to_space, reshape_jax_torch
+from utils.model_utils import channel_to_space, default_init
 
 Tensor = torch.Tensor
 
@@ -129,7 +129,7 @@ class UStack(nn.Module):
                         case=len(h.shape)-2,
                         dtype=self.dtype,
                         device=self.device,
-                        )
+                    )
 
                 h = self.conv_blocks[level][block_id](h, emb, is_training=is_training)
 
@@ -148,6 +148,7 @@ class UStack(nn.Module):
                     rng=self.rng,
                     padding=1,
                     case=len(h.shape)-2,
+                    kernel_init=default_init(1.0),
                     dtype=self.dtype,
                     device=self.device
                 )
@@ -172,6 +173,7 @@ class UStack(nn.Module):
                 rng=self.rng,
                 padding=1,
                 case=len(h.shape)-2,
+                kernel_init=default_init(1.0),
                 dtype=self.dtype,
                 device=self.device,
             )

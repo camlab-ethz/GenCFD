@@ -48,6 +48,8 @@ class ResConv1x(nn.Module):
   
   def forward(self, x):
     kernel_size = (len(x.shape) - 2) * (1,)
+    # weights and biases should only be 1 time initialized!
+    initialize = False
 
     if len(x.shape) == 3:
       # case 1
@@ -65,6 +67,7 @@ class ResConv1x(nn.Module):
         dtype=self.dtype,
         device=self.device
       )
+      initialize = True
 
     elif len(x.shape) == 4:
       # case 2
@@ -83,6 +86,7 @@ class ResConv1x(nn.Module):
           dtype=self.dtype,
           device=self.device
         )
+        initialize = True
     
     elif len(x.shape) == 5:
       # case 3
@@ -101,12 +105,17 @@ class ResConv1x(nn.Module):
           device=self.device,
           dtype=self.dtype
         )
+        initialize = True
 
     else:
       raise ValueError(f"Unsupported input dimension. Expected 4D or 5D")
     
-    default_init(self.scale)(self.conv1.weight)
-    default_init(self.scale)(self.conv2.weight)
+    if initialize:
+      default_init(self.scale)(self.conv1.weight)
+      torch.nn.init.zeros_(self.conv1.bias)
+      default_init(self.scale)(self.conv2.weight)
+      torch.nn.init.zeros_(self.conv2.bias)
+      initialize = False
 
     skip = x.clone()
     x = self.conv1(x)
@@ -178,6 +187,7 @@ class ConvBlock(nn.Module):
       stride=self.stride,
       use_bias=self.use_bias,
       case=self.case,
+      kernel_init=default_init(1.0),
       dtype=self.dtype,
       device=self.device,
       **kwargs
@@ -199,6 +209,7 @@ class ConvBlock(nn.Module):
       stride=self.stride,
       use_bias=self.use_bias,
       case=self.case,
+      kernel_init=default_init(1.0),
       dtype=self.dtype,
       device=self.device
     )

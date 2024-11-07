@@ -5,7 +5,7 @@ from typing import Any, Sequence
 from model.building_blocks.layers.convolutions import ConvLayer, DownsampleConv
 from model.building_blocks.blocks.convolution_blocks import ConvBlock
 from model.building_blocks.blocks.attention_block import AxialSelfAttentionBlock
-from utils.model_utils import reshape_jax_torch
+from utils.model_utils import default_init
 
 Tensor = torch.Tensor
 
@@ -96,6 +96,7 @@ class DStack(nn.Module):
         rng=self.rng,
         padding=1,
         case=kernel_dim,
+        kernel_init=default_init(1.0),
         dtype=self.dtype,
         device=self.device,
       )
@@ -110,6 +111,7 @@ class DStack(nn.Module):
                 in_channels=h.shape[1],
                 out_channels=channel,
                 ratios=(self.downsample_ratio[level],) * kernel_dim,
+                kernel_init=default_init(1.0),
                 rng=self.rng,
                 device=self.device,
                 dtype=self.dtype,

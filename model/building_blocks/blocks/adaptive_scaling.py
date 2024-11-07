@@ -3,7 +3,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from utils.model_utils import reshape_jax_torch
+from utils.model_utils import reshape_jax_torch, default_init
 
 Tensor = torch.Tensor
 
@@ -53,6 +53,8 @@ class AdaptiveScale(nn.Module):
         dtype=self.dtype,
         device=self.device
       )
+      default_init(1.0)(self.affine.weight)
+      torch.nn.init.zeros_(self.affine.bias)
 
     scale_params = self.affine(self.act_fun(emb)) # (bs, c*2)
     # Unsqueeze in the middle to allow broadcasting. 
