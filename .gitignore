@@ -11,7 +11,9 @@
 # ignore the dataset folder, data can be stored here
 /dataset
 /dataloader/test.py
-# Ignore all image files
+# ignore all job scripts
+*.sh
+# ignore all image files
 **/*.jpg
 **/*.npz
 **/*.png
