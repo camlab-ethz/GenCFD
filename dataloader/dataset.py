@@ -232,8 +232,10 @@ class DataIC_3D_Time_TG(TrainingSetBase):
         mean_data = np.load(mean_stats_path)
         std_data = np.load(std_stats_path)
 
+        breakpoint()
         mean_vals = mean_data.mean(axis=(0, 1, 2)) # mean over all channels
-        std_vals = std_data.std(axis=(0, 1, 2)) # std over all channels
+        # std_vals = std_data.std(axis=(0, 1, 2)) # std over all channels
+        std_vals = np.mean(std_data * 2, (0, 1, 2)) ** 0.5
 
         # first 3 channels are for the initial conditions
         self.mean_training_input = mean_vals[:self.input_channel] 
@@ -241,6 +243,8 @@ class DataIC_3D_Time_TG(TrainingSetBase):
         # last 3 channels are for the output (results)
         self.mean_training_output = mean_vals[self.input_channel:]
         self.std_training_output = std_vals[self.input_channel:]
+
+        breakpoint()
 
         self.min_time = min_time
         self.max_time = max_time
@@ -471,6 +475,90 @@ class ConditionalDataIC_3D(ConditionalBase):
         model_input = model_input.permute(3, 2, 1, 0)
 
         return model_input
+    
+
+class ConditionalDataIC_3D_TG(ConditionalBase):
+    def __init__(self, device: torch.device = None, t_final: int = 5):
+
+        self.input_channel = 3
+        self.output_channel = 3
+
+        self.t_final = t_final
+
+        self.start = 0
+        self.start_index = 0
+        
+        self.file_path = '/cluster/work/math/camlab-data/data/incompressible/tg/micro_ref_sol_N128_64.nc'
+        print(f"Start dataset from index {self.start}. Getting data from {self.file_path}")
+        self.data = netCDF4.Dataset(self.file_path, 'r')
+        
+        # Shape: (6, 64, 64, 64)
+        u_shape = self.data.variables['u'].shape 
+        v_shape = self.data.variables['v'].shape
+        w_shape = self.data.variables['w'].shape
+        assert (u_shape == v_shape == w_shape), "Data needs to align in terms of shape!"
+        data_shape = u_shape
+
+        training_samples = data_shape[0] * data_shape[1]
+        micro_perturbations = data_shape[1]
+        macro_perturbations = data_shape[0]
+
+        super().__init__(
+            training_samples=training_samples,
+            start=self.start,
+            device=device,
+            micro_perturbation=micro_perturbations,
+            macro_perturbation=macro_perturbations,
+            file_path=self.file_path,
+            # stat_folder=stat_folder,
+            t_final=self.t_final
+        )
+    
+    def __getitem__(self, index):
+        macro_idx = self.get_macro_index(index + self.start_index)
+        micro_idx = self.get_micro_index(index + self.start_index)
+
+        # Shape: (64, 64, 64)
+        u_data = self.data.variables['u'][macro_idx, micro_idx, 0]
+        v_data = self.data.variables['v'][macro_idx, micro_idx, 0]
+        w_data = self.data.variables['w'][macro_idx, micro_idx, 0]
+
+        # Stack along the new last dimension (axis=-1), Shape: (64, 64, 64, 3)
+        data_input = np.stack((u_data, v_data, w_data), axis=-1) 
+
+        # Load the data for the given index, Shape: (64, 64, 64)
+        u_data = self.data.variables['u'][macro_idx, micro_idx, self.t_final]
+        v_data = self.data.variables['v'][macro_idx, micro_idx, self.t_final]
+        w_data = self.data.variables['w'][macro_idx, micro_idx, self.t_final]
+        # Shape: (64, 64, 64, 3)
+        data_output = np.stack((u_data, v_data, w_data), axis=-1) 
+
+        # Shape: (64, 64, 64, 6)
+        model_input = torch.cat(
+            [torch.tensor(data_input, dtype=torch.float32, device=self.device), 
+             torch.tensor(data_output, dtype=torch.float32, device=self.device)], 
+            dim=-1
+        )
+        # Final Shape: (6, 64, 64, 64)
+        model_input = model_input.permute(3, 2, 1, 0)
+        
+        return model_input
+    
+    def set_true_stats_for_macro(self, macro_idx):
+        file_name = f"/cluster/work/math/camlab-data/data/diffusion_project/GroundTruthStats_ConditionalDataIC_3D_TG_nothing_64_80000_{self.t_final}/Stats_{macro_idx}.nc"
+
+        if not os.path.isfile(file_name):
+            raise FileNotFoundError(f"Statistics file {file_name} not found. Run ComputeTrueStatistics.py")
+        f = netCDF4.Dataset(file_name, 'r')
+        mean = np.array(f.variables['mean_'][:])
+        std = np.array(f.variables['std_'][:])
+        spectrum = np.array(f.variables['spectrum_'][:])
+        energy = np.array(f.variables['energy_'][:])
+        idx_wass = np.array(f.variables['idx'][:])
+        sol_wass = np.array(f.variables['sol_'][:])
+        kk = np.arange(1, spectrum.shape[0] + 1)
+
+        self.mean_down, self.std_down, self.kk, self.spectrum, self.energy, self.idx_wass, self.sol_wass = mean, std, kk, spectrum, energy, idx_wass, sol_wass
 
 
 #################### DATASETS FOR DEBUGGING ####################

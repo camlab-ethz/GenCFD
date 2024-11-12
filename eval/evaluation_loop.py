@@ -57,7 +57,9 @@ def run(
     """
     batch_size = dataloader.batch_size
     # first check if the correct dataset is used to compute statistics
-    if dataset_module not in ['ConditionalDataIC_Vel', 'ConditionalDataIC_3D']:
+    if dataset_module not in [
+        'ConditionalDataIC_Vel', 'ConditionalDataIC_3D', 'ConditionalDataIC_3D_TG'
+        ]:
         raise ValueError(f"To compute statistics use a conditional dataset, not {dataset_module}!")
     
     # To store either visualization or metric results a save_dir needs to be specified
@@ -155,7 +157,7 @@ def run(
     if visualize:
         # Run a single run to visualize results without computing metrics
 
-        batch = next(dataloader)
+        batch = next(iter(dataloader))
         u0 = batch[:, :dataset.output_channel, ...].to(device=device)
         u = batch[:, dataset.output_channel:, ...].to(device=device)
 

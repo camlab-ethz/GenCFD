@@ -36,7 +36,7 @@ def reshape_jax_torch(tensor: Tensor) -> Tensor:
 
 
 def default_init(scale: float = 1e-10):
-  """Initialization of weights with scaling"""
+  """Initialization of weights and biases with scaling"""
 
   def initializer(tensor: Tensor):
     """We need to differentiate between biases and weights"""
@@ -143,6 +143,7 @@ def get_model_args(
     args_dict = args_dict_2d
   
   if args.model_type in ['UNet3D', 'PreconditionedDenoiser3D']:
+    # General UNet arguments for the 3D case
     args_dict_3d = {
       'out_channels': out_channels, 'rng': rng, 'num_channels': (64, 128, 256), 
       'downsample_ratio': (2, 2, 2), 'num_blocks': args.num_blocks,

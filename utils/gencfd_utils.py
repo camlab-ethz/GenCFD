@@ -28,7 +28,8 @@ from dataloader.dataset import (
     DataIC_3D_Time,
     DataIC_3D_Time_TG,
     ConditionalDataIC_Vel,
-    ConditionalDataIC_3D
+    ConditionalDataIC_3D,
+    ConditionalDataIC_3D_TG
 )
 from utils.callbacks import Callback ,TqdmProgressBar, TrainStateCheckpoint
 from diffusion.samplers import SdeSampler, Sampler
@@ -70,6 +71,10 @@ def get_dataset(
     
     elif name == 'ConditionalDataIC_3D':
         dataset = ConditionalDataIC_3D(device=device)
+        time_cond = True
+    
+    elif name == 'ConditionalDataIC_3D_TG':
+        dataset = ConditionalDataIC_3D_TG(device=device)
         time_cond = True
     
     else:
@@ -345,7 +350,7 @@ def replace_args(args: ArgumentParser, train_args: dict):
     """Replace parser arguments with used arguments during training"""
 
     for key, value in train_args.items():
-        if key == "dataset":
+        if (key == "dataset" or key == "save_dir"):
             continue
         if hasattr(args, key):
             setattr(args, key, value)

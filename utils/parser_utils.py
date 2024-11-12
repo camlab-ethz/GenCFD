@@ -34,7 +34,8 @@ def add_data_options(parser: ArgumentParser):
     group.add_argument("--dataset", default='DataIC_Vel', type=str,
                        choices=[
                            'DataIC_Vel', 'DataIC_3D_Time', 'DataIC_3D_Time_TG',
-                           'ConditionalDataIC_Vel', 'ConditionalDataIC_3D'
+                           'ConditionalDataIC_Vel', 'ConditionalDataIC_3D',
+                           'ConditionalDataIC_3D_TG'
                         ],
                        help="Name of the dataset, available choices")
     group.add_argument("--batch_size", default=5, type=int, help="Choose a batch size")

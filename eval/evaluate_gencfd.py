@@ -161,7 +161,11 @@ if __name__=="__main__":
     )
 
     print(" ")
-    print(f"Run Evaluation Loop with {args.monte_carlo_samples} Monte Carlo Samples")
+    if args.compute_metrics:
+        print(f"Run Evaluation Loop with {args.monte_carlo_samples} Monte Carlo Samples and Batch Size {args.batch_size}")
+    if args.visualize:
+        print(f"Run Visualization Loop")
+        
     start_train = time.time()
 
     evaluation_loop.run(

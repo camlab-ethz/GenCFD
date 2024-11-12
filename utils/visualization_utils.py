@@ -33,9 +33,19 @@ def reshape_to_numpy(sample: Union[Tensor, array]) -> Union[Tensor, array]:
     """Converts a tensor or array to a NumPy array with appropriate dimension ordering."""
 
     if Tensor and isinstance(sample, Tensor):
-        return sample.permute(1, 2, 0).cpu().numpy()
+        if sample.ndim == 3:
+            return sample.permute(1, 2, 0).cpu().numpy()
+        elif sample.ndim == 4:
+            return sample.permute(1, 2, 3, 0).cpu().numpy()
+        else:
+            raise ValueError(f'sample dim should be 3 or 4 and not {sample.ndim}')
     elif isinstance(sample, array):
-        return sample.transpose(1, 2, 0)
+        if sample.ndim == 3:
+            return sample.transpose(1, 2, 0)
+        elif sample.ndim == 4:
+            return sample.transpose(1, 2, 3, 0)
+        else:
+            raise ValueError(f'sample dim should be 3 or 4 and not {sample.ndim}')
     else:
         raise TypeError("Input must be a numpy array or PyTorch tensor.")
     
