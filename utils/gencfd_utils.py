@@ -1,3 +1,17 @@
+# Copyright 2024 The CAM Lab at ETH Zurich.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 from argparse import ArgumentParser
 from typing import Tuple, Sequence, Dict, Callable
 import torch
@@ -9,7 +23,7 @@ from torch.utils.data import DataLoader, random_split
 
 from model.building_blocks.unets.unets import UNet, PreconditionedDenoiser
 from model.building_blocks.unets.unets3d import UNet3D, PreconditionedDenoiser3D
-from model.probabilistic_diffusion.denoising_model import DenoisingModel, DenoisingBaseModel
+from model.probabilistic_diffusion.denoising_model import DenoisingModel
 from utils.model_utils import get_model_args, get_denoiser_args
 from utils.diffusion_utils import (
     get_diffusion_scheme,
@@ -136,20 +150,16 @@ def get_model(
         out_channels: int, 
         rng: torch.Generator,
         device: torch.device = None,
-        mean_training_input: Tensor = None,
-        mean_training_output: Tensor = None,
-        std_training_input: Tensor = None,
-        std_training_output: Tensor = None
+        buffer_dict: dict = None,
+        dtype: torch.dtype = torch.float32
     ) -> nn.Module:
     """Get the correct model"""
     
     model_args = get_model_args(
         args=args, out_channels=out_channels, 
         rng=rng, device=device,
-        mean_training_input=mean_training_input, 
-        mean_training_output=mean_training_output,
-        std_training_input=std_training_input, 
-        std_training_output=std_training_output
+        buffer_dict=buffer_dict,
+        dtype=dtype
     )
 
     if args.model_type == 'UNet':
@@ -168,6 +178,7 @@ def get_model(
     else:
         raise ValueError(f"Model {args.model_type} does not exist")
     
+
 def get_denoising_model(
         args: ArgumentParser,
         input_shape: int,
@@ -192,9 +203,6 @@ def get_denoising_model(
         device=device,
         dtype=dtype
     )
-
-    if args.unconditional:
-        return DenoisingBaseModel(**denoiser_args)
     
     return DenoisingModel(**denoiser_args)
 
@@ -208,20 +216,15 @@ def create_denoiser(
         rng: torch.Generator,
         device: torch.device = None,
         dtype: torch.dtype = torch.float32,
-        mean_training_input: Tensor = None,
-        mean_training_output: Tensor = None,
-        std_training_input: Tensor = None,
-        std_training_output: Tensor = None
+        buffer_dict: dict = None
     ):
     """Get the denoiser and sampler if required"""
 
     model = get_model(
         args, out_channels, 
         rng, device,
-        mean_training_input,
-        mean_training_output,
-        std_training_input,
-        std_training_output
+        buffer_dict=buffer_dict,
+        dtype=dtype
     )
 
     noise_sampling = get_noise_sampling(args, device)
@@ -248,11 +251,15 @@ def create_denoiser(
 
 def create_callbacks(args: ArgumentParser, save_dir: str) -> Sequence[Callback]:
     """Get the callback methods like profilers, metric collectors, etc."""
-    
+
+    train_monitors = ["loss", "loss_std"]
+    if args.track_memory:
+        train_monitors.append("mem")
+
     callbacks = [
         TqdmProgressBar(
             total_train_steps=args.num_train_steps,
-            train_monitors=("train_loss",),
+            train_monitors=train_monitors,
         )
     ]
 
@@ -315,13 +322,13 @@ def save_json_file(
         "output_channel": output_channel,
         # model arguments
         "model_type": args.model_type,
-        "unconditional": args.unconditional,
         "num_heads": args.num_heads,
         # training arguments
+        "use_mixed_precision": args.use_mixed_precision,
         "num_train_steps": args.num_train_steps,
         "task": args.task,
         "device": str(device) if device is not None else None,
-        "seed": seed
+        "seed": seed,
     }
 
     config_path = os.path.join(args.save_dir, "training_config.json")
@@ -347,10 +354,13 @@ def load_json_file(config_path: str):
 
 
 def replace_args(args: ArgumentParser, train_args: dict):
-    """Replace parser arguments with used arguments during training"""
+    """Replace parser arguments with used arguments during training.
+    There is a skip list to avoid that every argument gets replaced."""
+
+    skip_list = ["dataset", "save_dir", "batch_size"]
 
     for key, value in train_args.items():
-        if (key == "dataset" or key == "save_dir"):
+        if key in skip_list:
             continue
         if hasattr(args, key):
             setattr(args, key, value)

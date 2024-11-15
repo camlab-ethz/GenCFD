@@ -1,30 +1,59 @@
+# Copyright 2024 The CAM Lab at ETH Zurich.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 from argparse import ArgumentParser
-from typing import Tuple
 import torch
 
 def parse_tuple(value):
+    """Allows for tuples as arguments."""
+
     if value is None or value.lower() == "none":
         return None
     try:
         return tuple(map(int, value.strip('()').split(',')))
     except ValueError:
         raise ValueError(f"Invalid tuple format: {value}")
+    
+
+def str_to_bool(value):
+    """Transform a string to a bool."""
+
+    if isinstance(value, bool):  # If it's already a boolean, return as is
+        return value
+    if value.lower() in ['true', 't', '1', 'yes', 'y']:
+        return True
+    elif value.lower() in ['false', 'f', '0', 'no', 'n']:
+        return False
+    else:
+        raise ValueError(f"Invalid boolean string value: {value}")
 
 
 def add_base_options(parser: ArgumentParser):
     """General base arguments for training and inference"""
 
     group = parser.add_argument_group('base')
+    # Mixed precision calculations activate a scalar for the gradient propagation and uses float16 where possible
     group.add_argument("--work_dir", default="datasets", type=str,
                        help="If empty, will use defaults according to the specified dataset.")
     group.add_argument('--save_dir', default=None, type=str,
                        help='Specify your directory where training or evaluation results should be saved')
     group.add_argument('--model_dir', default=None, type=str,
                        help='Set a path to a pretrained model for inference')
-    group.add_argument('--unconditional', default=False, type=bool,
-                       help='Run unconditional training and inference if set to True')
     group.add_argument('--dtype', default=torch.float32, type=torch.dtype,
                        help="Set the precision for PyTorch tensors by defining the dtype")
+    group.add_argument("--use_mixed_precision", default=True, type=str_to_bool,
+                       help="For memory efficiency activate mixed precision calculations")
     
 
 def add_data_options(parser: ArgumentParser):
@@ -59,18 +88,18 @@ def add_model_options(parser: ArgumentParser):
     group.add_argument("--downsample_ratio", default=(2, 2), type=parse_tuple,
                        help="Choose a downsample ratio")
     # Attention settings
-    group.add_argument("--use_attention", default=True, type=bool, 
+    group.add_argument("--use_attention", default=True, type=str_to_bool, 
                        help="Choose if attention blocks should be used")
     group.add_argument("--num_blocks", default=4, type=int, 
                        help="Choose number of Attention blocks")
     group.add_argument("--num_heads", default=8, type=int, 
                        help="Choose number of heads for multihead attention")
-    group.add_argument("--normalize_qk", default=False, type=bool,
+    group.add_argument("--normalize_qk", default=False, type=str_to_bool,
                        help="Choose if Query and Key matrix should be normalized")
     # Embedding settings
     group.add_argument("--noise_embed_dim", default=128, type=int, 
                        help="Choose noise embedding dimension")
-    group.add_argument("--use_position_encoding", default=True, type=bool,
+    group.add_argument("--use_position_encoding", default=True, type=str_to_bool,
                        help="Use position encoding True or False")
     # General settings
     group.add_argument("--padding_method", default="circular", type=str,
@@ -78,7 +107,7 @@ def add_model_options(parser: ArgumentParser):
                        help="Choose a proper padding method from the list of choices")
     group.add_argument("--dropout_rate", default=0.0, type=float,
                        help="Choose a proper dropout rate")
-    group.add_argument("--use_hr_residual", default=False, type=bool,
+    group.add_argument("--use_hr_residual", default=False, type=str_to_bool,
                        help="Dropout rate for classifier-free guidance")
     group.add_argument("--sigma_data", default=0.5, type=float,
                        help="This can be a fixed in [0, 1] or learnable parameter")
@@ -157,12 +186,14 @@ def add_training_options(parser: ArgumentParser):
                        help='Period at which an evaluation loop runs')
     group.add_argument('--num_batches_per_eval', default=2, type=int,
                        help='Number of steps until evaluation metrics are aggregated')
-    group.add_argument('--run_sanity_eval_batch', default=True, type=bool,
+    group.add_argument('--run_sanity_eval_batch', default=True, type=str_to_bool,
                        help='Sanity check to spot early mistakes or runtime issues')
-    group.add_argument('--checkpoints', default=True, type=bool,
+    group.add_argument('--checkpoints', default=True, type=str_to_bool,
                        help="Saves or Loads parameters from a checkpoint")
     group.add_argument('--save_every_n_steps', default=5000, type=int,
                        help="Saves a checkpoint of the model and optimizer after every n steps")
+    group.add_argument('--track_memory', action='store_true', default=False,
+                       help='If True, memory tracer during training is activated else returns zeros.')
     
 def add_sampler_options(parser: ArgumentParser):
     """Parser arguments for the sampler"""
@@ -177,9 +208,9 @@ def add_sampler_options(parser: ArgumentParser):
                        help='Choose a valid time step scheduler for solving an SDE')
     group.add_argument('--sampling_steps', default=128, type=int,
                        help='Define sampling steps for solving the SDE, min value should be 32')
-    group.add_argument('--apply_denoise_at_end', default=True, type=bool,
+    group.add_argument('--apply_denoise_at_end', default=True, type=str_to_bool,
                        help='If True applies the denoise function another time to the terminal states')
-    group.add_argument('--return_full_paths', default=False, type=bool,
+    group.add_argument('--return_full_paths', default=False, type=str_to_bool,
                        help='If True the output of .generate() and .denoise() will contain the complete sampling path')
     group.add_argument('--rho', default=7, type=int,
                        help='Set decay rate for the noise over time')
@@ -193,17 +224,17 @@ def add_sde_options(parser: ArgumentParser):
                        help='Choose a valid SDE Solver')
     group.add_argument('--time_axis_pos', default=0, type=int,
                        help='Defines the index where the time axis should be placed')
-    group.add_argument('--terminal_only', default=True, type=bool,
+    group.add_argument('--terminal_only', default=True, type=str_to_bool,
                        help='If set to False returns the full path otherwise only the terminal state')
     
 def add_evaluation_options(parser: ArgumentParser):
     """Parser arguments to compute Metrics for the inference pipeline"""
     group = parser.add_argument_group('evaluation')
-    group.add_argument('--compute_metrics', default=False, type=bool,
+    group.add_argument('--compute_metrics', action='store_true', default=False,
                        help='If True metrics like mean and std will be computed')
     group.add_argument('--monte_carlo_samples', default=100, type=int,
                        help='Choose a number of monte carlo samples to compute statistical metrics')
-    group.add_argument('--visualize', default=False, type=bool,
+    group.add_argument('--visualize', action='store_true', default=False,
                        help="If True an image of a single generated result will be stored")
 
 def train_args():

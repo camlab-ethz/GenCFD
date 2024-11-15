@@ -1,4 +1,4 @@
-# Copyright 2024 The swirl_dynamics Authors.
+# Copyright 2024 The CAM Lab at ETH Zurich.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -16,8 +16,3 @@
 
 # pylint: disable=g-importing-member
 # pylint: disable=g-multiple-import
-
-# from swirl_dynamics.lib.metrics.probabilistic_forecast import (
-#     crps,
-#     threshold_brier_score,
-# )

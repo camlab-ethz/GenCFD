@@ -1,4 +1,5 @@
 # Copyright 2024 The swirl_dynamics Authors.
+# Modifications made by the CAM Lab at ETH Zurich.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -192,7 +193,7 @@ class EulerMaruyamaStep(nn.Module):
     ) -> Tensor:
         """Makes one Euler-Maruyama integration step in time."""
         _check_sde_params_fields(params)
-        # drift_coeffs = dynamics.drift(x0, y, t0, params["drift"], lead_time)
+
         drift_coeffs = output_drift(
             drift=dynamics.drift,
             x=x0,

@@ -1,4 +1,19 @@
-import sys
+# Copyright 2024 The CAM Lab at ETH Zurich.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""Main File to run Training for GenCFD."""
+
 import time
 
 import os
@@ -18,12 +33,9 @@ from utils.parser_utils import train_args
 
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-SEED = 100
+SEED = 0
 RNG = torch.Generator(device=device)
 RNG.manual_seed(SEED)
-
-# sys.path.append("/usr/local/cuda/bin/ptxas")
-# os.environ["WANDB__SERVICE_WAIT"] = "300"
 
 if __name__ == "__main__":
 
@@ -61,10 +73,17 @@ if __name__ == "__main__":
 
     # extract normalization values from the used dataset, these can also be computed if not provided!
     # these values are then stored inside the NN model in buffers, so they don't get updated
-    mean_training_input = torch.tensor(dataset.mean_training_input, dtype=torch.float32, device=device)
-    mean_training_output = torch.tensor(dataset.mean_training_output, dtype=torch.float32, device=device)
-    std_training_input = torch.tensor(dataset.std_training_input, dtype=torch.float32, device=device)
-    std_training_output = torch.tensor(dataset.std_training_output, dtype=torch.float32, device=device)
+    mean_training_input = torch.tensor(dataset.mean_training_input, dtype=args.dtype, device=device)
+    mean_training_output = torch.tensor(dataset.mean_training_output, dtype=args.dtype, device=device)
+    std_training_input = torch.tensor(dataset.std_training_input, dtype=args.dtype, device=device)
+    std_training_output = torch.tensor(dataset.std_training_output, dtype=args.dtype, device=device)
+
+    buffer_dict = {
+        'mean_training_input': mean_training_input,
+        'mean_training_output': mean_training_output,
+        'std_training_input': std_training_input,
+        'std_training_output': std_training_output
+    }
 
     # Save parameters in a JSON File
     save_json_file(
@@ -89,10 +108,8 @@ if __name__ == "__main__":
         out_channels=dataset.output_channel,
         rng=RNG,
         device=device,
-        mean_training_input=mean_training_input,
-        mean_training_output=mean_training_output,
-        std_training_input=std_training_input,
-        std_training_output=std_training_output
+        dtype=args.dtype,
+        buffer_dict=buffer_dict
     )
 
     denoising_model.initialize(batch_size=args.batch_size, time_cond=time_cond)
@@ -101,15 +118,16 @@ if __name__ == "__main__":
     model_params = sum(p.numel() for p in denoising_model.denoiser.parameters() if p.requires_grad)
     print(f"Total number of model parameters: {model_params}")
 
-
     trainer = training_loop.trainers.DenoisingTrainer(
         model=denoising_model,
         optimizer=optim.AdamW(
             denoising_model.denoiser.parameters(), 
             lr=args.peak_lr,
-            weight_decay=args.weight_decay),
+            weight_decay=args.weight_decay),    
+        device=device,
         ema_decay=args.ema_decay,
-        device=device
+        track_memory=args.track_memory,
+        use_mixed_precision=args.use_mixed_precision
     )
 
     start_train = time.time()

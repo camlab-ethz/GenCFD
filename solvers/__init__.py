@@ -1,4 +1,4 @@
-# Copyright 2024 The swirl_dynamics Authors.
+# Copyright 2024 The CAM Lab at ETH Zurich.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -17,19 +17,6 @@
 # pylint: disable=g-importing-member
 # pylint: disable=g-multiple-import
 
-# from solvers.ode import (
-#     DoPri45,
-#     ExplicitEuler,
-#     HeunsMethod,
-#     MultiStepDirect,
-#     MultiStepScanOdeSolver,
-#     OdeDynamics,
-#     OdeSolver,
-#     OneStepDirect,
-#     RungeKutta4,
-#     ScanOdeSolver,
-#     nn_module_to_dynamics as nn_module_to_ode_dynamics,
-# )
 from solvers.sde import (
     EulerMaruyama,
     SdeCoefficientFn,

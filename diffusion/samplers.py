@@ -1,4 +1,5 @@
 # Copyright 2024 The swirl_dynamics Authors.
+# Modifications made by the CAM Lab at ETH Zurich.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -201,11 +202,6 @@ class Sampler:
         y=y,
         lead_time=lead_time
       )
-      # samples = denoise_fn(
-      #   samples / self.scheme.scale(self.tspan[-1]),
-      #   self.scheme.sigma(self.tspan[-1]),
-      #   cond,
-      # )
 
       if self.return_full_paths:
         denoised = torch.cat([denoised, samples.unsqueeze(0)], axis=0)
@@ -358,9 +354,11 @@ class SdeSampler(Sampler):
       x_hat = x / s
       if not t.requires_grad:
         t.requires_grad_(True)
+        
       dlog_sigma_dt = dlog_dt(self.scheme.sigma)(t)
       dlog_s_dt = dlog_dt(self.scheme.scale)(t)
       drift = (2 * dlog_sigma_dt + dlog_s_dt) * x
+
       denoiser_output = denoise_fn_output(
         denoise_fn=denoise_fn,
         x=x_hat,
@@ -369,7 +367,7 @@ class SdeSampler(Sampler):
         y=y,
         lead_time=lead_time
       )
-      # denoise_fn(x_hat, sigma, params["cond"])
+
       drift = drift - 2 * dlog_sigma_dt * s * denoiser_output 
       return drift
 

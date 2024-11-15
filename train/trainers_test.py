@@ -1,4 +1,4 @@
-# Copyright 2024 The swirl_dynamics Authors.
+# Copyright 2024 The CAM Lab at ETH Zurich.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -19,7 +19,6 @@ import torch.optim as optim
 
 import numpy as np
 from unittest import mock
-from model.base_model.base_model import BaseModel
 from train.train_states import TrainState, BasicTrainState, DenoisingModelTrainState
 from train.trainers import BaseTrainer, BasicTrainer, DenoisingTrainer
 

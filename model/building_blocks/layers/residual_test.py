@@ -1,4 +1,4 @@
-# Copyright 2024 The swirl_dynamics Authors.
+# Copyright 2024 The CAM Lab at ETH Zurich.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.

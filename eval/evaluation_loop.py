@@ -1,3 +1,19 @@
+# Copyright 2024 The CAM Lab at ETH Zurich.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""Run Inference loops to generate statistical metrics or visualize results."""
+
 import os
 import numpy as np
 import torch
@@ -27,7 +43,6 @@ def run(
     visualize: bool = False,
     device: torch.device = None,
     save_dir: str = None
-
 ) -> None:
     """Run benchmark evaluation on the specified dataset.
 
@@ -57,9 +72,7 @@ def run(
     """
     batch_size = dataloader.batch_size
     # first check if the correct dataset is used to compute statistics
-    if dataset_module not in [
-        'ConditionalDataIC_Vel', 'ConditionalDataIC_3D', 'ConditionalDataIC_3D_TG'
-        ]:
+    if dataset_module not in ['ConditionalDataIC_Vel', 'ConditionalDataIC_3D', 'ConditionalDataIC_3D_TG']:
         raise ValueError(f"To compute statistics use a conditional dataset, not {dataset_module}!")
     
     # To store either visualization or metric results a save_dir needs to be specified
@@ -105,6 +118,7 @@ def run(
             
             gen_batch = torch.empty(u.shape, device=device)
             for batch in range(batch_size):
+
                 gen_sample = sampler.generate(
                     num_samples=1, 
                     y=u0_norm[batch, ...].unsqueeze(0), 
@@ -112,8 +126,8 @@ def run(
                 ).detach()
 
                 gen_batch[batch] = gen_sample.squeeze(0)
+
             # update relevant metrics and denormalize the generated results
-            # u_gen = reshape_jax_torch(dataset.denormalize_output(reshape_jax_torch(gen_batch)))
             u_gen = reshape_jax_torch(
                 denormalize(
                     reshape_jax_torch(gen_batch),

@@ -1,5 +1,5 @@
-# Copyright 2024 The swirl_dynamics Authors and Modifications made 
-# by the CAM Lab at ETH Zurich.
+# Copyright 2024 The swirl_dynamics Authors.
+# Modifications made by the CAM Lab at ETH Zurich
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -18,14 +18,12 @@
 import abc
 from collections.abc import Callable, Iterator, Mapping
 from typing import Any, Generic, TypeVar
-import functools
 import torch
 import torch.nn as nn
 import torch.optim as optim
-import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
-import numpy as np
 from torchmetrics import MetricCollection, MeanMetric
+from utils.train_utils import StdMetric
 
 from train import train_states
 import diffusion as dfn_lib
@@ -35,8 +33,8 @@ BatchType = Mapping[str, Tensor]
 Metrics = MetricCollection
 
 M = TypeVar("M")  # Model
-S = TypeVar("S", bound=train_states.BasicTrainState)  # Train state
-D = TypeVar("D", bound=dfn_lib.DenoisingBaseModel)
+S = TypeVar("S", bound=train_states.BasicTrainState)
+D = TypeVar("D", bound=dfn_lib.DenoisingModel)
 SD = TypeVar("SD", bound=train_states.DenoisingModelTrainState)
 
 
@@ -45,11 +43,13 @@ class BaseTrainer(Generic[M, S], metaclass=abc.ABCMeta):
 
     def __init__(self, 
                  model: M,
-                 device: torch.device):
-        # self.model = model.to(device)
+                 device: torch.device = None,
+                 track_memory: bool = False):
         self.model = model
         self.device = device
         self.train_state = self.initialize_train_state()
+        self.track_memory = track_memory
+
 
     @property
     @abc.abstractmethod
@@ -57,29 +57,42 @@ class BaseTrainer(Generic[M, S], metaclass=abc.ABCMeta):
         """Returns the train step function."""
         raise NotImplementedError
 
+
     @property
     @abc.abstractmethod
     def eval_step(self) -> Callable[[S, BatchType], Metrics]:
         """Returns the evaluation step function."""
         raise NotImplementedError
 
+
     @abc.abstractmethod
     def initialize_train_state(self) -> S:
         """Instantiate the initial train state."""
         raise NotImplementedError
 
+
     def train(self, batch_iter: Iterator[BatchType], num_steps: int) -> Metrics:
         """Runs training for a specified number of steps."""
-        train_metrics = self.TrainMetrics()
-        self.model.denoiser.train() # adapt this part!
+
+        train_metrics = self.TrainMetrics(track_memory=self.track_memory)
+        self.model.denoiser.train()
 
         for step in range(num_steps):
             batch = next(batch_iter)
             # batch = {k: v.to(self.device) for k, v in batch.items()}
             metrics_update = self.train_step(batch)
-            train_metrics.update(metrics_update["train_loss"].compute())
+
+            train_metrics["loss"].update(metrics_update["loss"])
+            train_metrics["loss_std"].update(metrics_update["loss"])
+
+            if self.track_memory and "mem" in metrics_update:
+                train_metrics["mem"].update(metrics_update["mem"])
+        
+        if self.track_memory and self.device.type != "cuda":
+            print(f"Warning: Memory tracking is skipped. CUDA device is not available.")
 
         return train_metrics
+
 
     def eval(self, batch_iter: Iterator[BatchType], num_steps: int) -> Metrics:
         """Runs evaluation for a specified number of steps."""
@@ -105,12 +118,14 @@ class BasicTrainer(BaseTrainer[M, S]):
         # Example usage:
         # train_loss = MeanMetric()
         # train_acc = torchmetrics.Accuracy()
-        def __init__(self):
+        # memory tracer if set to True
+        def __init__(self, track_memory: bool = False):
             metrics = {
                 # 'train_loss': MeanMetric(),
                 #'train_acc': torchmetrics.Accuracy()
             }
             super().__init__(metrics)
+
 
     class EvalMetrics(Metrics):
         """Evaluation metrics based on model outputs."""
@@ -118,8 +133,16 @@ class BasicTrainer(BaseTrainer[M, S]):
         # eval_loss = torchmetrics.MeanSquaredError()
         # eval_acc = torchmetrics.Accuracy()
 
-    def __init__(self, model: nn.Module, optimizer: optim.Optimizer, device: torch.device):
-        super().__init__(model, device)
+
+    def __init__(self, 
+                 model: nn.Module, 
+                 optimizer: optim.Optimizer, 
+                 device: torch.device = None,
+                 track_memory: bool = False
+        ):
+        super().__init__(
+            model=model, device=device, track_memory=track_memory
+        )
         self.optimizer = optimizer
 
 
@@ -136,7 +159,7 @@ class BasicTrainer(BaseTrainer[M, S]):
         self.update_train_state()
 
         train_metrics = self.TrainMetrics()
-        train_metrics.update(torch.tensor(metrics["train_loss"]))
+        train_metrics.update(torch.tensor(metrics["loss"]))
 
         return train_metrics
 
@@ -144,14 +167,12 @@ class BasicTrainer(BaseTrainer[M, S]):
     def eval_step(self, batch: BatchType) -> Callable[[S, BatchType], Metrics]:
         self.model.denoiser.eval()
         with torch.no_grad():
-            # TODO: Change batch[0].to(device=self.device)
             metrics = self.model.eval_fn(batch)
 
         eval_metrics = self.EvalMetrics(self.model.num_eval_noise_levels)
         for key, value in metrics.items():
             eval_metrics[key](value)
 
-        # metrics_update = self.EvalMetrics(self.model.num_eval_noise_levels)(**metrics)
         return eval_metrics.compute()
 
 
@@ -197,20 +218,35 @@ class DenoisingTrainer(BasicTrainer[M, SD]):
             model: nn.Module, 
             optimizer: optim.Optimizer,
             device: torch.device,
-            ema_decay: float = 0.999):
+            ema_decay: float = 0.999,
+            track_memory: bool = False,
+            use_mixed_precision: bool = False):
       
-      self.optimizer = optimizer
-      self.ema_decay = ema_decay 
+        self.optimizer = optimizer
+        self.ema_decay = ema_decay 
+        self.track_memory = track_memory
 
-      super().__init__(model=model, optimizer=optimizer, device=device)
+        self.compute_dtype = torch.float16 if use_mixed_precision else torch.float32
+        self.use_mixed_precision = use_mixed_precision
+        # Grad scaler to avoid overflow and underflow during backprop.
+        self.scaler = torch.amp.GradScaler(device.type) if use_mixed_precision else None
+
+        super().__init__(
+            model=model, optimizer=optimizer, device=device, track_memory=track_memory
+        )
 
     class TrainMetrics(Metrics):
-        """Train metrics including mean and std of loss"""
-        def __init__(self):
+        """Train metrics including mean and std of loss and if required 
+        computes the mean of the memory profiler."""
+
+        def __init__(self, track_memory: bool = False):
             train_metrics = {
-                "train_loss": MeanMetric(),
-                "train_loss_std": MeanMetric() # TODO: Change to STD!
+                "loss": MeanMetric(),
+                "loss_std": StdMetric()
             }
+            if track_memory:
+                train_metrics['mem'] = MeanMetric()
+            
             super().__init__(metrics=train_metrics)
     
 
@@ -218,7 +254,7 @@ class DenoisingTrainer(BasicTrainer[M, SD]):
         """Evaluation metrics based on the model output, using noise level"""
         def __init__(self, num_eval_noise_levels: int):
             eval_metrics = {
-                f"eval_denoise_lvl{i}": MeanMetric() 
+                f"denoise_lvl{i}": MeanMetric() 
                 for i in range(num_eval_noise_levels) 
             }
             super().__init__(metrics=eval_metrics)
@@ -236,23 +272,37 @@ class DenoisingTrainer(BasicTrainer[M, SD]):
         )
     
     def train_step(self, batch: BatchType) -> Metrics:
+
+        if self.device.type == 'cuda' and self.track_memory:
+            torch.cuda.reset_peak_memory_stats(self.device)
         
         self.model.denoiser.train()
-        # batch[0]
-        loss, (metrics, mem) = self.model.loss_fn(batch)
+
+        with torch.amp.autocast(
+            device_type=self.device.type, 
+            dtype=self.compute_dtype,
+            enabled=self.use_mixed_precision
+        ):
+            loss, (metrics, _) = self.model.loss_fn(batch)
 
         self.optimizer.zero_grad()
-        loss.backward()
-        self.optimizer.step()
+        
+        if self.use_mixed_precision:
+            loss = loss.float()
+            self.scaler.scale(loss).backward()
+            self.scaler.step(self.optimizer)
+            self.scaler.update()
+        else:
+            loss.backward()
+            self.optimizer.step()
 
         self.update_train_state()
 
-        train_metrics = self.TrainMetrics()
+        if self.track_memory:
+            mem = torch.cuda.max_memory_allocated(self.device) if self.device.type == 'cuda' else 0
+            metrics["mem"] = mem / (1024 ** 2) # convert to GB
 
-        # train_metrics.update(torch.tensor(metrics["loss"]))
-        train_metrics.update(metrics["loss"])
-
-        return train_metrics
+        return metrics
     
 
     def update_train_state(self) -> SD:
@@ -291,5 +341,3 @@ class DenoisingTrainer(BasicTrainer[M, SD]):
                 raise ValueError("EMA model is None or not initialized")
 
         return dfn_lib.DenoisingModel.inference_fn(denoiser, task, lead_time, *args, **kwargs)
-
-    

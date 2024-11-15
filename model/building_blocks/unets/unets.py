@@ -1,4 +1,5 @@
-# Copyright 2024 The CAM Lab at ETH Zurich.
+# Copyright 2024 The swirl_dynamics Authors.
+# Modifications made by the CAM Lab at ETH Zurich.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -41,8 +42,8 @@ class UNet(nn.Module):
                rng: torch.Generator, 
                resize_to_shape: tuple[int, ...] | None = None,
                use_hr_residual: bool = False,
-               num_channels: tuple[int, ...] = (128, 256, 256, 256),
-               downsample_ratio : tuple[int, ...] = (2, 2, 2, 2), 
+               num_channels: tuple[int, ...] = (128, 256, 256),
+               downsample_ratio : tuple[int, ...] = (2, 2, 2), 
                num_blocks: int = 4, 
                noise_embed_dim: int = 128, 
                padding_method: str = 'circular', 
@@ -53,18 +54,14 @@ class UNet(nn.Module):
                normalize_qk: bool = False, 
                dtype: torch.dtype = torch.float32, 
                device: Any | None = None,
-               mean_training_input: Tensor = None,
-               mean_training_output: Tensor = None,
-               std_training_input: Tensor = None,
-               std_training_output: Tensor = None
+               buffer_dict: dict = None
     ):
     super(UNet, self).__init__()
 
-    # Store normalization parameters as buffers!
-    self.register_buffer('mean_training_input', mean_training_input)
-    self.register_buffer('mean_training_output', mean_training_output)
-    self.register_buffer('std_training_input', std_training_input)
-    self.register_buffer('std_training_output', std_training_output)
+    if buffer_dict:
+        # Store normalization parameters as buffers for all datasets!
+        for name, tensor in buffer_dict.items():
+          self.register_buffer(name, tensor)
 
     self.out_channels = out_channels
     self.resize_to_shape = resize_to_shape
@@ -88,6 +85,7 @@ class UNet(nn.Module):
       dtype=self.dtype,
       device=self.device
     )
+
     self.DStack = DStack(
       num_channels=self.num_channels,
       num_res_blocks=len(self.num_channels) * (self.num_blocks,),
@@ -102,6 +100,7 @@ class UNet(nn.Module):
       dtype=self.dtype,
       device=self.device
     )
+
     self.UStack = UStack(
       num_channels=self.num_channels[::-1],
       num_res_blocks=len(self.num_channels) * (self.num_blocks,),
@@ -115,6 +114,7 @@ class UNet(nn.Module):
       dtype=self.dtype,
       device=self.device
     )
+
     self.norm = None
     self.conv_layer = None
     
@@ -224,8 +224,8 @@ class PreconditionedDenoiser(UNet):
                rng: torch.Generator, 
                resize_to_shape: tuple[int, ...] | None = None,
                use_hr_residual: bool = False,
-               num_channels: tuple[int, ...] = (128, 256, 256, 256),
-               downsample_ratio : tuple[int, ...] = (2, 2, 2, 2), 
+               num_channels: tuple[int, ...] = (128, 256, 256),
+               downsample_ratio : tuple[int, ...] = (2, 2, 2), 
                num_blocks: int = 4, 
                noise_embed_dim: int = 128, 
                padding_method: str = 'circular', 
@@ -236,12 +236,9 @@ class PreconditionedDenoiser(UNet):
                normalize_qk: bool = False, 
                dtype: torch.dtype = torch.float32, 
                device: Any | None = None,
-               mean_training_input: Tensor = None,
-               mean_training_output: Tensor = None,
-               std_training_input: Tensor = None,
-               std_training_output: Tensor = None,
-               sigma_data: float = 1.0,):
-    
+               buffer_dict: dict = None,
+               sigma_data: float = 1.0
+    ):
     super().__init__(out_channels=out_channels,
                      rng=rng,
                      resize_to_shape=resize_to_shape,
@@ -258,10 +255,7 @@ class PreconditionedDenoiser(UNet):
                      normalize_qk=normalize_qk,
                      dtype=dtype,
                      device=device,
-                     mean_training_input=mean_training_input,
-                     mean_training_output=mean_training_output,
-                     std_training_input=std_training_input,
-                     std_training_output=std_training_output)
+                     buffer_dict=buffer_dict)
     
     self.sigma_data = sigma_data
     
@@ -292,9 +286,9 @@ class PreconditionedDenoiser(UNet):
 
     expand_shape = [-1] + [1] * (x.dim() - 1)
     # Expand dimensions of the coefficients
-    c_in = c_in.view(*expand_shape).expand_as(x)
-    c_out = c_out.view(*expand_shape).expand_as(x)
-    c_skip = c_skip.view(*expand_shape).expand_as(x)
+    c_in = c_in.view(*expand_shape)
+    c_out = c_out.view(*expand_shape)
+    c_skip = c_skip.view(*expand_shape)
     
     if y is None:
       f_x = super().forward(

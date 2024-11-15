@@ -1,7 +1,8 @@
 # Don't store compiled versions of python scripts
 **/__pycache__/
-# ignore data file for the MNIST data used in the demo
+# ignore data file for the MNIST data used in the demo and the demo itself
 /data
+demo.py
 # ignore data file for the MNIST data used in the demo
 /datasets
 # ignore outputs where the model is stored

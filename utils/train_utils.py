@@ -1,4 +1,4 @@
-# Copyright 2024 The swirl_dynamics Authors.
+# Copyright 2024 The CAM Lab at ETH Zurich.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -18,15 +18,45 @@ import collections
 from collections.abc import Callable, Mapping, Sequence
 import functools
 import os
-from typing import Any
+from typing import Any, Union
 
 import torch
 import numpy as np
 import torch.optim as optim
 from torch.utils.tensorboard import SummaryWriter
 from tensorboard.backend.event_processing import event_accumulator
+from torchmetrics import Metric
 
 Scalar = Any
+Tensor = torch.Tensor
+
+
+class StdMetric(Metric):
+    """Computes the standard deviation of a stream of values."""
+    def __init__(self):
+        super().__init__()
+        self.add_state("total", default=torch.tensor(0.0), dist_reduce_fx="sum")
+        self.add_state("sum_of_squares", default=torch.tensor(0.0), dist_reduce_fx="sum")
+        self.add_state("count", default=torch.tensor(0), dist_reduce_fx="sum")
+
+    def update(self, values: Union[Tensor, float]):
+        """Accumulate values for the standard deviation computation."""
+
+        # Ensure the input is a tensor
+        if isinstance(values, float):
+            values = torch.as_tensor(values)
+
+        self.total += values.sum()
+        self.sum_of_squares += (values ** 2).sum()
+        self.count += values.numel()
+
+    def compute(self):
+        """Compute the standard deviation."""
+        mean = self.total / self.count
+        variance = (self.sum_of_squares / self.count) - mean ** 2
+        # In theory the variance is non negative, but we can ensure this
+        variance = torch.clamp(variance, min=0.0) 
+        return torch.sqrt(variance)
 
 
 def primary_process_only(cls: type[Any]) -> type[Any]:

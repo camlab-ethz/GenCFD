@@ -1,63 +1,93 @@
 # GenCFD
 
-This Repository is based on the swirl-dynamics code by Google from 
-[arXiv:2305.15618](https://arxiv.org/abs/2305.15618) and rewritten from 
-Jax into a PyTorch version.
+This is the PyTorch based source code for the paper 
+[Generative AI for fast and accurate Statistical Computation of Fluids](https://arxiv.org/abs/2409.18359).
 
-You can execute training and evaluation / inference tasks directly from the root 
-directory using the following commands.
+### Overview
+
+GenCFD is a PyTorch-based implementation designed for training and evaluating conditional score-based diffusion models for Computational Fluid Dynamics (CFD) tasks. These generative AI models enable fast, accurate, and robust statistical computation for simulating both two-dimensional and three-dimensional turbulent fluid flows.
+
+![GenCFD Representation](https://drive.google.com/uc?export=view&id=12eiY6YnmZSBi12ZXw7HqqXfb6c_p1xBF)
 
 ## Training
 
-The training with default settings can be run as follows, where a save directory for the model
-and metrics needs to be passed
+Train a model using:
 ```shell
-python3 -m train.train_gencfd --save_dir outputs
+python3 -m train.train_gencfd \
+--dataset <DATASET_NAME> \
+--model_type <MODEL_NAME> \
+--save_dir <DIRECTORY_PATH> \
+--num_train_steps <INT>
 ```
 
-### Train a 2D model
-To run training for a 2D dataset, this can be achieved as follows for the dataset DataIC_Vel. In this case the 
-default model PreconditionedDenoiser is used for training.
-```shell
-python3 -m train.train_gencfd --dataset DataIC_Vel --save_dir outputs --num_train_steps 10000
-```
-### Train a 3D model
-Furthermore, to run a 3D model and dataset it is best to set the number of heads to a maximum of 4. With 8 even on the 
-lowest layer only applied the required GPU memory succeeds 32 Gigabytes. The model can be trained as follows:
-```shell
-python3 -m train.train_gencfd --dataset DataIC_3D_Time --model_type PreconditionedDenoiser3D --save_dir outputs --batch_size 2 --num_heads 4
-```
+### Notes:
+* `DATASET_NAME` should be a valid dataset from the section Dataset.
+* `MODEL_NAME` should either be `PreconditionedDenoiser` for the two-dimensional case, or `PreconditionedDenoiser3D` in the three-dimensional case.
+    * 3D models have approximately 70M parameters with (64, 64, 64) resolution.
+    * Recommended: GPU with 32GB memory (batch size 5) or 24GB memory (batch size 4).
+
+After training, a JSON file with model settings is saved in the output directory for use during inference.
+
 ## Inference and Evaluation
-The inference loop can be run with the following command, where a model directory needs to be set. The default command 
-looks as follows. To run inference there are two options. First option is to set the flag --compute_metrics to True. In this 
-case a default of 100 Monte Carlo Simulations is run to generate metrics such as the relative mean and standard deviation for each channel.
-Second option is to set the flag --visualize to True. This allows a single inference run and visualizes the first generated sample of the
-provided dataset.
 
-Instead of the dataset used for training we want to compute metrics with a perturbed dataset called ConditionalDataIC_i, where i should relate to the dataset used for training.
+Run inference with:
+
 ```shell
-python3 -m eval.evaluate_gencfd --dataset ConditionalDataIC_Vel --model_dir outputs/checkpoints
-```
-Furthermore another flag that can be used is --sampling_steps, this sets the number of time steps for the 
-Euler Maruyama method to solve the SDE. The number of sampling steps should be preferably above 30 to reach convergence.
-```shell
-python3 -m eval.evaluate_gencfd --dataset ConditionalDataIC_Vel --model_dir outputs/checkpoints --sampling_steps 80
-```
-At last to get the visualization results of a single sample this can be done for the 3D as well as the 2D model by using the 
-flag --visualize. The following command provides an example for a 2D model using again the same dataset and model. Moreover, to store the metric results or visualization results use the flag --save_dir to provide a relative path to the directory where you want to save the results.
-```shell
-python3 -m eval.evaluate_gencfd --dataset ConditionalDataIC_Vel --model_dir outputs/checkpoints --visualize True --save_dir outputs
+python3 -m eval.evaluate_gencfd \
+--dataset <DATASET_NAME> \
+--model_type <MODEL_NAME> \
+--model_dir <DIRECTORY_PATH> \
+--compute_metrics \
+--monte_carlo_samples <INT> \
+--visualize \
+--save_dir <DIRECTORY_PATH>
 ```
 
-### Compute evaluation metrics for the 2D model
-For a trained 2D model to run the results, the directory where the relevant checkpoint folder with the models should be provided. In 
-the following case the models can be found in outputs/checkpoints/. It is enough to only provide the relative path from the root directory.
-```shell
-python3 -m eval.evaluate_gencfd --dataset ConditionalDataIC_Vel --model_dir outputs --compute_metrics True --monte_carlo_samples 1000 --save_dir outputs
-```
+### Options:
 
-### Compute evaluation metrics for the 3D model
-As a result, for the 3D model trained with the arguments presented above. Inference can be achieved as follows:
-```shell
-python3 -m eval.evaluate_gencfd --dataset ConditionalDataIC_3D --model_type PreconditionedDenoiser3D --model_dir outputs --compute_metrics True --monte_carlo_samples 1000 --save_dir outputs
-```
+* `--compute_metrics`: Computes evaluation metrics (e.g., mean and standard deviation) using Monte Carlo simulations.
+* `--visualize`: Generates a single inference sample for visualization.
+
+The number of sampling steps (`--sampling_steps`) for the Euler-Maruyama method should be preferably >30 for convergence.
+
+### Summary of Additional Arguments
+***
+The following table summarizes key arguments that can help optimize memory usage or fine-tune model performance.
+
+* **Action Arguments**: Simply add the flag (e.g., `--track_memory`), no need to specify `True` or `False`.
+* **Boolean Flags**: Requires explicit specification of either `True` or `False` (e.g. `--use_mixed_precision True`)
+
+| Argument                 | Type   | Default                  | Scope     | Description                                                                                                                                                    |
+|--------------------------|--------|--------------------------|-----------|----------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `--dataset`              | string | `<DATASET_NAME>`  | Both          | Dataset to use for training or evaluation. A list of available datasets is in the Dataset section.                                              |
+| `--save_dir`             | string | `<DIRECTORY_PATH>`                | Both      | Directory to save models and metrics. If it doesn’t exist, it will be created automatically. Path is relative to the root directory.                                               |
+| `--model_type`           | string | `PreconditionedDenoiser` | Both      | Model type to use. For 2D, options include `PreconditionedDenoiser`. For 3D, `PreconditionedDenoiser3D` is recommended.                            |
+| `--batch_size`           | int | 5 | Both      | The number of samples per batch for the dataloader.                          |
+| `--num_train_steps`      | int    | 10_000                   | Train     | Number of training steps. Increase for more training epochs or higher accuracy.   |
+| `--track_memory`      | action    | False                   | Train     | If `True`, monitors memory usage for each training step.                                                                                 |
+| `--use_mixed_precision`  | bool   | `True`                   | Train     | Enables mixed precision computation for faster training, using less memory. Set to `False` for full precision (default `torch.float32`).                                   |
+| `--metric_aggregation_steps`      | int    | 500                   | Train     | Computes metrics (e.g., loss and its standard deviation) every specified number of training steps.                                                                                |
+| `--save_every_n_steps`      | int    | 5000                   | Train     | Saves a checkpoint of the model and optimizer after every `n` steps.                                                                                |
+| `--checkpoints`      | bool    | True                   | Train     | If `False`, disables checkpoint storage during training.               |
+| `--num_blocks`  | int    | 4                      | Train      | Number of convolution blocks used in the model for each layer.                                                    |
+| `--compute_metrics`      | action   | `False`                  | Eval      | If set to `True`, computes evaluation metrics over multiple samples for statistical accuracy.                                                                  |
+| `--visualize`            | action   | `False`                  | Eval      | If set to `True`, generates a single visualized inference sample from the dataset for quick inspection of model output. The sample is drawn from a uniform distribution.                                      |
+| `--sampling_steps`       | int    | 100                       | Eval      | Number of steps for the Euler-Maruyama method to solve the SDE during inference. Higher values generally improve convergence.                         |
+| `--monte_carlo_samples`  | int    | 100                      | Eval      | Number of Monte Carlo samples to run for metric computation. Increase for more precise statistical results.                                                    |
+
+
+
+
+
+## Datasets
+
+The table below provides a description of each dataset along with the corresponding flag argument for selection during training or evaluation.
+
+| Dataset                    | Type      | Description                                                                | Use Case                        |
+|----------------------------|-----------|----------------------------------------------------------------------------|---------------------------------|
+| `DataIC_Vel`                | Train  | 2D incompressible flow dataset                                | 2D models              |
+| `DataIC_3D_Time`            | Train  | Cylindrical Shear Flow dataset                                         | 3D models              |
+| `DataIC_3D_Time_TG`     | Train  | Taylor-Green Dataset | 3D models         |
+| `ConditionalDataIC_Vel`     | Eval| Perturbed 2D incompressible flow dataset                           | 2D Model         |
+| `ConditionalDataIC_3D`      | Eval| Perturbed Cylindrical Shear Flow dataset                                  | Inference on DataIC_3D_Time     |
+| `ConditionalDataIC_3D_TG` | Eval| Perturbed Taylor-Green dataset           | 3D Model         |

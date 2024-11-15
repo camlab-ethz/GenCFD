@@ -1,5 +1,22 @@
-import sys
-import random
+# Copyright 2024 The CAM Lab at ETH Zurich.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""Main File to Run Inference.
+
+Options are to compute statistical metrics or visualize results.
+"""
+
 import time
 import os
 import matplotlib.pyplot as plt
@@ -26,8 +43,6 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 SEED = 0
 RNG = torch.Generator(device=device)
 RNG.manual_seed(SEED)
-
-# sys.path.append("/usr/local/cuda/bin/ptxas")
 
 if __name__=="__main__":
 
@@ -89,7 +104,16 @@ if __name__=="__main__":
         split=False,
         device=device
     )
+    
+    # Dummy buffer values, for initialization! Necessary to load the model parameters
+    buffer_dict = {
+        'mean_training_input': torch.zeros((dataset.input_channel,)),
+        'mean_training_output': torch.zeros((dataset.output_channel,)),
+        'std_training_input': torch.ones((dataset.input_channel,)),
+        'std_training_output': torch.ones((dataset.output_channel,))
+    }
 
+    # the compute_dtype needs to be the same as used for the trained model!
     denoising_model = create_denoiser(
         args=args,
         input_shape=input_shape,
@@ -97,11 +121,8 @@ if __name__=="__main__":
         out_channels=dataset.output_channel,
         rng=RNG,
         device=device,
-        # Initialize the mean and std values with dummy values
-        mean_training_input=torch.zeros((dataset.input_channel,)),
-        mean_training_output=torch.zeros((dataset.output_channel,)),
-        std_training_input=torch.ones((dataset.input_channel,)),
-        std_training_output=torch.ones((dataset.output_channel,))
+        dtype=args.dtype,
+        buffer_dict=buffer_dict
     )
 
     print(" ")
@@ -115,8 +136,8 @@ if __name__=="__main__":
             denoising_model.denoiser.parameters(), 
             lr=args.peak_lr,
             weight_decay=args.weight_decay),
-        ema_decay=args.ema_decay,
-        device=device
+        device=device,
+        ema_decay=args.ema_decay
     )
 
     print(" ")
