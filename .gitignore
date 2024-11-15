@@ -12,6 +12,7 @@ demo.py
 # ignore the dataset folder, data can be stored here
 /dataset
 /dataloader/test.py
+/dataloader/dataset_test.py
 # ignore all job scripts
 *.sh
 # ignore all image files
