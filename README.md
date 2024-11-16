@@ -109,5 +109,5 @@ The table below provides a description of each dataset along with the correspond
 | `DataIC_3D_Time`            | Train  | Cylindrical Shear Flow dataset                                         | 3D models              |
 | `DataIC_3D_Time_TG`     | Train  | Taylor-Green Dataset | 3D models         |
 | `ConditionalDataIC_Vel`     | Eval| Perturbed 2D incompressible flow dataset                           | 2D Model         |
-| `ConditionalDataIC_3D`      | Eval| Perturbed Cylindrical Shear Flow dataset                                  | Inference on DataIC_3D_Time     |
+| `ConditionalDataIC_3D`      | Eval| Perturbed Cylindrical Shear Flow dataset                                  | 3D Model     |
 | `ConditionalDataIC_3D_TG` | Eval| Perturbed Taylor-Green dataset           | 3D Model         |
