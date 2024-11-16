@@ -1,4 +1,4 @@
-# GenCFD
+# GenCFD: Generative AI for CFD
 
 This is the PyTorch based source code for the paper 
 [Generative AI for fast and accurate Statistical Computation of Fluids](https://arxiv.org/abs/2409.18359).
@@ -9,7 +9,7 @@ GenCFD is a PyTorch-based implementation designed for training and evaluating co
 
 ![GenCFD Representation](https://drive.google.com/uc?export=view&id=12eiY6YnmZSBi12ZXw7HqqXfb6c_p1xBF)
 
-## Installation
+## 🛠️ Installation
 
 To set up a virtual environment and install the necessary dependencies for this project, follow these steps.
 
@@ -28,8 +28,7 @@ source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-
-## Training
+## 🏋️ Training
 
 Train a model using:
 ```shell
@@ -48,7 +47,7 @@ python3 -m train.train_gencfd \
 
 After training, a JSON file with model settings is saved in the output directory for use during inference.
 
-## Inference and Evaluation
+## 🧪 Inference and Evaluation
 
 Run inference with:
 
@@ -70,8 +69,8 @@ python3 -m eval.evaluate_gencfd \
 
 The number of sampling steps (`--sampling_steps`) for the Euler-Maruyama method should be preferably >30 for convergence.
 
-### Summary of Additional Arguments
-***
+## ⚙️ Summary of Additional Arguments
+
 The following table summarizes key arguments that can help optimize memory usage or fine-tune model performance.
 
 * **Action Arguments**: Simply add the flag (e.g., `--track_memory`), no need to specify `True` or `False`.
@@ -95,11 +94,7 @@ The following table summarizes key arguments that can help optimize memory usage
 | `--sampling_steps`       | int    | 100                       | Eval      | Number of steps for the Euler-Maruyama method to solve the SDE during inference. Higher values generally improve convergence.                         |
 | `--monte_carlo_samples`  | int    | 100                      | Eval      | Number of Monte Carlo samples to run for metric computation. Increase for more precise statistical results.                                                    |
 
-
-
-
-
-## Datasets
+## 📊 Datasets
 
 The table below provides a description of each dataset along with the corresponding flag argument for selection during training or evaluation.
 
