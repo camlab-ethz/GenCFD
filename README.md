@@ -9,6 +9,26 @@ GenCFD is a PyTorch-based implementation designed for training and evaluating co
 
 ![GenCFD Representation](https://drive.google.com/uc?export=view&id=12eiY6YnmZSBi12ZXw7HqqXfb6c_p1xBF)
 
+## Installation
+
+To set up a virtual environment and install the necessary dependencies for this project, follow these steps.
+
+1) Create a Virtual Environment
+```shell
+python3 -m venv venv
+```
+
+2) Activate the Virtual Environment
+```shell
+source venv/bin/activate
+```
+
+3) Install dependencies: Make sure your virtual environment is active, then run:
+```shell
+pip install -r requirements.txt
+```
+
+
 ## Training
 
 Train a model using:
