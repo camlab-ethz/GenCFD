@@ -23,7 +23,7 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torchmetrics import MetricCollection, MeanMetric
-from utils.train_utils import StdMetric
+from utils.train_utils import StdMetric, compute_memory
 
 from train import train_states
 import diffusion as dfn_lib
@@ -271,10 +271,11 @@ class DenoisingTrainer(BasicTrainer[M, SD]):
             ema_decay=self.ema_decay
         )
     
+    @compute_memory
     def train_step(self, batch: BatchType) -> Metrics:
 
-        if self.device.type == 'cuda' and self.track_memory:
-            torch.cuda.reset_peak_memory_stats(self.device)
+        # if self.device.type == 'cuda' and self.track_memory:
+        #     torch.cuda.reset_peak_memory_stats(self.device)
         
         self.model.denoiser.train()
 
@@ -298,9 +299,9 @@ class DenoisingTrainer(BasicTrainer[M, SD]):
 
         self.update_train_state()
 
-        if self.track_memory:
-            mem = torch.cuda.max_memory_allocated(self.device) if self.device.type == 'cuda' else 0
-            metrics["mem"] = mem / (1024 ** 2) # convert to GB
+        # if self.track_memory:
+        #     mem = torch.cuda.max_memory_allocated(self.device) if self.device.type == 'cuda' else 0
+        #     metrics["mem"] = mem / (1024 ** 2) # convert to GB
 
         return metrics
     

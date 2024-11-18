@@ -17,13 +17,12 @@
 import collections
 from collections.abc import Callable, Mapping, Sequence
 import functools
-import os
 from typing import Any, Union
+from functools import wraps
 
 import torch
 import numpy as np
 import torch.optim as optim
-from torch.utils.tensorboard import SummaryWriter
 from tensorboard.backend.event_processing import event_accumulator
 from torchmetrics import Metric
 
@@ -57,6 +56,29 @@ class StdMetric(Metric):
         # In theory the variance is non negative, but we can ensure this
         variance = torch.clamp(variance, min=0.0) 
         return torch.sqrt(variance)
+
+
+def compute_memory(func):
+  """Decorator to track GPU memory usage if `track_memory` is enabled."""
+
+  @wraps(func)
+  def wrapper(self, *args, **kwargs):
+    if self.device.type == 'cuda' and self.track_memory:
+      # Reset peak memory
+      torch.cuda.reset_peak_memory_stats(self.device)
+    
+    metrics = func(self, *args, **kwargs)
+    
+    if self.device.type == 'cuda' and self.track_memory:
+      # Compute the peak memory
+      peak_mem = torch.cuda.max_memory_allocated(self.device) / (1024 ** 3)  # Convert to GB
+      # Inject memory info into metrics
+      if isinstance(metrics, dict):  # Assuming metrics is a dictionary
+        metrics["mem"] = peak_mem
+    
+    return metrics
+  
+  return wrapper
 
 
 def primary_process_only(cls: type[Any]) -> type[Any]:
