@@ -76,8 +76,20 @@ The following table summarizes key arguments that can help optimize memory usage
 * **Action Arguments**: Simply add the flag (e.g., `--track_memory`), no need to specify `True` or `False`.
 * **Boolean Flags**: Requires explicit specification of either `True` or `False` (e.g. `--use_mixed_precision True`)
 
+A compiled version of the model can be used through adding the flag `--compile`. The compiler works without any isses on 
+the following GPUs
+
+* NVIDIA GeForce RTX 3090 
+* NVIDIA GeForce RTX 4090 
+* NVIDIA Tesla V100-SXM2 32 GiB 
+* NVIDIA Tesla V100-SXM2 32 GB
+* Nvidia Tesla A100
+
+If there are some compiler warnings, you can always surpress them.
+
 | Argument                 | Type   | Default                  | Scope     | Description                                                                                                                                                    |
 |--------------------------|--------|--------------------------|-----------|----------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `--compile`              | action | False  | Train         | Model can be compiled for faster training            |
 | `--dataset`              | string | `<DATASET_NAME>`  | Both          | Dataset to use for training or evaluation. A list of available datasets is in the Dataset section.                                              |
 | `--save_dir`             | string | `<DIRECTORY_PATH>`                | Both      | Directory to save models and metrics. If it doesn’t exist, it will be created automatically. Path is relative to the root directory.                                               |
 | `--model_type`           | string | `PreconditionedDenoiser` | Both      | Model type to use. For 2D, options include `PreconditionedDenoiser`. For 3D, `PreconditionedDenoiser3D` is recommended.                            |
