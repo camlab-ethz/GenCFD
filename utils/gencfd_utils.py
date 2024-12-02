@@ -40,12 +40,11 @@ from dataloader.dataset import (
     TrainingSetBase,
     DataIC_Vel,
     DataIC_3D_Time,
-    # DataIC_3D_Time_TG,
+    DataIC_3D_Time_TG,
     ConditionalDataIC_Vel,
     ConditionalDataIC_3D,
     ConditionalDataIC_3D_TG
 )
-from dataloader.dataset_test import DataIC_3D_Time_TG
 from utils.callbacks import Callback ,TqdmProgressBar, TrainStateCheckpoint
 from diffusion.samplers import SdeSampler, Sampler
 from solvers.sde import EulerMaruyama
