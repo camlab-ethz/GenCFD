@@ -87,7 +87,6 @@ the following GPUs
 
 If there are some compiler warnings, you can always surpress them.
 
-
 | Argument                 | Type   | Default                  | Scope     | Description                                                                                                                                                    |
 |--------------------------|--------|--------------------------|-----------|----------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `--compile`              | action | False  | Train         | Model can be compiled for faster training            |
