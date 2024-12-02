@@ -76,7 +76,7 @@ The following table summarizes key arguments that can help optimize memory usage
 * **Action Arguments**: Simply add the flag (e.g., `--track_memory`), no need to specify `True` or `False`.
 * **Boolean Flags**: Requires explicit specification of either `True` or `False` (e.g. `--use_mixed_precision True`)
 
-A compiled version of the model can be used through adding the flag `--compile`. The compiler works without any isses on 
+A compiled version of the model can be used through adding the flag `--compile`. The compiler works without any issues on 
 the following GPUs
 
 * NVIDIA GeForce RTX 3090 
@@ -86,6 +86,7 @@ the following GPUs
 * Nvidia Tesla A100
 
 If there are some compiler warnings, you can always surpress them.
+
 
 | Argument                 | Type   | Default                  | Scope     | Description                                                                                                                                                    |
 |--------------------------|--------|--------------------------|-----------|----------------------------------------------------------------------------------------------------------------------------------------------------------------|
