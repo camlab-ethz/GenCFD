@@ -13,6 +13,32 @@ demo.py
 /dataset
 /dataloader/test.py
 /dataloader/dataset_test.py
+# ignore test file
+/eval/metrics/test_probabilistic_forecast.py
+# ignore all test files
+/utils/dataloader_utils_test.py
+/utils/model_utils_test.py
+/utils/reshape_utils_test.py
+/utils/train_utils_test.py
+/train/train_states_test.py
+/train/trainers_test.py
+/train/training_loop_test.py
+/solvers/sde_test.py
+/model/building_blocks/blocks/test_all_blocks.py
+/model/building_blocks/embeddings/test_embeddings.py
+/model/building_blocks/layers/axial_attention_test.py
+/model/building_blocks/layers/convolutions_test.py
+/model/building_blocks/layers/multihead_attention_test.py
+/model/building_blocks/layers/residual_test.py
+/model/building_blocks/layers/resize_test.py
+/model/building_blocks/stacks/test_stacks.py
+/model/building_blocks/unets/unets_test.py
+/model/building_blocks/unets/unets3d_test.py
+/model/probabilistic_diffusion/test_models.py
+/diffusion/diffusion_test.py
+/diffusion/guidance_test.py
+/diffusion/samplers_test.py
+/diffusion/schedulers_test.py
 # ignore all job scripts
 *.sh
 # ignore all image files
