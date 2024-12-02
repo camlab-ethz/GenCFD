@@ -33,16 +33,22 @@ from utils.gencfd_utils import (
     create_sampler,
     get_latest_checkpoint,
     load_json_file,
-    replace_args
+    replace_args,
+    get_buffer_dict
 )
 from eval.metrics.stats_recorder import StatsRecorder
 from eval import evaluation_loop
 
 
+torch.set_float32_matmul_precision('high') # Better performance on newer GPUs!
+torch.backends.cudnn.benchmark = True
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 SEED = 0
-RNG = torch.Generator(device=device)
-RNG.manual_seed(SEED)
+
+# Setting global seed for reproducibility
+torch.manual_seed(SEED)  # For CPU operations
+torch.cuda.manual_seed(SEED)  # For GPU operations
+torch.cuda.manual_seed_all(SEED)  # Ensure all GPUs (if multi-GPU) are set
 
 if __name__=="__main__":
 
@@ -56,35 +62,25 @@ if __name__=="__main__":
         raise ValueError("Path to a trained model is not specified!")
     model_dir = os.path.join(cwd, args.model_dir, "checkpoints")
     if not os.path.exists(model_dir):
-        raise ValueError("Wrong Path it doesn't exist!")
+        raise ValueError(f"Wrong Path, {args.model_dir} doesn't exist!")
     
     # read configurations which were used to train the model
     train_args = load_json_file(
         os.path.join(cwd, args.model_dir, "training_config.json")
     )
 
-    # determine whether the json file exists
-    if train_args is None:
-        # json file does not exist and train_args is None
-        dataset, time_cond = get_dataset(
-            name=args.dataset, device=device, is_time_dependent=True
-        )
-        if 'lead_time' in dataset.file.variables:
-            batch = dataset.__getitem__(0)
-            lead_time, inputs = batch['lead_time'], batch['data']
-            input_shape = inputs.shape
-        else:
-            input_shape = dataset.__getitem__(0).shape
-    
-        out_shape = (dataset.output_channel,) + tuple(input_shape[1:])
-    else:
-        # json file exists, use parameters which were used during training
-        dataset = get_dataset(name=args.dataset, device=device)
+    dataloader, dataset, time_cond = get_dataset_loader(
+        name=args.dataset, 
+        batch_size=args.batch_size, 
+        num_worker=args.worker, 
+        split=False
+    )
 
-        if SEED != train_args["seed"]:
-            # to get the same training data if the same dataset is used
-            RNG.manual_seed(train_args["seed"]) 
+    input_shape = dataset.input_shape
+    out_shape = dataset.output_shape
+    spatial_resolution = dataset.spatial_resolution
 
+    if train_args:
         # check if the correct device is currently in use
         if str(device) != train_args["device"]:
             raise ValueError(f"Wrong device, device needs to be {train_args['device']}")
@@ -92,44 +88,43 @@ if __name__=="__main__":
         # replace every argument from train_args besides the dataset name!
         replace_args(args, train_args) 
 
-        input_shape = tuple(train_args['input_shape'])
-        out_shape = tuple(train_args['out_shape'])
-        time_cond = train_args['time_cond']
-
-    # get the dataloader
-    dataloader = get_dataset_loader(
-        name=args.dataset, 
-        batch_size=args.batch_size, 
-        num_worker=args.worker, 
-        split=False,
-        device=device
-    )
+        # Check if the arguments used for training are the same as the evaluation dataset
+        # assert spatial_resolution == tuple(train_args['spatial_resolution']), \
+        #     f"spatial_resolution should be {tuple(train_args['input_shape'])} " \ 
+        #     f"and not {spatial_resolution}"
+        assert spatial_resolution == tuple(train_args['spatial_resolution']), \
+            f"spatial_resolution should be {tuple(train_args['spatial_resolution'])} " \
+            f"and not {spatial_resolution}"
+        assert out_shape == tuple(train_args['out_shape']), \
+            f"out_shape should be {tuple(train_args['input_shape'])} and not {out_shape}"
+        # assert time_cond == train_args['time_cond'], \
+        #     f"time_cond should be {train_args['time_cond']} and not {time_cond}"
     
     # Dummy buffer values, for initialization! Necessary to load the model parameters
-    buffer_dict = {
-        'mean_training_input': torch.zeros((dataset.input_channel,)),
-        'mean_training_output': torch.zeros((dataset.output_channel,)),
-        'std_training_input': torch.ones((dataset.input_channel,)),
-        'std_training_output': torch.ones((dataset.output_channel,))
-    }
+    buffer_dict = get_buffer_dict(dataset=dataset, create_dummy=True)
 
     # the compute_dtype needs to be the same as used for the trained model!
     denoising_model = create_denoiser(
         args=args,
-        input_shape=input_shape,
         input_channels=dataset.input_channel,
         out_channels=dataset.output_channel,
-        rng=RNG,
+        spatial_resolution=spatial_resolution,
+        time_cond=time_cond,
         device=device,
         dtype=args.dtype,
         buffer_dict=buffer_dict
     )
 
+    with torch.no_grad():
+        denoising_model.initialize(batch_size=args.batch_size, time_cond=time_cond)
+
+    # Print number of Parameters:
+    model_params = sum(p.numel() for p in denoising_model.denoiser.parameters() if p.requires_grad)
     print(" ")
-    print("Denoiser Initialization")
+    print(f"Total number of model parameters: {model_params}")
+    print(" ")
 
-    denoising_model.initialize(batch_size=args.batch_size, time_cond=time_cond)
-
+    # Rebuild the trainer used for training
     trainer = DenoisingTrainer(
         model=denoising_model,
         optimizer=optim.AdamW(
@@ -137,11 +132,15 @@ if __name__=="__main__":
             lr=args.peak_lr,
             weight_decay=args.weight_decay),
         device=device,
-        ema_decay=args.ema_decay
+        ema_decay=args.ema_decay,
+        store_ema=False, 
+        track_memory=False,
+        use_mixed_precision=args.use_mixed_precision,
+        is_compiled=args.compile
     )
 
-    print(" ")
     print("Load Model Parameters")
+    print(" ")
 
     latest_model_path = get_latest_checkpoint(model_dir)
 
@@ -158,21 +157,21 @@ if __name__=="__main__":
     # Construct the inference function
     denoise_fn = trainer.inference_fn_from_state_dict(
         trained_state, 
-        use_ema=True, 
+        use_ema=False, # Changed! 
         denoiser=denoising_model.denoiser, 
         task=args.task,
         lead_time=time_cond
     )
 
+    # Create Sampler
     sampler = create_sampler(
         args=args,
         input_shape=out_shape, 
         denoise_fn=denoise_fn,
-        rng=RNG, 
         device=device
     )
 
-    # initialize stats_recorder to keep track of metrics
+    # Initialize stats_recorder to keep track of metrics
     stats_recorder = StatsRecorder(
         batch_size=args.batch_size, 
         ndim=len(out_shape)-1, 
@@ -181,7 +180,6 @@ if __name__=="__main__":
         device=device
     )
 
-    print(" ")
     if args.compute_metrics:
         print(f"Run Evaluation Loop with {args.monte_carlo_samples} Monte Carlo Samples and Batch Size {args.batch_size}")
     if args.visualize:

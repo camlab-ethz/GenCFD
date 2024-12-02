@@ -25,7 +25,6 @@ class MultiHeadDotProductAttention(nn.Module):
     def __init__(self, 
                  emb_dim: int, 
                  num_heads: int, 
-                 rng: torch.Generator,
                  normalize_qk: bool=False, 
                  dropout: float=0.0,
                  device: Any | None = None,
@@ -37,7 +36,6 @@ class MultiHeadDotProductAttention(nn.Module):
         self.dropout = dropout
         self.device = device
         self.dtype = dtype
-        self.rng = rng
 
         if emb_dim % num_heads != 0:
             raise ValueError(
@@ -53,11 +51,11 @@ class MultiHeadDotProductAttention(nn.Module):
 
     def _init_weights(self):
         nn.init.xavier_uniform_(
-            self.multihead_attention.in_proj_weight, generator=self.rng
-            )
+            self.multihead_attention.in_proj_weight
+        )
         nn.init.xavier_uniform_(
-            self.multihead_attention.out_proj.weight, generator=self.rng
-            )
+            self.multihead_attention.out_proj.weight
+        )
 
     def forward(
             self, query: Tensor, key: Tensor = None, value: Tensor = None

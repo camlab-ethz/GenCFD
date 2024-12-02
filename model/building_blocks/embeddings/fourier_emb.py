@@ -28,7 +28,9 @@ class FourierEmbedding(nn.Module):
                  projection: bool=True, 
                  act_fun: Callable[[Tensor], Tensor]=F.silu,
                  dtype: torch.dtype=torch.float32,
-                 device: Any | None = None):
+                 device: Any | None = None,
+                 max_val: float = 1e6 # for numerical stability
+        ):
         super(FourierEmbedding, self).__init__()
 
         self.dims = dims
@@ -37,33 +39,40 @@ class FourierEmbedding(nn.Module):
         self.act_fun = act_fun
         self.dtype = dtype
         self.device = device
+        self.max_val = max_val
 
-        self.lin_layer1 = None
-        self.lin_layer2 = None
+        logfreqs = torch.linspace(0, torch.log(
+            torch.tensor(self.max_freq, dtype=self.dtype, device=self.device)), 
+            self.dims // 2, dtype=self.dtype, device=self.device
+        )
 
+        # freqs are constant and scaled with pi!
+        const_freqs = torch.pi * torch.exp(logfreqs)[None, :]  # Shape: (1, dims//2)
+
+        # Store freqs as a non-trainable buffer also to ensure device and dtype transfers
+        self.register_buffer("const_freqs", const_freqs)
+
+        if self.projection:
+            self.lin_layer1 = nn.Linear(
+                self.dims, 2 * self.dims, dtype=self.dtype, device=self.device
+            )
+            self.lin_layer2 = nn.Linear(
+                2* self.dims, self.dims, dtype=self.dtype, device=self.device
+            )
     
     def forward(self, x: Tensor) -> Tensor:
         assert len(x.shape) == 1, "Input tensor must be 1D"
-        logfreqs = torch.linspace(0, torch.log(
-            torch.tensor(self.max_freq, dtype=self.dtype, device=self.device)
-            ), self.dims // 2, dtype=self.dtype, device=self.device)
         
-        x_proj = torch.pi * torch.exp(logfreqs)[None, :] * x[:, None]
+        # Use the registered buffer const_freqs
+        x_proj = self.const_freqs * x[:, None]
+        # x_proj is now a 2D tensor
         x_proj = torch.cat([torch.sin(x_proj), torch.cos(x_proj)], dim=-1)
-        # now x_proj is a 2D tensor
+        # clamping values to avoid running into numerical instability!
+        x_proj = torch.clamp(x_proj, min=-self.max_val, max=self.max_val)
 
         if self.projection:
-            if self.lin_layer1 is None or self.lin_layer2 is None:
-                self.lin_layer1 = nn.Linear(
-                    x_proj.shape[1], 2 * self.dims, dtype=self.dtype, device=self.device
-                    )
-                self.lin_layer2 = nn.Linear(
-                    2* self.dims, self.dims, dtype=self.dtype, device=self.device
-                    )
-            
             x_proj = self.lin_layer1(x_proj)
             x_proj = self.act_fun(x_proj)
             x_proj = self.lin_layer2(x_proj)
 
         return x_proj
-        

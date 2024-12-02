@@ -21,7 +21,9 @@ from typing import Any, Generic, TypeVar
 import torch
 import torch.nn as nn
 import torch.optim as optim
+import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
+import numpy as np
 from torchmetrics import MetricCollection, MeanMetric
 from utils.train_utils import StdMetric, compute_memory
 
@@ -79,7 +81,7 @@ class BaseTrainer(Generic[M, S], metaclass=abc.ABCMeta):
 
         for step in range(num_steps):
             batch = next(batch_iter)
-            # batch = {k: v.to(self.device) for k, v in batch.items()}
+            batch = {k: v.to(self.device, non_blocking=True) for k, v in batch.items()}
             metrics_update = self.train_step(batch)
 
             train_metrics["loss"].update(metrics_update["loss"])
@@ -102,7 +104,7 @@ class BaseTrainer(Generic[M, S], metaclass=abc.ABCMeta):
         with torch.no_grad():
             for _ in range(num_steps):
                 batch = next(batch_iter)
-                # batch = {k: v.to(self.device) for k, v in batch.items()}
+                batch = {k: v.to(self.device, non_blocking=True) for k, v in batch.items()}
                 update_metrics = self.eval_step(batch) # self.train_state as first entry
                 for key, value in update_metrics.items():
                     eval_metrics[key].update(value)
@@ -165,7 +167,6 @@ class BasicTrainer(BaseTrainer[M, S]):
 
 
     def eval_step(self, batch: BatchType) -> Callable[[S, BatchType], Metrics]:
-        self.model.denoiser.eval()
         with torch.no_grad():
             metrics = self.model.eval_fn(batch)
 
@@ -219,17 +220,22 @@ class DenoisingTrainer(BasicTrainer[M, SD]):
             optimizer: optim.Optimizer,
             device: torch.device,
             ema_decay: float = 0.999,
+            store_ema: bool = False,
             track_memory: bool = False,
-            use_mixed_precision: bool = False):
+            use_mixed_precision: bool = False,
+            is_compiled: bool = False):
       
         self.optimizer = optimizer
         self.ema_decay = ema_decay 
+        self.store_ema = store_ema
         self.track_memory = track_memory
-
+        # Mixed precision training with Grad scaler to avoid overflow and underflow during backprop.
         self.compute_dtype = torch.float16 if use_mixed_precision else torch.float32
         self.use_mixed_precision = use_mixed_precision
-        # Grad scaler to avoid overflow and underflow during backprop.
         self.scaler = torch.amp.GradScaler(device.type) if use_mixed_precision else None
+        # Store status if the model is compiled
+        self.is_compiled = is_compiled
+
 
         super().__init__(
             model=model, optimizer=optimizer, device=device, track_memory=track_memory
@@ -261,48 +267,35 @@ class DenoisingTrainer(BasicTrainer[M, SD]):
     
 
     def initialize_train_state(self) -> SD:
-        """Initializes the train state with EMA and model params"""
+        """Initializes the train state with EMA and model params
+        
+        Those states are tracked at every iteration step
+        """
         return train_states.DenoisingModelTrainState(
-            model=self.model.denoiser,
-            optimizer=self.optimizer,
-            params=self.model.denoiser.state_dict(),
-            opt_state=self.optimizer.state_dict(),
+            # Further parameters can be added here to track
             step=0,
-            ema_decay=self.ema_decay
+            ema_decay=self.ema_decay,
+            store_ema=self.store_ema
         )
     
     @compute_memory
     def train_step(self, batch: BatchType) -> Metrics:
 
-        # if self.device.type == 'cuda' and self.track_memory:
-        #     torch.cuda.reset_peak_memory_stats(self.device)
-        
-        self.model.denoiser.train()
+        with torch.amp.autocast(device_type=self.device.type, dtype=self.compute_dtype):
+            loss, metrics = self.model.loss_fn(batch)
 
-        with torch.amp.autocast(
-            device_type=self.device.type, 
-            dtype=self.compute_dtype,
-            enabled=self.use_mixed_precision
-        ):
-            loss, (metrics, _) = self.model.loss_fn(batch)
-
-        self.optimizer.zero_grad()
-        
+        self.optimizer.zero_grad(set_to_none=True)
         if self.use_mixed_precision:
             loss = loss.float()
-            self.scaler.scale(loss).backward()
+            self.scaler.scale(loss).backward(retain_graph=False)
             self.scaler.step(self.optimizer)
             self.scaler.update()
         else:
-            loss.backward()
+            loss.backward(retain_graph=False)
             self.optimizer.step()
 
         self.update_train_state()
-
-        # if self.track_memory:
-        #     mem = torch.cuda.max_memory_allocated(self.device) if self.device.type == 'cuda' else 0
-        #     metrics["mem"] = mem / (1024 ** 2) # convert to GB
-
+        
         return metrics
     
 
@@ -313,14 +306,14 @@ class DenoisingTrainer(BasicTrainer[M, SD]):
             next_step = next_step.item()
 
         # update ema model
-        self.train_state.ema_model.update_parameters(self.model.denoiser)
-        ema_params = self.train_state.ema_parameters
+        if self.store_ema:
+            self.train_state.ema_model.update_parameters(self.model.denoiser)
+            ema_params = self.train_state.ema_parameters
 
+        # Further states can be replaced at every training step
         return self.train_state.replace(
             step=next_step,
-            opt_state=self.optimizer.state_dict(),
-            params=self.model.denoiser.state_dict(),
-            ema=ema_params,
+            ema=ema_params if self.store_ema else None
         )
     
     @staticmethod

@@ -60,6 +60,7 @@ class UNet3D(nn.Module):
 
     Attributes:
       out_channels: Number of output channels (should match the input).
+      kernel_dim: Dimension of spatial resolution. Adds info if it's a 2 or 3D dataset
       resize_to_shape: Optional input resizing shape. Facilitates greater
         downsampling flexibility. Output is resized to the original input shape.
       num_channels: Number of feature channels in intermediate convolutions.
@@ -84,8 +85,10 @@ class UNet3D(nn.Module):
 
     def __init__(
           self,
+          in_channels: int,
           out_channels: int,
-          rng: torch.Generator,
+          spatial_resolution: Sequence[int],
+          time_cond: bool,
           num_channels: Sequence[int] = (128, 256, 256),
           downsample_ratio: Sequence[int] = (2, 2, 2),
           num_blocks: int = 4,
@@ -108,9 +111,13 @@ class UNet3D(nn.Module):
         # Store normalization parameters as buffers for all datasets!
         for name, tensor in buffer_dict.items():
           self.register_buffer(name, tensor)
-      
+
+      self.in_channels = in_channels
       self.out_channels = out_channels
       self.num_channels = num_channels
+      self.spatial_resolution = spatial_resolution
+      self.time_cond = time_cond
+      self.kernel_dim = len(spatial_resolution)
       self.downsample_ratio = downsample_ratio
       self.num_blocks = num_blocks
       self.noise_embed_dim = noise_embed_dim 
@@ -123,18 +130,18 @@ class UNet3D(nn.Module):
       self.num_heads = num_heads
       self.normalize_qk = normalize_qk
       self.device = device
-      self.rng = rng
       self.dtype = dtype
 
       self.use_spatial_attention = _maybe_broadcast_to_list(
             source=self.use_spatial_attention, reference=self.num_channels
       )
 
-      self.time_embedding = FourierEmbedding(
-          dims=self.noise_embed_dim,
-          dtype=self.dtype,
-          device=self.device
-      )
+      if self.time_cond:
+        self.time_embedding = FourierEmbedding(
+            dims=self.noise_embed_dim,
+            dtype=self.dtype,
+            device=self.device
+        )
 
       self.sigma_embedding = FourierEmbedding(
           dims=self.noise_embed_dim,
@@ -142,12 +149,16 @@ class UNet3D(nn.Module):
           device=self.device
       )
 
+      self.emb_channels = self.noise_embed_dim * 2 if self.time_cond else self.noise_embed_dim
+
       self.DStack = DStack(
+          in_channels=self.in_channels,
+          spatial_resolution=self.spatial_resolution,
+          emb_channels = self.emb_channels,
           num_channels=self.num_channels,
           num_res_blocks=len(self.num_channels) * (self.num_blocks,),
           downsample_ratio=self.downsample_ratio,
           use_spatial_attention=self.use_spatial_attention,
-          rng=self.rng,
           num_input_proj_channels=self.input_proj_channels,
           padding_method=self.padding_method,
           dropout_rate=self.dropout_rate,
@@ -159,11 +170,13 @@ class UNet3D(nn.Module):
       )
 
       self.UStack = UStack(
+         spatial_resolution=self.spatial_resolution,
+         emb_channels = self.emb_channels,
          num_channels=self.num_channels[::-1],
          num_res_blocks=len(self.num_channels) * (self.num_blocks,),
          upsample_ratio=self.downsample_ratio[::-1],
          use_spatial_attention=self.use_spatial_attention[::-1],
-         rng=self.rng,
+         num_input_proj_channels=self.input_proj_channels,
          num_output_proj_channels=self.output_proj_channels,
          padding_method=self.padding_method,
          dropout_rate=self.dropout_rate,
@@ -174,9 +187,24 @@ class UNet3D(nn.Module):
          device=self.device
       )
 
-      self.norm = None
-      self.conv_layer = None
+      self.norm = nn.GroupNorm(
+        min(max(self.output_proj_channels // 4, 1), 32),
+        self.output_proj_channels,
+        device=self.device,
+        dtype=self.dtype
+      )
 
+      self.conv_layer = ConvLayer(
+        in_channels=self.output_proj_channels,
+        out_channels=self.out_channels,
+        kernel_size=self.kernel_dim * (3,),
+        padding_mode=self.padding_method,
+        padding=1,
+        case=self.kernel_dim,
+        kernel_init=default_init(),
+        dtype=self.dtype,
+        device=self.device
+      )
 
     def forward(
             self,
@@ -184,8 +212,6 @@ class UNet3D(nn.Module):
             sigma: Tensor,
             time: Tensor = None,
             cond: dict[str, Tensor] | None = None,
-            *,
-            is_training: bool,
     ) -> Tensor:
       """Predicts denoised given noised input and noise level.
 
@@ -211,74 +237,49 @@ class UNet3D(nn.Module):
               f" ({x.shape[0]})!"
           )
 
-      if time is not None:
+      if self.time_cond:
         if time.ndim < 1:
             time = time.expand(x.size(0))
 
       if time.ndim != 1 or x.shape[0] != time.shape[0]:
-          raise ValueError(
-              "`time` must be 1D and have the same leading (batch) dimension as x"
-              f" ({x.shape[0]})!"
-          )
+        raise ValueError(
+            "`time` must be 1D and have the same leading (batch) dimension as x"
+            f" ({x.shape[0]})!"
+        )
 
       if not x.ndim == 5:
-          raise ValueError(
-              "5D inputs (batch, x,y,z, features)! x.shape:"
-              f" {x.shape}"
-          )
+        raise ValueError(
+            "5D inputs (batch, x,y,z, features)! x.shape:"
+            f" {x.shape}"
+        )
 
       if len(self.num_channels) != len(self.downsample_ratio):
-          raise ValueError(
-              f"`num_channels` {self.num_channels} and `downsample_ratio`"
-              f" {self.downsample_ratio} must have the same lengths!"
-          )
-
-      kernel_dim = x.ndim - 2
+        raise ValueError(
+            f"`num_channels` {self.num_channels} and `downsample_ratio`"
+            f" {self.downsample_ratio} must have the same lengths!"
+        )
 
       # Embedding
       emb_sigma = self.sigma_embedding(sigma)
-      if time is not None:
+      if self.time_cond:
         emb_time = self.time_embedding(time)
         emb = torch.cat((emb_sigma, emb_time), dim=-1)
       else:
-         emb = emb_sigma
+        emb = emb_sigma
 
       # Downsampling
-      skips = self.DStack(x, emb, is_training=is_training)
+      skips = self.DStack(x, emb)
 
       # Upsampling
-      h = self.UStack(skips[-1], emb, skips, is_training=is_training)
-
-      if self.norm is None:
-          self.norm = nn.GroupNorm(
-            min(max(h.shape[1] // 4, 1), 32),
-            h.shape[1],
-            device=self.device,
-            dtype=self.dtype
-          )
+      h = self.UStack(skips[-1], emb, skips)
 
       h = F.silu(self.norm(h))
-
-      if self.conv_layer is None:
-          self.conv_layer = ConvLayer(
-            in_channels=h.shape[1],
-            out_channels=self.out_channels,
-            kernel_size=kernel_dim * (3,),
-            padding_mode=self.padding_method,
-            padding=1,
-            rng=self.rng,
-            case=kernel_dim,
-            kernel_init=default_init(),
-            dtype=self.dtype,
-            device=self.device
-          )
-
       h = self.conv_layer(h)
 
       return h
 
 
-class PreconditionedDenoiser3D(UNet3D):
+class PreconditionedDenoiser3D(UNet3D, nn.Module):
   """Preconditioned 3-dimensional UNet denoising model.
 
   Attributes:
@@ -289,8 +290,10 @@ class PreconditionedDenoiser3D(UNet3D):
   """
   def __init__(
         self,
+        in_channels: int,
         out_channels: int,
-        rng: torch.Generator,
+        spatial_resolution: Sequence[int],
+        time_cond: bool,
         num_channels: Sequence[int] = (128, 256, 256),
         downsample_ratio: Sequence[int] = (2, 2, 2),
         num_blocks: int = 4,
@@ -308,8 +311,10 @@ class PreconditionedDenoiser3D(UNet3D):
         buffer_dict: dict = None,
         sigma_data: float = 1.0
     ):
-    super().__init__(out_channels=out_channels,
-                     rng=rng,
+    super().__init__(in_channels=in_channels,
+                     out_channels=out_channels,
+                     spatial_resolution=spatial_resolution,
+                     time_cond=time_cond,
                      num_channels=num_channels,
                      downsample_ratio=downsample_ratio,
                      num_blocks=num_blocks,
@@ -335,14 +340,12 @@ class PreconditionedDenoiser3D(UNet3D):
       y: Tensor = None,
       time: Tensor = None,
       cond: dict[str, Tensor] | None = None,
-      *,
-      is_training: bool,
   ) -> Tensor:
     """Runs preconditioned denoising."""
     if sigma.ndim < 1:
       sigma = sigma.expand(x.size(0))
 
-    if sigma.ndim != 1 or x.shape[0] != sigma.shape[0]:
+    if sigma.ndim != 1 or x.size(0) != sigma.shape[0]:
       raise ValueError(
           "sigma must be 1D and have the same leading (batch) dimension as x"
           f" ({x.shape[0]})!"
@@ -354,36 +357,23 @@ class PreconditionedDenoiser3D(UNet3D):
     c_in = 1 / torch.sqrt(total_var)
     c_noise = 0.25 * torch.log(sigma)
 
-    expand_shape = [-1] + [1] * (x.dim() - 1)
+    expand_shape = [-1] + [1] * (self.kernel_dim + 1) # resolution + channel dimension
     # Expand dimensions of the coefficients
     c_in = c_in.view(*expand_shape)
     c_out = c_out.view(*expand_shape)
     c_skip = c_skip.view(*expand_shape)
 
-    if y is None and time is None:
-      # no conditioning
-      f_x = super().forward(
-          c_in * x, 
-          sigma=c_noise, 
-          cond=cond, 
-          is_training=is_training
-      )
-    if y is not None and time is None:
-      # conditioning only on the initial conditions
-      f_x = super().forward(
-          torch.cat((c_in * x, y), dim=1), 
-          sigma=c_noise, 
-          cond=cond, 
-          is_training=is_training
-      )
-    if y is not None and time is not None:
-      # conditioning on initial conditions and time
-      f_x = super().forward(
-          torch.cat((c_in * x, y), dim=1), 
-          sigma=c_noise,
-          time=time,
-          cond=cond, 
-          is_training=is_training
-      )
+    inputs = c_in * x
+
+    if y is not None:
+      # stack conditioning y
+      inputs = torch.cat((inputs, y), dim=1)
+
+    f_x = super().forward(
+        inputs, 
+        sigma=c_noise,
+        time=time,
+        cond=cond
+    )
 
     return c_skip * x + c_out * f_x

@@ -43,7 +43,6 @@ class FilteredResize(nn.Module):
   def __init__(self,
                output_size: Sequence[int],
                kernel_size: Union[Sequence[int], int], 
-               rng: torch.Generator,
                method: str = 'bicubic',
                padding_mode: str = 'circular',
                initializer: nn.init = nn.init.normal_,
@@ -60,7 +59,6 @@ class FilteredResize(nn.Module):
     self.initializer = initializer
     self.use_local = use_local
     self.dtype = dtype
-    self.rng = rng
     self.device = device
 
     # compute padding to allow for a padding_mode:
@@ -122,7 +120,6 @@ class FilteredResize(nn.Module):
         out_channels=inputs.shape[1],
         kernel_size=self.kernel_size,
         padding_mode=self.padding_mode,
-        rng=self.rng,
         padding=self.padding,
         use_local=self.use_local,
         case=len(inputs.shape)-2,
@@ -153,7 +150,6 @@ class InterpConvMerge(MergeChannelCond):
   def __init__(self, 
                embed_dim, 
                kernel_size, 
-               rng = torch.Generator,
                resize_method="cubic", 
                padding_mode="circular", 
                dtype=torch.float32,
@@ -162,7 +158,6 @@ class InterpConvMerge(MergeChannelCond):
     super(InterpConvMerge, self).__init__(embed_dim, kernel_size, resize_method, padding_mode)
     self.dtype = dtype
     self.device = device
-    self.rng = rng
 
     self.conv_layer = None
     self.resize_layer = None
@@ -203,7 +198,6 @@ class InterpConvMerge(MergeChannelCond):
             self.resize_layer = FilteredResize(
               output_size=x.shape[2:],
               kernel_size=self.kernel_size,
-              rng=self.rng,
               method=self.resize_method,
               padding_mode=self.padding_mode,
               dtype=self.dtype,

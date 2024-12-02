@@ -343,26 +343,25 @@ def exponential_noise_schedule(
 
 class NoiseLevelSampling(Protocol):
 
-  def __call__(self, rng: th.Generator, shape: tuple[int, ...]) -> Tensor:
+  def __call__(self, shape: tuple[int, ...]) -> Tensor:
     """Samples noise levels for training."""
     ...
 
 
 def _uniform_samples(
-    rng: th.Generator,
     shape: tuple[int, ...],
     uniform_grid: bool,
     device: th.device = None
 ) -> th.tensor:
   """Generates samples from uniform distribution on [0, 1]."""
   if uniform_grid:
-    s0 = th.rand((), generator=rng, dtype=th.float32, device=device)
+    s0 = th.rand((), dtype=th.float32, device=device)
     num_elements = int(np.prod(shape))
     step_size = 1 / num_elements
     grid = th.linspace(0, 1 - step_size, num_elements, dtype=th.float32, device=device)
     samples = th.remainder(grid + s0, 1).reshape(shape)
   else:
-    samples = th.rand(shape, generator=rng, dtpye=th.float32, device=device)
+    samples = th.rand(shape, dtpye=th.float32, device=device)
   return samples
 
 
@@ -374,8 +373,8 @@ def log_uniform_sampling(
 ) -> NoiseLevelSampling:
   """Samples noise whose natural log follows a uniform distribution."""
 
-  def _noise_sampling(rng: th.Generator, shape: tuple[int, ...]) -> Tensor:
-    samples = _uniform_samples(rng, shape, uniform_grid, device)
+  def _noise_sampling(shape: tuple[int, ...]) -> Tensor:
+    samples = _uniform_samples(shape, uniform_grid, device)
     log_min = th.log(th.as_tensor(clip_min, dtype=samples.dtype, device=device))
     log_max = th.log(th.as_tensor(scheme.sigma_max, dtype=samples.dtype, device=device))
     samples = (log_max - log_min) * samples + log_min
@@ -393,10 +392,9 @@ def time_uniform_sampling(
   """Samples noise from a uniform distribution in t."""
 
   def _noise_sampling(
-      rng: th.Generator, 
       shape: tuple[int, ...]
     ) -> Tensor:
-    samples = _uniform_samples(rng, shape, uniform_grid, device=device)
+    samples = _uniform_samples(shape, uniform_grid, device=device)
     min_t = scheme.sigma.inverse(clip_min)
     samples = (MAX_DIFFUSION_TIME - min_t) * samples + min_t
     return th.as_tensor(scheme.sigma(samples), device=device)
@@ -427,9 +425,9 @@ def normal_sampling(
     A normal sampling function.
   """
 
-  def _noise_sampler(rng: th.Generator, shape: tuple[int, ...]) -> Tensor:
+  def _noise_sampler(shape: tuple[int, ...]) -> Tensor:
     log_sigma = th.normal(
-      mean=0, std=1, size=shape, generator=rng, dtype=th.float32, device=device
+      mean=0, std=1, size=shape, dtype=th.float32, device=device
     )
     log_sigma = p_mean + p_std * log_sigma
     return th.clamp(th.exp(log_sigma), min=clip_min, max=scheme.sigma_max)

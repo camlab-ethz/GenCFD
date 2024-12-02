@@ -123,8 +123,10 @@ class BasicTrainState(TrainState):
     super().__init__(step)
     self.model = model
     self.optimizer = optimizer
-    self.params = params if params is not None else self.model.state_dict()
-    self.opt_state = opt_state if opt_state is not None else self.optimizer.state_dict()
+    # self.params = params if params is not None else self.model.state_dict()
+    # self.opt_state = opt_state if opt_state is not None else self.optimizer.state_dict()
+    self.params = params
+    self.opt_state = opt_state
 
   @classmethod
   def restore_from_checkpoint(cls, 
@@ -137,6 +139,13 @@ class BasicTrainState(TrainState):
 
     params = checkpoint["params"] if "params" in checkpoint.keys() else checkpoint["model_state_dict"]
     opt_state = checkpoint["opt_state"] if "opt_state" in checkpoint.keys() else checkpoint["optimizer_state_dict"]
+
+    is_compiled = checkpoint['is_compiled'] # check if stored model was compiled
+    if is_compiled:
+        # stored model was compiled, thus the keys are stored with _orig_mod. and needs to be 
+        params = {
+          key.replace('_orig_mod.', ''): value for key, value in params.items()
+        }
 
     model.load_state_dict(params)
     optimizer.load_state_dict(opt_state)
@@ -161,10 +170,11 @@ class BasicTrainState(TrainState):
   def update_from_checkpoint(self, checkpoint: Dict[str, Any]) -> None:
     "Update model and optimizer states from checkpoint."
     super().update_from_checkpoint(checkpoint)
+
     self.model.load_state_dict(checkpoint["params"])
     self.optimizer.load_state_dict(checkpoint["opt_state"])
 
-  def replace(self, step: int, params: Dict[str, Any], opt_state: Dict[str, Any]):
+  def replace(self, step: int, params: Dict[str, Any] = None, opt_state: Dict[str, Any] = None):
         """Replaces state values with updated fields."""
         self.step = step
         self.params = params
@@ -181,7 +191,8 @@ class DenoisingModelTrainState(BasicTrainState):
       params = None,
       opt_state = None,
       step: int = 0,
-      ema_decay: float = 0.999
+      ema_decay: float = 0.999,
+      store_ema: bool = False
       ):
     super().__init__(
       model=model, 
@@ -191,10 +202,11 @@ class DenoisingModelTrainState(BasicTrainState):
       step=step)
     
     self.ema_decay = ema_decay
+    self.store_ema = store_ema
     self.ema_model = AveragedModel(
       self.model, multi_avg_fn=get_ema_multi_avg_fn(ema_decay)
-      )
-    self.ema = self.ema_parameters
+    ) if store_ema else None 
+    self.ema = self.ema_parameters if store_ema else None
 
   @property
   def ema_parameters(self):
@@ -207,9 +219,9 @@ class DenoisingModelTrainState(BasicTrainState):
   def replace(
       self, 
       step: int, 
-      params: Dict[str, Any], 
-      opt_state: Dict[str, Any],
-      ema: Dict[str, Any]):
+      params: Dict[str, Any] = None, 
+      opt_state: Dict[str, Any] = None,
+      ema: Dict[str, Any] = None):
       """Replaces state values with updated fields."""
       self.step = step
       self.params = params

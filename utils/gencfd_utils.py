@@ -40,11 +40,12 @@ from dataloader.dataset import (
     TrainingSetBase,
     DataIC_Vel,
     DataIC_3D_Time,
-    DataIC_3D_Time_TG,
+    # DataIC_3D_Time_TG,
     ConditionalDataIC_Vel,
     ConditionalDataIC_3D,
     ConditionalDataIC_3D_TG
 )
+from dataloader.dataset_test import DataIC_3D_Time_TG
 from utils.callbacks import Callback ,TqdmProgressBar, TrainStateCheckpoint
 from diffusion.samplers import SdeSampler, Sampler
 from solvers.sde import EulerMaruyama
@@ -59,8 +60,8 @@ DenoiseFn = Callable[[Tensor, Tensor, TensorMapping | None], Tensor]
 
 def get_dataset(
         name: str, 
-        device: torch.device = None,
-        is_time_dependent: bool = False
+        is_time_dependent: bool = False,
+        # device: torch.device = None
     ) -> TrainingSetBase:
     """Returns the correct dataset and if the dataset has a time dependency
     This is necessary for the evaluation pipeline if there is no json file 
@@ -68,27 +69,33 @@ def get_dataset(
     """
 
     if name == 'DataIC_Vel':
-        dataset = DataIC_Vel(device=device)
+        # dataset = DataIC_Vel(device=device)
+        dataset = DataIC_Vel()
         time_cond = False
     
     elif name == 'DataIC_3D_Time':
-        dataset = DataIC_3D_Time(device=device)
+        # dataset = DataIC_3D_Time(device=device)
+        dataset = DataIC_3D_Time()
         time_cond = True
 
     elif name == 'DataIC_3D_Time_TG':
-        dataset = DataIC_3D_Time_TG(device=device)
+        # dataset = DataIC_3D_Time_TG(device=device)
+        dataset = DataIC_3D_Time_TG()
         time_cond = True
     
     elif name == 'ConditionalDataIC_Vel':
-        dataset = ConditionalDataIC_Vel(device=device)
+        # dataset = ConditionalDataIC_Vel(device=device)
+        dataset = ConditionalDataIC_Vel()
         time_cond = False
     
     elif name == 'ConditionalDataIC_3D':
-        dataset = ConditionalDataIC_3D(device=device)
+        # dataset = ConditionalDataIC_3D(device=device)
+        dataset = ConditionalDataIC_3D()
         time_cond = True
     
     elif name == 'ConditionalDataIC_3D_TG':
-        dataset = ConditionalDataIC_3D_TG(device=device)
+        # dataset = ConditionalDataIC_3D_TG(device=device)
+        dataset = ConditionalDataIC_3D_TG()
         time_cond = True
     
     else:
@@ -106,49 +113,77 @@ def get_dataset_loader(
         num_worker: int = 0,
         split: bool = True, 
         split_ratio: float = 0.8,
-        rng: torch.Generator = None,
-        device: torch.device = None
     ) -> Tuple[DataLoader, DataLoader] | DataLoader:
     """Return a training and evaluation dataloader or a single dataloader"""
 
-    dataset = get_dataset(name=name, device=device)
+    dataset, time_cond = get_dataset(name=name, is_time_dependent=True)
 
     if split:
         train_size = int(split_ratio * len(dataset))
         eval_size = len(dataset) - train_size
-        train_dataset, eval_dataset = random_split(dataset, [train_size, eval_size], rng)
+        train_dataset, eval_dataset = random_split(dataset, [train_size, eval_size])
         train_dataloader = DataLoader(
             dataset=train_dataset, 
             batch_size=batch_size, 
             shuffle=True, 
+            pin_memory=True,
             num_workers=num_worker,
-            generator=rng
         )
         eval_dataloader = DataLoader(
             dataset=eval_dataset, 
             batch_size=batch_size, 
             shuffle=True,
+            pin_memory=True,
             num_workers=num_worker,
-            generator=rng
         )
-        return (train_dataloader, eval_dataloader)
+        return (train_dataloader, eval_dataloader, dataset, time_cond)
     else:
-        return DataLoader(
+        dataloader = DataLoader(
             dataset=dataset, 
             batch_size=batch_size, 
             shuffle=True, 
+            pin_memory=True,
             num_workers=num_worker,
-            generator=rng
         )
+        return (dataloader, dataset, time_cond)
+
+def get_buffer_dict(
+    dataset: TrainingSetBase, 
+    device: torch.device = None,
+    create_dummy: bool = False
+) -> dict:
+    """Build the Buffer Dictionary with normalizatino parameters"""
+
+    if create_dummy:
+        mean_training_input = torch.zeros((dataset.input_channel,))
+        mean_training_output = torch.zeros((dataset.output_channel,))
+        std_training_input = torch.ones((dataset.input_channel,))
+        std_training_output = torch.ones((dataset.output_channel,))
+    else:
+        mean_training_input = torch.tensor(dataset.mean_training_input, dtype=torch.float32, device=device)
+        mean_training_output = torch.tensor(dataset.mean_training_output, dtype=torch.float32, device=device)
+        std_training_input = torch.tensor(dataset.std_training_input, dtype=torch.float32, device=device)
+        std_training_output = torch.tensor(dataset.std_training_output, dtype=torch.float32, device=device)
+
+    buffer_dict = {
+        'mean_training_input': mean_training_input,
+        'mean_training_output': mean_training_output,
+        'std_training_input': std_training_input,
+        'std_training_output': std_training_output
+    }
+
+    return buffer_dict
     
 # ***************************
 # Load Denoiser
 # ***************************
 
 def get_model(
-        args: ArgumentParser, 
-        out_channels: int, 
-        rng: torch.Generator,
+        args: ArgumentParser,
+        in_channels: int, 
+        out_channels: int,
+        spatial_resolution: tuple,
+        time_cond: bool,
         device: torch.device = None,
         buffer_dict: dict = None,
         dtype: torch.dtype = torch.float32
@@ -156,8 +191,12 @@ def get_model(
     """Get the correct model"""
     
     model_args = get_model_args(
-        args=args, out_channels=out_channels, 
-        rng=rng, device=device,
+        args=args, 
+        in_channels=in_channels,
+        out_channels=out_channels,
+        spatial_resolution=spatial_resolution,
+        time_cond=time_cond,
+        device=device,
         buffer_dict=buffer_dict,
         dtype=dtype
     )
@@ -181,12 +220,12 @@ def get_model(
 
 def get_denoising_model(
         args: ArgumentParser,
-        input_shape: int,
         input_channels: int,
+        spatial_resolution: Sequence[int],
+        time_cond: bool,
         denoiser: nn.Module,
         noise_sampling: NoiseLevelSampling,
         noise_weighting: NoiseLossWeighting,
-        rng: torch.Generator,
         device: torch.device = None,
         dtype: torch.dtype = torch.float32
     ) -> DenoisingModel:
@@ -194,12 +233,12 @@ def get_denoising_model(
 
     denoiser_args = get_denoiser_args(
         args=args,
-        input_shape=input_shape,
         input_channels=input_channels,
+        spatial_resolution=spatial_resolution,
+        time_cond=time_cond,
         denoiser=denoiser,
         noise_sampling=noise_sampling,
         noise_weighting=noise_weighting,
-        rng=rng,
         device=device,
         dtype=dtype
     )
@@ -209,11 +248,11 @@ def get_denoising_model(
 
 
 def create_denoiser(
-        args: ArgumentParser, 
-        input_shape: int,
+        args: ArgumentParser,
         input_channels: int,
         out_channels: int,
-        rng: torch.Generator,
+        spatial_resolution: Sequence[int],
+        time_cond: bool,
         device: torch.device = None,
         dtype: torch.dtype = torch.float32,
         buffer_dict: dict = None
@@ -221,8 +260,12 @@ def create_denoiser(
     """Get the denoiser and sampler if required"""
 
     model = get_model(
-        args, out_channels, 
-        rng, device,
+        args=args, 
+        in_channels=input_channels*2,
+        out_channels=out_channels,
+        spatial_resolution=spatial_resolution,
+        time_cond=time_cond,
+        device=device,
         buffer_dict=buffer_dict,
         dtype=dtype
     )
@@ -232,12 +275,12 @@ def create_denoiser(
 
     denoising_model = get_denoising_model(
         args=args,
-        input_shape=input_shape,
         input_channels=input_channels,
+        spatial_resolution=spatial_resolution,
+        time_cond=time_cond,
         denoiser=model,
         noise_sampling=noise_sampling,
         noise_weighting=noise_weighting,
-        rng=rng,
         device=device,
         dtype=dtype
     )
@@ -264,12 +307,11 @@ def create_callbacks(args: ArgumentParser, save_dir: str) -> Sequence[Callback]:
     ]
 
     if args.checkpoints:
-        callbacks.append(
-            TrainStateCheckpoint(
-                base_dir= save_dir,
-                save_every_n_step=args.save_every_n_steps
-            )
+        checkpoint_callback = TrainStateCheckpoint(
+            base_dir= save_dir,
+            save_every_n_step=args.save_every_n_steps
         )
+        callbacks.insert(0, checkpoint_callback)
     
     return tuple(callbacks)
 
@@ -298,10 +340,10 @@ def save_json_file(
         args: ArgumentParser, 
         time_cond: bool, 
         split_ratio: float,
-        input_shape: tuple[int],
-        out_shape: tuple[int],
+        out_shape: Sequence[int],
         input_channel: int,
         output_channel: int,
+        spatial_resolution: Sequence[int],
         device: torch.device = None,
         seed: int = None
     ):
@@ -316,12 +358,13 @@ def save_json_file(
         "split_ratio": split_ratio,
         "worker": args.worker,
         "time_cond": time_cond,
-        "input_shape": input_shape,
         "out_shape": out_shape,
         "input_channel": input_channel,
         "output_channel": output_channel,
+        "spatial_resolution": spatial_resolution,
         # model arguments
         "model_type": args.model_type,
+        "compile": args.compile,
         "num_heads": args.num_heads,
         # training arguments
         "use_mixed_precision": args.use_mixed_precision,
@@ -357,7 +400,7 @@ def replace_args(args: ArgumentParser, train_args: dict):
     """Replace parser arguments with used arguments during training.
     There is a skip list to avoid that every argument gets replaced."""
 
-    skip_list = ["dataset", "save_dir", "batch_size"]
+    skip_list = ["dataset", "save_dir", "batch_size", "compile"]
 
     for key, value in train_args.items():
         if key in skip_list:
@@ -373,7 +416,6 @@ def create_sampler(
         args: ArgumentParser,
         input_shape: int,
         denoise_fn: DenoiseFn,
-        rng: torch.Generator,
         device: torch.device = None,
         dtype: torch.dtype = torch.float32
     ) -> Sampler:
@@ -381,7 +423,6 @@ def create_sampler(
     scheme = get_diffusion_scheme(args, device)
 
     integrator = EulerMaruyama(
-        rng=rng, 
         time_axis_pos=args.time_axis_pos,
         terminal_only=args.terminal_only
     )
@@ -395,7 +436,6 @@ def create_sampler(
         denoise_fn=denoise_fn,
         tspan=tspan,
         integrator=integrator,
-        rng=rng,
         device=device,
         dtype=dtype
     )

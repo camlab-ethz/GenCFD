@@ -112,7 +112,10 @@ def add_model_options(parser: ArgumentParser):
     group.add_argument("--sigma_data", default=0.5, type=float,
                        help="This can be a fixed in [0, 1] or learnable parameter")
     group.add_argument("--resize_to_shape", default=None, type=parse_tuple,
-                       help="Choose a shape to resize inside the UNet")
+                       help="Choose a shape to resize inside the UNet. Necessary if dataset resolution changes")
+    # Compile model setting
+    group.add_argument('--compile', action='store_true', default=False,
+                       help='If True, model will be compiled. This allows for faster training and inference')
     
 
 def add_denoiser_options(parser: ArgumentParser):

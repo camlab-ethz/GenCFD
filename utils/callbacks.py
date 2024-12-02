@@ -21,14 +21,10 @@ import time
 from typing import Any, Optional
 
 import torch
-from torch import nn, optim
 from torch.utils.tensorboard import SummaryWriter
-import matplotlib.pyplot as plt
-import numpy as np
 import tqdm
 
-from train import train_states, trainers
-from utils import train_utils
+from train import trainers
 
 Tensor = torch.Tensor
 ComputedMetrics = Mapping[str, Tensor | Mapping[str, Tensor]]
@@ -141,9 +137,33 @@ class TrainStateCheckpoint(Callback):
     checkpoint_path = self._get_latest_checkpoint()
     if checkpoint_path:
       checkpoint = torch.load(checkpoint_path, weights_only=True)
+      
+      is_compiled = checkpoint['is_compiled'] # check if stored model was compiled
+      if is_compiled:
+        # stored model was compiled, thus the keys are stored with _orig_mod. and needs to be 
+        checkpoint['model_state_dict'] = {
+          key.replace('_orig_mod.', ''): value for key, value in checkpoint['model_state_dict'].items()
+        }
+
+      # Load stored states
       trainer.model.denoiser.load_state_dict(checkpoint['model_state_dict'])
       trainer.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
       trainer.train_state.step = checkpoint['step']
+      print("Continue Training from Checkpoint")
+    
+    # Check if model should be compiled for faster training
+    self.compile_model(trainer)
+  
+  def compile_model(self, trainer: Trainer) -> None:
+    """Model should be compiled!"""
+    if trainer.is_compiled:
+      print(f"Compile Model for Faster Training")
+      # set model first to train to avoid switches between train and eval
+      trainer.model.denoiser.train() 
+      # Compile model to speedup training time
+      compiled_denoiser = torch.compile(trainer.model.denoiser)
+      # replace denoiser in frozen dataclass
+      object.__setattr__(trainer.model, 'denoiser', compiled_denoiser)
 
   def on_train_batches_end(
       self, trainer: Trainer, train_metrics: ComputedMetrics
@@ -176,7 +196,8 @@ class TrainStateCheckpoint(Callback):
       'model_state_dict': trainer.model.denoiser.state_dict(),
       'optimizer_state_dict': trainer.optimizer.state_dict(),
       'step': step,
-      'metrics': metrics
+      'metrics': metrics,
+      'is_compiled': trainer.is_compiled
     }
     checkpoint_path = os.path.join(self.save_dir, f"checkpoint_{step}.pth")
     torch.save(checkpoint, checkpoint_path)

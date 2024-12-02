@@ -13,13 +13,16 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+"""Downsampling Stack for 2D Data Dimensions"""
+
 import torch
 import torch.nn as nn
-from typing import Any
+from typing import Any, Sequence
 
 from model.building_blocks.layers.convolutions import ConvLayer, DownsampleConv
 from model.building_blocks.blocks.convolution_blocks import ConvBlock, ResConv1x
 from model.building_blocks.blocks.attention_block import AttentionBlock
+from model.building_blocks.embeddings.position_emb import position_embedding
 from utils.model_utils import reshape_jax_torch, default_init
 
 Tensor = torch.Tensor
@@ -32,21 +35,31 @@ class DStack(nn.Module):
   for skip connections by the UStack module.
   """
 
-  def __init__(self, num_channels: tuple[int, ...], 
-               num_res_blocks: tuple[int, ...],
-               downsample_ratio: tuple[int, ...], 
-               rng: torch.Generator,
-               padding_method: str='circular', 
-               dropout_rate: float=0.0, 
-               use_attention: bool=False, 
-               num_heads: int=8,
-               channels_per_head: int=-1, 
-               use_positional_encoding: bool=False,
-               normalize_qk: bool=False, 
-               dtype: torch.dtype=torch.float32,
-               device: Any | None = None):
+  def __init__(
+      self, 
+      in_channels: int,
+      spatial_resolution: Sequence[int],
+      emb_channels: int,
+      num_channels: Sequence[int], 
+      num_res_blocks: Sequence[int],
+      downsample_ratio: Sequence[int], 
+      num_input_proj_channels: int = 128,
+      padding_method: str='circular', 
+      dropout_rate: float=0.0, 
+      use_attention: bool=False, 
+      num_heads: int=8,
+      channels_per_head: int=-1, 
+      use_position_encoding: bool=False,
+      normalize_qk: bool=False, 
+      dtype: torch.dtype=torch.float32,
+      device: Any | None = None
+    ):
     super(DStack, self).__init__()
 
+    self.in_channels = in_channels
+    self.kernel_dim = len(spatial_resolution)
+    self.num_input_proj_channels = num_input_proj_channels
+    self.emb_channels = emb_channels
     self.num_channels = num_channels
     self.num_res_blocks = num_res_blocks
     self.downsample_ratio = downsample_ratio
@@ -55,13 +68,27 @@ class DStack(nn.Module):
     self.use_attention = use_attention
     self.num_heads = num_heads
     self.channels_per_head = channels_per_head
-    self.use_positional_encoding = use_positional_encoding
+    self.use_position_encoding = use_position_encoding
     self.dtype = dtype
     self.normalize_qk = normalize_qk
     self.device = device
-    self.rng = rng
 
-    self.conv_layer = None
+    self.conv_layer = ConvLayer(
+      in_channels=self.in_channels,
+      out_channels=self.num_input_proj_channels,
+      kernel_size=self.kernel_dim * (3,),
+      padding_mode=self.padding_method,
+      padding=1,
+      case=self.kernel_dim,
+      kernel_init=default_init(1.0),
+      dtype=self.dtype,
+      device=self.device,
+    )
+
+    # Input channels for the downsampling layer
+    dsample_in_channels = [self.num_input_proj_channels, *self.num_channels[:-1]]
+    list_downsample_resolutions = [spatial_resolution]
+  
     self.dsample_layers = nn.ModuleList()
     self.conv_blocks = nn.ModuleList()
     self.pos_emb_layers = nn.ModuleList()
@@ -69,34 +96,69 @@ class DStack(nn.Module):
     self.res_conv_blocks = nn.ModuleList()
 
     for level, channel in enumerate(self.num_channels):
+      # Calculate the resolution at each level
+      downsampled_resolution = tuple([int(res / self.downsample_ratio[level]) for res in list_downsample_resolutions[-1]])
+      list_downsample_resolutions.append(downsampled_resolution)
+
       self.conv_blocks.append(nn.ModuleList())
-      self.dsample_layers.append(None)
+      self.dsample_layers.append(
+        DownsampleConv(
+          in_channels=dsample_in_channels[level],
+          out_channels=channel,
+          spatial_resolution=spatial_resolution,
+          ratios=(self.downsample_ratio[level],) * self.kernel_dim,
+          kernel_init=default_init(1.0),
+          case=self.kernel_dim,
+          device=self.device,
+          dtype=self.dtype,
+        )
+      )
 
       for block_id in range(self.num_res_blocks[level]):
-        self.conv_blocks[level].append(None)
+        self.conv_blocks[level].append(
+          ConvBlock(
+            in_channels=channel,
+            out_channels=channel,
+            emb_channels=self.emb_channels,
+            kernel_size=self.kernel_dim * (3,),
+            padding_mode=self.padding_method,
+            padding=1,
+            case=self.kernel_dim,
+            dropout=self.dropout_rate,
+            dtype=self.dtype,
+            device=self.device,
+          )
+        )
 
         if self.use_attention and level == len(self.num_channels) - 1:
-          self.pos_emb_layers.append(None)
+          if self.use_position_encoding:
+            self.pos_emb_layers.append(
+              position_embedding(
+                kernel_dim=self.kernel_dim,
+                in_shape=(channel,) + list_downsample_resolutions[-1]
+              ).to(self.device)
+            )
           self.attention_blocks.append(
             AttentionBlock(
-              rng=self.rng,
+              in_channels=channel,
               num_heads=self.num_heads, 
-              normalize_qk=normalize_qk, 
+              normalize_qk=self.normalize_qk, 
               dtype=self.dtype, 
               device=self.device
-              )
+            )
           )
           self.res_conv_blocks.append(
             ResConv1x(
+              in_channels=channel,
               hidden_layer_size=channel*2, 
               out_channels=channel,
-              rng=self.rng,
+              kernel_dim=1, # 1D due to token shape being (bs, l, c)
               dtype=self.dtype,
               device=self.device
-              )
+            )
           )
 
-  def forward(self, x: Tensor, emb: Tensor, is_training: bool) -> list[Tensor]:
+  def forward(self, x: Tensor, emb: Tensor) -> list[Tensor]:
     assert (
       len(self.num_channels)
       == len(self.num_res_blocks)
@@ -104,61 +166,24 @@ class DStack(nn.Module):
     )
     kernel_dim = len(x.shape) - 2
     skips = []
-    h = x.clone()
-
-    if self.conv_layer is None:
-      self.conv_layer = ConvLayer(
-        in_channels=h.shape[1],
-        out_channels=128,
-        kernel_size=kernel_dim * (3,),
-        padding_mode=self.padding_method,
-        rng=self.rng,
-        padding=1,
-        case=kernel_dim,
-        kernel_init=default_init(1.0),
-        dtype=self.dtype,
-        device=self.device,
-      )
     
-    h = self.conv_layer(h)
+    h = self.conv_layer(x)
     skips.append(h)
 
     for level, channel in enumerate(self.num_channels):
-
-      if self.dsample_layers[level] is None:
-        self.dsample_layers[level] = DownsampleConv(
-          in_channels=h.shape[1],
-          out_channels=channel,
-          ratios=(self.downsample_ratio[level],) * kernel_dim,
-          kernel_init=default_init(1.0),
-          rng=self.rng,
-          device=self.device,
-          dtype=self.dtype,
-        )
-
+      # Downsampling
       h = self.dsample_layers[level](h)
 
       for block_id in range(self.num_res_blocks[level]):
-
-        if self.conv_blocks[level][block_id] is None:
-          self.conv_blocks[level][block_id] = ConvBlock(
-            in_channels=h.shape[1],
-            out_channels=channel,
-            kernel_size=kernel_dim * (3,),
-            rng=self.rng,
-            padding_mode=self.padding_method,
-            padding=1,
-            case=len(h.shape)-2,
-            dropout=self.dropout_rate,
-            dtype=self.dtype,
-            device=self.device,
-          )
-        h = self.conv_blocks[level][block_id](h, emb, is_training=is_training)
+        # Convolution Block with const number of channels
+        h = self.conv_blocks[level][block_id](h, emb)
 
         if self.use_attention and level == len(self.num_channels) - 1:
+          if self.use_position_encoding:
+            h = self.pos_emb_layers[block_id](h)
           h = reshape_jax_torch(h) # (bs, width, height, c)
           b, *hw, c = h.shape
-          h = self.attention_blocks[block_id](h.reshape(b, -1, c), is_training)
+          h = self.attention_blocks[block_id](h.reshape(b, -1, c))
           # reshaping h first to get (bs, c, *hw), then in the end reshape again to get (bs, c, h, w)
           h = reshape_jax_torch(self.res_conv_blocks[block_id](reshape_jax_torch(h))).reshape(b, *hw, c)
           h = reshape_jax_torch(h)

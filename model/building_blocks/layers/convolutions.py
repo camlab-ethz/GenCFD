@@ -1,4 +1,5 @@
 # Copyright 2024 The swirl_dynamics Authors.
+# Modifications made by the CAM Lab at ETH Zurich.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -11,9 +12,6 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-#
-# Modifications made by CAM LAB, 09.2024.
-# Converted from JAX to PyTorch and made further changes.
 
 """Convolution layers."""
 
@@ -31,7 +29,6 @@ def ConvLayer(
     out_channels: int,
     kernel_size: int | Sequence[int],
     padding_mode: str,
-    rng: torch.Generator,
     padding: int = 0,
     stride: int = 1,
     use_bias: bool = True,
@@ -59,7 +56,6 @@ def ConvLayer(
     return LatLonConv(
       in_channels=in_channels,
       out_channels=out_channels,
-      rng=rng, 
       kernel_size=kernel_size, 
       order=padding_mode.lower(),
       dtype=dtype,
@@ -72,7 +68,6 @@ def ConvLayer(
       in_channels=in_channels,
       out_channels=out_channels,
       kernel_size=kernel_size,
-      rng=rng,
       padding=padding,
       stride=stride,
       use_bias=use_bias,
@@ -132,12 +127,11 @@ class ConvLocal2d(nn.Module):
                in_channels, 
                out_channels, 
                kernel_size, 
-               rng: torch.Generator,
-               stride = 1, 
-               padding = 0, 
-               padding_mode = 'constant', 
+               stride: int = 1, 
+               padding: int = 0, 
+               padding_mode: str = 'constant', 
                use_bias: bool = True,
-               device: Any | None = None,
+               device: torch.device = None,
                dtype: torch.dtype = torch.float32
                ):
     super(ConvLocal2d, self).__init__()
@@ -150,7 +144,6 @@ class ConvLocal2d(nn.Module):
     self.use_bias = use_bias
     self.device = device
     self.dtype = dtype
-    self.rng = rng
 
     # Weights for each spatial location (out_height x out_width)
     self.weights = None 
@@ -158,7 +151,7 @@ class ConvLocal2d(nn.Module):
     if self.use_bias:
       self.bias = nn.Parameter(
         torch.zeros(out_channels, dtype=self.dtype, device=self.device)
-        )
+      )
     else:
       self.bias = None
 
@@ -190,13 +183,13 @@ class ConvLocal2d(nn.Module):
           dtype=self.dtype
           )
       )
-      torch.nn.init.xavier_uniform_(self.weights, generator=self.rng)
+      torch.nn.init.xavier_uniform_(self.weights)
 
     output = torch.zeros(
       (batch_size, self.out_channels, out_height, out_width),
       dtype=self.dtype, 
       device=self.device
-      )
+    )
 
     # manually scripted convolution. 
     for i in range(out_height):
@@ -221,7 +214,6 @@ class LatLonConv(nn.Module):
       self, 
       in_channels: int,
       out_channels: int, 
-      rng: torch.Generator,
       kernel_size: tuple[int, int] = (3, 3), 
       order: Literal["latlon", "lonlat"] = "latlon", 
       use_bias: bool = True,
@@ -241,14 +233,12 @@ class LatLonConv(nn.Module):
     self.use_local = use_local
     self.dtype = dtype
     self.device = device
-    self.rng = rng
 
     if self.use_local:
       self.conv = ConvLocal2d(
         in_channels=self.in_channels,
         out_channels=self.out_channels,
         kernel_size=kernel_size,
-        rng=self.rng,
         stride=strides,
         bias=use_bias,
         dtype = self.dtype,
@@ -293,37 +283,63 @@ class LatLonConv(nn.Module):
 
 
 class DownsampleConv(nn.Module):
-  """Downsampling layer through strided convolution."""
+  """Downsampling layer through strided convolution.
+  
+  Arguments:
+    in_channels: number of input channels
+    out_channels: number of output channels
+    ratios: downsampling ratio for the resolution, increase of the channel dimension
+    case: dimensionality of the dataset, 1D, 2D and 3D (int: 1, 2, or 3)
+    use_bias:  If True, adds a learnable bias to the output. Default: True
+    kernel_init: initializations for the convolution weights
+    bias_init: initializtations for the convolution bias values
+  """
 
   def __init__(self, 
                in_channels: int,
-               out_channels: int, 
+               out_channels: int,
+               spatial_resolution: Sequence[int],
                ratios: Sequence[int],
-               rng: torch.Generator, 
+               case: int,
                use_bias: bool = True,
                kernel_init: Callable = torch.nn.init.kaiming_uniform_,
                bias_init: Callable = torch.nn.init.zeros_,
-               device: Any | None = None,
-               dtype: torch.dtype = torch.float32, 
-               **kwargs):
+               device: torch.device = None,
+               dtype: torch.dtype = torch.float32
+    ):
     super(DownsampleConv, self).__init__()
     self.in_channels = in_channels
     self.out_channels = out_channels
+    self.kernel_dim = len(spatial_resolution) # Spatial dimension of dataset
     self.ratios = ratios
     self.bias_init = bias_init
     self.dtype = dtype
     self.device = device
-    self.rng = rng
+
+    dataset_shape = self.kernel_dim + 2 # spatial resolution + channel + batch_size
+
+    # Check if input has the correct shape and size to be downsampled!
+    if dataset_shape <= len(self.ratios):
+      raise ValueError(
+        f"Inputs ({dataset_shape}) for downsampling must have at least 1 more dimension " 
+        f"than that of 'ratios' ({self.ratios})."
+      )
+
+    if not all(s % r == 0 for s, r in zip(spatial_resolution, self.ratios)):
+      raise ValueError(
+        f"Input dimensions (spatial) {spatial_resolution} must divide the "
+        f"downsampling ratio {self.ratios}."
+      )
 
     self.use_bias = use_bias
     if kernel_init is torch.nn.init.kaiming_uniform_:
-      self.kernel_init = functools.partial(kernel_init, a=np.sqrt(5), generator=self.rng)
+      self.kernel_init = functools.partial(kernel_init, a=np.sqrt(5))
     else:
       self.kernel_init = kernel_init
 
     # For downsampling padding = 0 and stride > 1
-    if len(ratios) == 1:
-      self.conv1d = nn.Conv1d(
+    if case == 1:
+      self.conv_layer = nn.Conv1d(
         in_channels=self.in_channels,
         out_channels=self.out_channels,
         kernel_size=ratios,
@@ -333,11 +349,9 @@ class DownsampleConv(nn.Module):
         device=self.device,
         dtype=self.dtype
       )
-      self.kernel_init(self.conv1d.weight)
-      self.bias_init(self.conv1d.bias)
 
-    elif len(ratios) == 2:
-      self.conv2d = nn.Conv2d(
+    elif case == 2:
+      self.conv_layer = nn.Conv2d(
         in_channels=self.in_channels,
         out_channels=self.out_channels,
         kernel_size=ratios,
@@ -347,13 +361,9 @@ class DownsampleConv(nn.Module):
         device=self.device,
         dtype=self.dtype
       )
-      # Initialize with variance_scaling
-      # Only use this if the activation function is ReLU or smth. similar
-      self.kernel_init(self.conv2d.weight)
-      self.bias_init(self.conv2d.bias)
 
-    elif len(ratios) == 3:
-      self.conv3d = nn.Conv3d(
+    elif case == 3:
+      self.conv_layer = nn.Conv3d(
         in_channels=self.in_channels,
         out_channels=self.out_channels,
         kernel_size=ratios,
@@ -363,34 +373,16 @@ class DownsampleConv(nn.Module):
         device=self.device,
         dtype=self.dtype
       )
-      self.kernel_init(self.conv3d.weight)
-      self.bias_init(self.conv3d.bias)
     else:
-      raise ValueError(f"Ratio lengths should either be 1D, 2D or 3D")
+      raise ValueError(f"Dataset dimension should either be 1D, 2D or 3D")
+    
+    # Initialize with variance_scaling
+    # Only use this if the activation function is ReLU or smth. similar
+    self.kernel_init(self.conv_layer.weight)
+    self.bias_init(self.conv_layer.bias)
     
     
   def forward(self, inputs):
     """Applies strided convolution for downsampling."""
 
-    if len(inputs.shape) <= len(self.ratios):
-      raise ValueError(
-        f"Inputs ({inputs.shape}) must have at least 1 more dimension " 
-        f"than that of 'ratios' ({self.ratios})."
-      )
-
-    batch_ndims = len(inputs.shape) - len(self.ratios) - 1
-    spatial_shape = inputs.shape[batch_ndims:-1]
-    if not all(s % r == 0 for s, r in zip(spatial_shape, self.ratios)):
-      raise ValueError(
-        f"Input dimensions (spatial) {spatial_shape} must divide the "
-        f"downsampling ratio {self.ratios}."
-      )
-    
-    if len(inputs.shape) == 5:
-      return self.conv3d(inputs)
-    elif len(inputs.shape) == 4:
-      return self.conv2d(inputs)
-    elif len(inputs.shape) == 3:
-      return self.conv1d(inputs)
-    else:
-      raise ValueError(f"Input Dimension must be either 3D (bs, c, x), 4D (bs, c, y, x) or 5D (bs, c, z, y, x)")
+    return self.conv_layer(inputs)

@@ -15,30 +15,38 @@
 """Main File to run Training for GenCFD."""
 
 import time
-
 import os
+# Set the cache size and debugging for torch.compile before importing torch
+# os.environ["TORCH_LOGS"] = "all"  # or any of the valid log settings
 import torch
 from torch import optim
 from torch.utils.tensorboard import SummaryWriter
 
 from train import training_loop
 from utils.gencfd_utils import (
-    get_dataset_loader, 
-    get_dataset, 
+    get_dataset_loader,
+    get_buffer_dict,
     create_denoiser,
     create_callbacks,
     save_json_file
 )
 from utils.parser_utils import train_args
 
-
+torch.set_float32_matmul_precision('high') # Better performance on newer GPUs!
+torch.backends.cudnn.benchmark = True
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 SEED = 0
-RNG = torch.Generator(device=device)
-RNG.manual_seed(SEED)
+
+# Setting global seed for reproducibility
+torch.manual_seed(SEED)  # For CPU operations
+torch.cuda.manual_seed(SEED)  # For GPU operations
+torch.cuda.manual_seed_all(SEED)  # Ensure all GPUs (if multi-GPU) are set
 
 if __name__ == "__main__":
+    print(" ")
+    print(f'Used device {device}')
 
+    # get arguments for training
     args = train_args()
 
     cwd = os.getcwd()
@@ -50,73 +58,50 @@ if __name__ == "__main__":
         print(f"Created a directory to store metrics and models: {savedir}")
 
     split_ratio = 0.8
-    train_dataloader, eval_dataloader = get_dataset_loader(
+    train_dataloader, eval_dataloader, dataset, time_cond = get_dataset_loader(
         name=args.dataset, 
         batch_size=args.batch_size, 
         num_worker=args.worker, 
         split=True,
-        split_ratio=split_ratio,
-        device=device
+        split_ratio=split_ratio
     )
 
-    dataset, time_cond = get_dataset(name=args.dataset, device=device, is_time_dependent=True)
-
-    # Get input shape ant output shape and check whether the lead time is included
-    if time_cond:
-        batch = dataset.__getitem__(0)
-        lead_time, inputs = batch['lead_time'], batch['data']
-        input_shape = inputs.shape
-    else:
-        input_shape = dataset.__getitem__(0).shape
-    
-    out_shape = (dataset.output_channel,) + tuple(input_shape[1:])
-
-    # extract normalization values from the used dataset, these can also be computed if not provided!
-    # these values are then stored inside the NN model in buffers, so they don't get updated
-    mean_training_input = torch.tensor(dataset.mean_training_input, dtype=args.dtype, device=device)
-    mean_training_output = torch.tensor(dataset.mean_training_output, dtype=args.dtype, device=device)
-    std_training_input = torch.tensor(dataset.std_training_input, dtype=args.dtype, device=device)
-    std_training_output = torch.tensor(dataset.std_training_output, dtype=args.dtype, device=device)
-
-    buffer_dict = {
-        'mean_training_input': mean_training_input,
-        'mean_training_output': mean_training_output,
-        'std_training_input': std_training_input,
-        'std_training_output': std_training_output
-    }
+    # Create a buffer dictionary to store normalization parameters in the NN
+    buffer_dict = get_buffer_dict(dataset=dataset, device=device)
 
     # Save parameters in a JSON File
     save_json_file(
         args=args, 
         time_cond=time_cond, 
         split_ratio=split_ratio,
-        input_shape=input_shape,
-        out_shape=out_shape, 
+        out_shape=dataset.output_shape, # output shape of the prediction 
         input_channel=dataset.input_channel,
         output_channel=dataset.output_channel,
+        spatial_resolution=dataset.spatial_resolution,
         device=device, 
         seed=SEED
     )
 
-    print(" ")
-    print("Denoiser Initialization")
-
     denoising_model = create_denoiser(
         args=args,
-        input_shape=input_shape,
         input_channels=dataset.input_channel,
         out_channels=dataset.output_channel,
-        rng=RNG,
+        spatial_resolution=dataset.spatial_resolution,
+        time_cond=time_cond,
         device=device,
         dtype=args.dtype,
         buffer_dict=buffer_dict
     )
-
-    denoising_model.initialize(batch_size=args.batch_size, time_cond=time_cond)
+    
+    with torch.no_grad():
+        # Warmup round to check if model is running as intended
+        denoising_model.initialize(batch_size=args.batch_size, time_cond=time_cond)
 
     # Print number of Parameters:
     model_params = sum(p.numel() for p in denoising_model.denoiser.parameters() if p.requires_grad)
+    print(" ")
     print(f"Total number of model parameters: {model_params}")
+    print(" ")
 
     trainer = training_loop.trainers.DenoisingTrainer(
         model=denoising_model,
@@ -126,8 +111,10 @@ if __name__ == "__main__":
             weight_decay=args.weight_decay),    
         device=device,
         ema_decay=args.ema_decay,
+        store_ema=False, # Changed manually
         track_memory=args.track_memory,
-        use_mixed_precision=args.use_mixed_precision
+        use_mixed_precision=args.use_mixed_precision,
+        is_compiled=args.compile
     )
 
     start_train = time.time()
@@ -139,10 +126,12 @@ if __name__ == "__main__":
         total_train_steps=args.num_train_steps,
         metric_writer=SummaryWriter(log_dir=savedir),
         metric_aggregation_steps=args.metric_aggregation_steps,
-        eval_dataloader=eval_dataloader,
+        # Only do evaluation while training if the model is not compiled
+        eval_dataloader=eval_dataloader if not args.compile else None, 
         eval_every_steps=args.eval_every_steps,
         num_batches_per_eval=args.num_batches_per_eval,
-        callbacks=create_callbacks(args, savedir)
+        callbacks=create_callbacks(args, savedir),
+        compile_model=args.compile
     )
 
     end_train = time.time()

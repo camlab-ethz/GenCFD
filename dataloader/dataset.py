@@ -11,7 +11,6 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
 """
 File contains all the used datasets. The keyword IC is a characterization of 
 incompressible flows. 
@@ -38,11 +37,10 @@ class TrainingSetBase:
     def __init__(self,
                  training_samples: int,
                  start: int = 0,
-                 device: torch.device = None) -> None:
+    ) -> None:
         
         self.start = start
         self.training_samples = training_samples
-        self.device = device
         self.rand_gen = np.random.RandomState(seed = 4)
     
         self.mean_training_input = None
@@ -116,20 +114,22 @@ class TrainingSetBase:
 class DataIC_Vel(TrainingSetBase):
     def __init__(self, 
                  start: int = 0,
-                 file: str = None,
-                 device: torch.device = None):
+                 file: str = None):
         
         self.class_name = self.__class__.__name__
         self.input_channel = 2
         self.output_channel = 2
-        self.spatial_dim = 2
+        self.spatial_resolution = (128, 128)
+        self.input_shape = (4, 128, 128)
+        self.output_shape = (2, 128, 128)
+        
         
         if file is None:
             self.file = netCDF4.Dataset(f'{DIR_PATH_LOADER}/ddsl_fast_nothing_128_tr2.nc', mode='r')
         else:
             self.file = file
 
-        super().__init__(start = start, device=device, training_samples=self.file['data'].shape[0])
+        super().__init__(start = start, training_samples=self.file['data'].shape[0])
         
         self.mean_training_input = np.array([8.0606696e-08, 4.8213877e-11])
         self.std_training_input = np.array([0.19003302, 0.13649726])
@@ -147,15 +147,22 @@ class DataIC_Vel(TrainingSetBase):
         data_input = self.normalize_input(data_input)
         data_output = self.normalize_output(data_output)
 
-        model_input = torch.cat(
-            [torch.as_tensor(data_input, dtype=torch.float32, device=self.device), 
-             torch.as_tensor(data_output, dtype=torch.float32, device=self.device)], 
-            dim=-1
+        initial_cond = (
+            torch.from_numpy(data_input)
+            .type(torch.float32)
+            .permute(2, 1, 0)
         )
 
-        model_input = model_input.permute(2, 1, 0)
+        target_cond = (
+            torch.from_numpy(data_output)
+            .type(torch.float32)
+            .permute(2, 1, 0)
+        )
 
-        return model_input
+        return {
+            'initial_cond': initial_cond,
+            'target_cond': target_cond
+        }
     
 #################### 3D SHEAR LAYER DATASETS ####################
 
@@ -163,12 +170,14 @@ class DataIC_3D_Time(TrainingSetBase):
     def __init__(
             self,
             start=0,
-            device=None,
             file = None
         ):
 
         self.input_channel = 3
         self.output_channel = 3
+        self.spatial_resolution = (64, 64, 64)
+        self.input_shape = (6, 64, 64, 64)
+        self.output_shape = (3, 64, 64, 64)
 
         if file is None:
             if start == 0:
@@ -178,7 +187,7 @@ class DataIC_3D_Time(TrainingSetBase):
 
         self.file = netCDF4.Dataset(self.file_path, 'r')
 
-        super().__init__(start=start, device=device, training_samples=self.file.variables['data'].shape[0])
+        super().__init__(start=start, training_samples=self.file.variables['data'].shape[0])
 
         self.n_all_steps = 10
         self.start = self.start // self.n_all_steps
@@ -201,19 +210,24 @@ class DataIC_3D_Time(TrainingSetBase):
         data_input = self.normalize_input(data[0])
         data_output = self.normalize_output(data[1])
 
-        inputs = np.concatenate((data_input, data_output), -1)
+        initial_cond = (
+            torch.from_numpy(data_input)
+            .type(torch.float32)
+            .permute(3, 2, 1, 0)
+        )
+        target_cond = (
+            torch.from_numpy(data_output)
+            .type(torch.float32)
+            .permute(3, 2, 1, 0)
+        )
 
         return {
-            'lead_time': torch.tensor(lead_time, dtype=torch.float32, device=self.device), 
-            'data': torch.tensor(inputs, dtype=torch.float32, device=self.device).permute(3, 2, 1, 0)
+            'lead_time': torch.tensor(lead_time, dtype=torch.float32), 
+            'initial_cond': initial_cond,
+            'target_cond': target_cond
         }
-
-    def collate_tf(self, time, data):
-        return {"lead_time": time, "data": data}
-
-    def get_proc_data(self, data):
-        return data["data"]
     
+
 
 #################### 3D TAYLOR GREEN VORTEX DATASET ####################
 
@@ -222,21 +236,30 @@ class DataIC_3D_Time_TG(TrainingSetBase):
     def __init__(
             self,
             start: int = 0,
-            device: torch.device = None,
             file: str = None,
             min_time: int = 0,
             max_time: int = 5
     ):
 
         if file is None:
-            self.file_path = '/cluster/work/math/camlab-data/data/incompressible/tg/N128_64.nc'
+            tmpdir_file_path = os.path.join(os.environ.get('TMPDIR', ''), 'N128_64.nc')
+            if os.path.exists(tmpdir_file_path):
+                print(f"Using file from local scratch: {tmpdir_file_path}")
+                self.file_path = tmpdir_file_path
+            else:
+                print("Using default file path")
+                self.file_path = '/cluster/work/math/camlab-data/data/incompressible/tg/N128_64.nc'
 
         self.file = netCDF4.Dataset(self.file_path, 'r')
 
-        super().__init__(start=start, device=device, training_samples=self.file.variables['u'].shape[0])
+        super().__init__(start=start, training_samples=self.file.variables['u'].shape[0])
 
         self.input_channel = 3
         self.output_channel = 3
+
+        self.spatial_resolution = (64, 64, 64)
+        self.input_shape = (6, 64, 64, 64)
+        self.output_shape = (3, 64, 64, 64)
 
         # these stats can be used to get the mean and std for normalization
         training_stats_path = f"/cluster/work/math/camlab-data/data/diffusion_project/TrainingStats_nothing_DataIC_3D_Time_TG"
@@ -245,10 +268,8 @@ class DataIC_3D_Time_TG(TrainingSetBase):
         mean_data = np.load(mean_stats_path)
         std_data = np.load(std_stats_path)
 
-        breakpoint()
         mean_vals = mean_data.mean(axis=(0, 1, 2)) # mean over all channels
-        # std_vals = std_data.std(axis=(0, 1, 2)) # std over all channels
-        std_vals = np.mean(std_data * 2, (0, 1, 2)) ** 0.5
+        std_vals = np.mean(std_data ** 2, (0, 1, 2)) ** 0.5 # std over all channels
 
         # first 3 channels are for the initial conditions
         self.mean_training_input = mean_vals[:self.input_channel] 
@@ -256,8 +277,6 @@ class DataIC_3D_Time_TG(TrainingSetBase):
         # last 3 channels are for the output (results)
         self.mean_training_output = mean_vals[self.input_channel:]
         self.std_training_output = std_vals[self.input_channel:]
-
-        breakpoint()
 
         self.min_time = min_time
         self.max_time = max_time
@@ -298,16 +317,23 @@ class DataIC_3D_Time_TG(TrainingSetBase):
         lead_time = float(t_final - t_initial)
         lead_time_normalized = 0.25 + 0.4375 * (lead_time - 1)
 
+        initial_cond = (
+            torch.from_numpy(initial_condition)
+            .type(torch.float32)
+            .permute(3, 2, 1, 0)
+        )
+
+        target_cond = (
+            torch.from_numpy(final_condition)
+            .type(torch.float32)
+            .permute(3, 2, 1, 0)
+        )
+
         return {
-            'lead_time': torch.tensor(lead_time_normalized, dtype=torch.float32, device=self.device), 
-            'data': torch.tensor(output_tensor, dtype=torch.float32, device=self.device).permute(3, 2, 1, 0) #(c, z, y, x)
+            'lead_time': torch.tensor(lead_time_normalized, dtype=torch.float32), 
+            'initial_cond': initial_cond,
+            'target_cond': target_cond
         }
-
-    def collate_tf(self, time, data):
-        return {"lead_time": time, "data": data}
-
-    def get_proc_data(self, data):
-        return data["data"]
 
 
 #################### CONDITIONAL DATASETS FOR EVALUATON ####################
@@ -325,14 +351,13 @@ class ConditionalBase(TrainingSetBase):
     def __init__(self,
                  training_samples: int,
                  start: int = 0,
-                 device: torch.device = None,
                  micro_perturbation: int = 0,
                  macro_perturbation: int = 0,
                  file_path: str = None,
                  stat_folder: str = None,
                  t_final: int = None) -> None : 
 
-        super().__init__(training_samples=training_samples, start=start, device=device)
+        super().__init__(training_samples=training_samples, start=start)
 
         self.micro_perturbation = micro_perturbation
         self.macro_perturbation = macro_perturbation
@@ -389,11 +414,14 @@ class ConditionalBase(TrainingSetBase):
 #--------------------------------------
 
 class ConditionalDataIC_Vel(ConditionalBase):
-    def __init__(self, device: torch.device = None):
+    def __init__(self):
         
         self.input_channel = 2
         self.output_channel = 2
-        self.spatial_dim = 2
+
+        self.spatial_resolution = (128, 128)
+        self.input_shape = (4, 128, 128)
+        self.output_shape = (2, 128, 128)
         
         file_path = f'{DIR_PATH_LOADER}/macro_micro_id_2d.nc'
         stat_folder = f'{DIR_PATH_LOADER}/GroundTruthStats_ConditionalDataIC_Vel_nothing_128_10000'
@@ -406,7 +434,6 @@ class ConditionalDataIC_Vel(ConditionalBase):
 
         super().__init__(training_samples=training_samples,
                          start=self.start_index,
-                         device=device,
                          micro_perturbation = 1000,
                          macro_perturbation = 10,
                          file_path = file_path,
@@ -425,21 +452,34 @@ class ConditionalDataIC_Vel(ConditionalBase):
         data_input = datum[0, ..., :self.input_channel]
         data_output = datum[-1, ..., :self.output_channel]
 
-        model_input = torch.cat(
-            [torch.as_tensor(data_input, dtype=torch.float32), 
-             torch.as_tensor(data_output, dtype=torch.float32)], 
-            dim=-1
+        initial_cond = (
+            torch.from_numpy(data_input)
+            .type(torch.float32)
+            .permute(2, 1, 0)
         )
-        model_input = model_input.permute(2, 1, 0)
+        target_cond = (
+            torch.from_numpy(data_output)
+            .type(torch.float32)
+            .permute(2, 1, 0)
+        )
 
-        return model_input
+        return {
+            # lead time needs to be changed depending on your start index
+            'lead_time': torch.tensor(1., dtype=torch.float32),
+            'initial_cond': initial_cond,
+            'target_cond': target_cond
+        }
     
 
 class ConditionalDataIC_3D(ConditionalBase):
-    def __init__(self, device: torch.device = None):
+    def __init__(self):
 
         self.input_channel = 3
         self.output_channel = 3
+
+        self.spatial_resolution = (64, 64, 64)
+        self.input_shape = (6, 64, 64, 64)
+        self.output_shape = (3, 64, 64, 64)
 
         self.macro_perturbation = 10
         self.micro_perturbation = 1000
@@ -457,11 +497,9 @@ class ConditionalDataIC_3D(ConditionalBase):
 
         super().__init__(
             training_samples=training_samples,
-            device=device,
             micro_perturbation=micro_perturbations,
             macro_perturbation=macro_perturbations,
             file_path=self.file_path,
-            # stat_folder=stat_folder,
         )
 
         # Set the same mean and std values as for training DataIC_3D_Time
@@ -480,21 +518,35 @@ class ConditionalDataIC_3D(ConditionalBase):
         data_input = datum[0]
         data_output = datum[-1]
 
-        model_input = torch.cat(
-            [torch.as_tensor(data_input, dtype=torch.float32), 
-             torch.as_tensor(data_output, dtype=torch.float32)], 
-            dim=-1
+        initial_cond = (
+            torch.from_numpy(data_input)
+            .type(torch.float32)
+            .permute(3, 2, 1, 0)
         )
-        model_input = model_input.permute(3, 2, 1, 0)
 
-        return model_input
-    
+        target_cond = (
+            torch.from_numpy(data_output)
+            .type(torch.float32)
+            .permute(3, 2, 1, 0)
+        )
+
+        return {
+            # lead_time needs to be changed depending on your start index
+            'lead_time': torch.tensor(1., dtype=torch.float32),
+            'initial_cond': initial_cond,
+            'target_cond': target_cond
+        }
+
 
 class ConditionalDataIC_3D_TG(ConditionalBase):
-    def __init__(self, device: torch.device = None, t_final: int = 5):
+    def __init__(self, t_final: int = 5):
 
         self.input_channel = 3
         self.output_channel = 3
+
+        self.spatial_resolution = (64, 64, 64)
+        self.input_shape = (6, 64, 64, 64)
+        self.output_shape = (3, 64, 64, 64)
 
         self.t_final = t_final
 
@@ -504,9 +556,8 @@ class ConditionalDataIC_3D_TG(ConditionalBase):
         self.file_path = '/cluster/work/math/camlab-data/data/incompressible/tg/micro_ref_sol_N128_64.nc'
         print(f"Start dataset from index {self.start}. Getting data from {self.file_path}")
         self.data = netCDF4.Dataset(self.file_path, 'r')
-        
-        # Shape: (6, 64, 64, 64)
-        u_shape = self.data.variables['u'].shape 
+
+        u_shape = self.data.variables['u'].shape  # Shape: (6, 64, 64, 64)
         v_shape = self.data.variables['v'].shape
         w_shape = self.data.variables['w'].shape
         assert (u_shape == v_shape == w_shape), "Data needs to align in terms of shape!"
@@ -519,7 +570,6 @@ class ConditionalDataIC_3D_TG(ConditionalBase):
         super().__init__(
             training_samples=training_samples,
             start=self.start,
-            device=device,
             micro_perturbation=micro_perturbations,
             macro_perturbation=macro_perturbations,
             file_path=self.file_path,
@@ -546,16 +596,28 @@ class ConditionalDataIC_3D_TG(ConditionalBase):
         # Shape: (64, 64, 64, 3)
         data_output = np.stack((u_data, v_data, w_data), axis=-1) 
 
-        # Shape: (64, 64, 64, 6)
-        model_input = torch.cat(
-            [torch.tensor(data_input, dtype=torch.float32, device=self.device), 
-             torch.tensor(data_output, dtype=torch.float32, device=self.device)], 
-            dim=-1
+        initial_cond = (
+            torch.from_numpy(data_input)
+            .type(torch.float32)
+            .permute(3, 2, 1, 0)
         )
-        # Final Shape: (6, 64, 64, 64)
-        model_input = model_input.permute(3, 2, 1, 0)
+
+        target_cond = (
+            torch.from_numpy(data_output)
+            .type(torch.float32)
+            .permute(3, 2, 1, 0)
+        )
+
+        lead_time = float(self.t_final - self.start_index)
+        # lead_time goes from 0 to 2
+        lead_time_normalized = 0.25 + 0.4375 * (lead_time - 1)
         
-        return model_input
+        return {
+            'lead_time': torch.tensor(lead_time_normalized, dtype=torch.float32),
+            'initial_cond': initial_cond,
+            'target_cond': target_cond
+        }
+    
     
     def set_true_stats_for_macro(self, macro_idx):
         file_name = f"/cluster/work/math/camlab-data/data/diffusion_project/GroundTruthStats_ConditionalDataIC_3D_TG_nothing_64_80000_{self.t_final}/Stats_{macro_idx}.nc"

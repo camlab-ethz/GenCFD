@@ -70,10 +70,9 @@ class SdeSolver(nn.Module):
         returns the full path containing all steps.
     """
 
-    def __init__(self, rng: torch.Generator, terminal_only: bool = False):
+    def __init__(self, terminal_only: bool = False):
         super().__init__()
         self.terminal_only = terminal_only
-        self.rng = rng
 
     def forward(
             self,
@@ -91,8 +90,6 @@ class SdeSolver(nn.Module):
           x0: Initial condition.
           tspan: The sequence of time points on which the approximate solution
             of the SDE are evaluated. The first entry corresponds to the time for x0.
-          rng: A PyTorch generator used to draw realizations of the Wiener processes
-            for the SDE.
 
         Returns:
           Integrated SDE trajectory (initial condition included at time position 0).
@@ -110,12 +107,10 @@ class IterativeSdeSolver(nn.Module):
 
     def __init__(
             self,
-            rng: torch.Generator = None,
             time_axis_pos: int = 0, 
             terminal_only: bool = False
     ):
         super().__init__()
-        self.rng = rng if rng is not None else torch.Generator().manual_seed(0)
         self.time_axis_pos = time_axis_pos
         self.terminal_only = terminal_only
 
@@ -177,10 +172,6 @@ class IterativeSdeSolver(nn.Module):
 class EulerMaruyamaStep(nn.Module):
     """The Euler-Maruyama scheme for integrating the Ito SDE"""
 
-    def __init__(self, rng: torch.Generator = None):
-        super().__init__()
-        self.rng = rng if rng is not None else torch.Generator().manual_seed(0)
-
     def step(
             self,
             dynamics: SdeDynamics,
@@ -193,7 +184,7 @@ class EulerMaruyamaStep(nn.Module):
     ) -> Tensor:
         """Makes one Euler-Maruyama integration step in time."""
         _check_sde_params_fields(params)
-
+        # drift_coeffs = dynamics.drift(x0, y, t0, params["drift"], lead_time)
         drift_coeffs = output_drift(
             drift=dynamics.drift,
             x=x0,
@@ -205,7 +196,7 @@ class EulerMaruyamaStep(nn.Module):
         diffusion_coeffs = dynamics.diffusion(x0, t0, params["diffusion"])
 
         noise = torch.randn(
-            size=x0.shape, generator=self.rng, dtype=x0.dtype, device=x0.device
+            size=x0.shape, dtype=x0.dtype, device=x0.device
         )
         return (
             x0 + 
@@ -217,15 +208,14 @@ class EulerMaruyamaStep(nn.Module):
 class EulerMaruyama(EulerMaruyamaStep, IterativeSdeSolver):
     """Solver using the Euler-Maruyama with iteration (i.e. looping through time steps)."""
     def __init__(
-            self, 
-            rng: torch.Generator = None, 
+            self,
             time_axis_pos: int = 0, 
             terminal_only: bool = False
         ):
         super().__init__()
-        EulerMaruyamaStep.__init__(self, rng=rng)
+        # EulerMaruyamaStep.__init__(self, rng=rng)
         IterativeSdeSolver.__init__(
-            self, rng=rng, time_axis_pos=time_axis_pos, terminal_only=terminal_only
+            self, time_axis_pos=time_axis_pos, terminal_only=terminal_only
         )
 
 

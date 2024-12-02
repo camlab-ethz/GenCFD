@@ -42,6 +42,8 @@ def run(
     # other configs
     metric_writer: Optional[SummaryWriter] = None,
     callbacks: Sequence[cb.Callback] = (),
+    # model configs
+    compile_model: bool = False
 ) -> None:
   """Runs trainer for a training task.
 
@@ -74,6 +76,7 @@ def run(
       also accessible to callbacks for custom writing in other formats.
     callbacks: A sequence of self-contained programs executing non-essential
       logic (e.g. checkpoint saving, logging, timing, profiling etc.).
+    compile_model: For faster training the model can be compiled with torch.compile()
   """
   if not os.path.exists(workdir):
     os.makedirs(workdir)

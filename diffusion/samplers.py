@@ -130,7 +130,6 @@ class Sampler:
       guidance_transforms: Sequence[guidance.Transform] = (),
       apply_denoise_at_end: bool = True,
       return_full_paths: bool = False,
-      rng: torch.Generator = None,
       device: torch.device = None,
       dtype: torch.dtype = torch.float32,
   ):
@@ -141,7 +140,6 @@ class Sampler:
     self.guidance_transforms = guidance_transforms
     self.apply_denoise_at_end = apply_denoise_at_end
     self.return_full_paths = return_full_paths
-    self.rng = rng
     self.device = device
     self.dtype = dtype
 
@@ -157,7 +155,6 @@ class Sampler:
 
     Args:
       num_samples: The number of samples to generate in a single batch.
-      rng: The base rng for the generation process.
       cond: Explicit conditioning inputs for the denoising function. These
         should be provided **without** batch dimensions (one should be added
         inside this function based on `num_samples`).
@@ -174,12 +171,10 @@ class Sampler:
       raise ValueError("`tspan` must be a 1-d Tensor.")
 
     x_shape = (num_samples,) + self.input_shape
-    x1 = torch.randn(x_shape, dtype=self.dtype, device=self.device, generator=self.rng)
+    x1 = torch.randn(x_shape, dtype=self.dtype, device=self.device)
     x1 = x1 * self.scheme.sigma(self.tspan[0]) * self.scheme.scale(self.tspan[0])
 
-    # TODO: Check if cond is really needed!
     if cond is not None:
-      # cond = jax.tree.map(lambda x: jnp.stack([x] * num_samples, axis=0), cond)
       cond = {k: v.repeat(num_samples, *([1] * (v.dim() - 1))) for k, v in cond.items()}
     
     denoised = self.denoise(
@@ -202,6 +197,11 @@ class Sampler:
         y=y,
         lead_time=lead_time
       )
+      # samples = denoise_fn(
+      #   samples / self.scheme.scale(self.tspan[-1]),
+      #   self.scheme.sigma(self.tspan[-1]),
+      #   cond,
+      # )
 
       if self.return_full_paths:
         denoised = torch.cat([denoised, samples.unsqueeze(0)], axis=0)
@@ -222,7 +222,6 @@ class Sampler:
     Args:
       noisy: A batch of noisy states (all at the same noise level). Can be fully
         noisy or partially denoised.
-      rng: Base Jax rng for denoising.
       tspan: A decreasing sequence of diffusion time steps within the interval
         [1, 0). The first element aligns with the time step of the `noisy`
         input.
@@ -263,7 +262,6 @@ class SdeSampler(Sampler):
       guidance_transforms: Sequence[guidance.Transform] = (),
       apply_denoise_at_end: bool = True,
       return_full_paths: bool = False,
-      rng: torch.Generator = None,
       device: torch.device = None,
       dtype: torch.dtype = torch.float32,
   ):
@@ -275,7 +273,6 @@ class SdeSampler(Sampler):
       guidance_transforms=guidance_transforms,
       apply_denoise_at_end=apply_denoise_at_end,
       return_full_paths=return_full_paths,
-      rng=rng,
       device=device,
       dtype=dtype
     )
@@ -292,7 +289,7 @@ class SdeSampler(Sampler):
   ) -> Tensor:
     """Applies iterative denoising to given noisy states."""
     if self.integrator is None:
-      self.integrator = sde.EulerMaruyama(rng=self.rng, terminal_only=True)
+      self.integrator = sde.EulerMaruyama(terminal_only=True)
 
     if self.integrator.terminal_only and self.return_full_paths:
       raise ValueError(
@@ -354,11 +351,9 @@ class SdeSampler(Sampler):
       x_hat = x / s
       if not t.requires_grad:
         t.requires_grad_(True)
-        
       dlog_sigma_dt = dlog_dt(self.scheme.sigma)(t)
       dlog_s_dt = dlog_dt(self.scheme.scale)(t)
       drift = (2 * dlog_sigma_dt + dlog_s_dt) * x
-
       denoiser_output = denoise_fn_output(
         denoise_fn=denoise_fn,
         x=x_hat,
@@ -367,7 +362,7 @@ class SdeSampler(Sampler):
         y=y,
         lead_time=lead_time
       )
-
+      # denoise_fn(x_hat, sigma, params["cond"])
       drift = drift - 2 * dlog_sigma_dt * s * denoiser_output 
       return drift
 

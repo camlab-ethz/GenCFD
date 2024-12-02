@@ -1,4 +1,21 @@
-from typing import Tuple, Any
+# Copyright 2024 The swirl_dynamics Authors.
+# Modifications made by the CAM Lab at ETH Zurich.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""Upsampling Stack for 2D Data Dimensions"""
+
+from typing import Tuple, Any, Sequence
 import numpy as np
 import torch
 import torch.nn as nn
@@ -11,7 +28,7 @@ from model.building_blocks.layers.residual import CombineResidualWithSkip
 from model.building_blocks.layers.convolutions import ConvLayer
 from model.building_blocks.blocks.convolution_blocks import ConvBlock, ResConv1x
 from model.building_blocks.blocks.attention_block import AttentionBlock
-from utils.model_utils import channel_to_space, reshape_jax_torch, default_init
+from utils.model_utils import reshape_jax_torch, default_init
 
 Tensor = torch.Tensor
 
@@ -34,160 +51,194 @@ class UStack(nn.Module):
         channels_per_head: Number of channels per head.
         dtype: Data type.
     """
-    def __init__(self, num_channels: tuple[int, ...], 
-                 num_res_blocks: tuple[int, ...],
-                 upsample_ratio: tuple[int, ...],
-                 rng: torch.Generator,
-                 padding_method: str = 'circular', 
-                 dropout_rate: float = 0.0, 
-                 use_attention: bool = False, 
-                 num_heads: int = 8, 
-                 channels_per_head: int = -1, 
-                 normalize_qk: bool = False,
-                 dtype: torch.dtype=torch.float32,
-                 device: Any | None = None):
+    def __init__(
+            self, 
+            spatial_resolution: Sequence[int],
+            emb_channels: int,
+            num_channels: Sequence[int], 
+            num_res_blocks: Sequence[int],
+            upsample_ratio: Sequence[int],
+            padding_method: str = 'circular', 
+            dropout_rate: float = 0.0, 
+            use_attention: bool = False, 
+            num_input_proj_channels: int = 128,
+            num_output_proj_channels: int = 128,
+            num_heads: int = 8, 
+            channels_per_head: int = -1, 
+            normalize_qk: bool = False,
+            dtype: torch.dtype=torch.float32,
+            device: torch.device = None
+        ):
         super(UStack, self).__init__()
 
+        self.kernel_dim = len(spatial_resolution)
+        self.emb_channels = emb_channels
         self.num_channels = num_channels
         self.num_res_blocks = num_res_blocks
         self.upsample_ratio = upsample_ratio
         self.padding_method = padding_method
         self.dropout_rate = dropout_rate
         self.use_attention = use_attention
+        self.num_input_proj_channels = num_input_proj_channels
+        self.num_output_proj_channels = num_output_proj_channels
         self.num_heads = num_heads
         self.channels_per_head = channels_per_head
         self.normalize_qk = normalize_qk
         self.dtype = dtype
         self.device = device
-        self.rng = rng
+
+        # Calculate channels for the residual block
+        in_channels = []
+
+        # calculate list of upsample resolutions
+        list_upsample_resolutions = [spatial_resolution]
+        for level, channel in enumerate(self.num_channels):
+            downsampled_resolution = tuple([int(res / self.upsample_ratio[level]) for res in list_upsample_resolutions[-1]])
+            list_upsample_resolutions.append(downsampled_resolution)
+        list_upsample_resolutions = list_upsample_resolutions[::-1]
+        list_upsample_resolutions.pop()
 
         self.residual_blocks = nn.ModuleList()
         self.conv_blocks = nn.ModuleList()
         self.attention_blocks = nn.ModuleList()
         self.res_conv_blocks = nn.ModuleList()
         self.conv_layers = nn.ModuleList()
+        self.upsample_layers = nn.ModuleList()
 
         for level, channel in enumerate(self.num_channels):
             self.conv_blocks.append(nn.ModuleList())
             self.residual_blocks.append(nn.ModuleList())
 
             for block_id in range(self.num_res_blocks[level]):
-                self.residual_blocks[level].append(None)
-                self.conv_blocks[level].append(None)
+                if block_id == 0 and level > 0:
+                    in_channels.append(self.num_channels[level - 1])
+                else:
+                    in_channels.append(channel)
+
+                self.residual_blocks[level].append(
+                    CombineResidualWithSkip(
+                        residual_channels=in_channels[-1],
+                        skip_channels=channel,
+                        kernel_dim=self.kernel_dim,
+                        project_skip=in_channels[-1] != channel,
+                        dtype=self.dtype,
+                        device=self.device
+                    )
+                )
+                self.conv_blocks[level].append(
+                    ConvBlock(
+                        in_channels=in_channels[-1],
+                        out_channels=channel,
+                        emb_channels=self.emb_channels,
+                        kernel_size=self.kernel_dim * (3,),
+                        padding_mode= self.padding_method,
+                        padding=1,
+                        case=self.kernel_dim,
+                        dtype=self.dtype,
+                        device=self.device,
+                    )
+                )
 
                 if self.use_attention and level == 0:
                     self.attention_blocks.append(
                         AttentionBlock(
-                            rng=self.rng,
+                            in_channels=channel,
                             num_heads=self.num_heads, 
                             normalize_qk=self.normalize_qk,
                             dtype=self.dtype,
                             device=self.device
-                            )
+                        )
                     )
                     self.res_conv_blocks.append(
                         ResConv1x(
+                            in_channels=channel,
                             hidden_layer_size=channel*2, 
                             out_channels=channel,
-                            rng=self.rng,
+                            kernel_dim=1, # 1D due to token shape (bs, l, c)
                             dtype=self.dtype,
                             device=self.device)
-                    )
+                        )
             
-            self.conv_layers.append(None)
+            # Upsampling step
+            up_ratio = self.upsample_ratio[level]
+            self.conv_layers.append(
+                ConvLayer(
+                    in_channels=channel,
+                    out_channels=up_ratio**self.kernel_dim * channel,
+                    kernel_size=self.kernel_dim * (3,),
+                    padding_mode=self.padding_method,
+                    padding=1,
+                    case=self.kernel_dim,
+                    kernel_init=default_init(1.0),
+                    dtype=self.dtype,
+                    device=self.device
+                )
+            )
 
-        self.res_skip_layer = None
+            # For higher or lower input dimensions than 2 use ChannelToSpace from upsample.py
+            self.upsample_layers.append(
+                # upscaling spatial dimensions by rearranging channel data
+                nn.PixelShuffle(up_ratio) # Only for 2D data input
+            )
 
-        # add output layer
-        self.conv_layers.append(None)
+        # DStack Input - UStack Output Residual Connection
+        self.res_skip_layer = CombineResidualWithSkip(
+            residual_channels=self.num_channels[-1],
+            skip_channels=self.num_input_proj_channels,
+            project_skip=(self.num_channels[-1] != self.num_input_proj_channels),
+            dtype=self.dtype,
+            device=self.device
+        )
 
-    def forward(self, x: Tensor, emb: Tensor, skips: list[Tensor], is_training: bool) -> Tensor:
+        # Add output layer
+        self.conv_layers.append(
+            ConvLayer(
+                in_channels=self.num_channels[-1],
+                out_channels=self.num_output_proj_channels,
+                kernel_size=self.kernel_dim * (3,),
+                padding_mode=self.padding_method,
+                padding=1,
+                case=self.kernel_dim,
+                kernel_init=default_init(1.0),
+                dtype=self.dtype,
+                device=self.device,
+            )
+        )
+
+    def forward(self, x: Tensor, emb: Tensor, skips: list[Tensor]) -> Tensor:
         assert (
             len(self.num_channels)
             == len(self.num_res_blocks)
             == len(self.upsample_ratio)
         )
         kernel_dim = len(x.shape) - 2
-        h = x.clone()
+        h = x
 
         for level, channel in enumerate(self.num_channels):
             for block_id in range(self.num_res_blocks[level]):
-                
-                if self.residual_blocks[level][block_id] is None:
-                    # Initialize
-                    self.residual_blocks[level][block_id] = CombineResidualWithSkip(
-                        rng=self.rng,
-                        project_skip=h.shape[1] != skips[-1].shape[1],
-                        dtype=self.dtype,
-                        device=self.device
-                    )
-                
-                if self.conv_blocks[level][block_id] is None:
-                    self.conv_blocks[level][block_id] = ConvBlock(
-                        in_channels = h.shape[1],
-                        out_channels=channel,
-                        kernel_size=kernel_dim * (3,),
-                        rng=self.rng,
-                        padding_mode= self.padding_method,
-                        padding=1,
-                        case=len(h.shape)-2,
-                        dtype=self.dtype,
-                        device=self.device,
-                        )
-
+                # Residual 
                 h = self.residual_blocks[level][block_id](residual=h, skip=skips.pop())
-                h = self.conv_blocks[level][block_id](h, emb, is_training=is_training)
-
+                # Convolution Blocks
+                h = self.conv_blocks[level][block_id](h, emb)
+                # Spatial Attention Blocks
                 if self.use_attention and level == 0:
                     h = reshape_jax_torch(h) # (bs, width, height, c)
                     b, *hw, c = h.shape
                     
-                    h = self.attention_blocks[block_id](h.reshape(b, -1, c), is_training)
+                    h = self.attention_blocks[block_id](h.reshape(b, -1, c))
                     h = reshape_jax_torch(self.res_conv_blocks[block_id](reshape_jax_torch(h))).reshape(b, *hw, c)
                     h = reshape_jax_torch(h) # (bs, c, width, height)
 
-            # upsampling
-            up_ratio = self.upsample_ratio[level]
-            
-            if self.conv_layers[level] is None:
-                self.conv_layers[level] = ConvLayer(
-                    in_channels=h.shape[1],
-                    out_channels=up_ratio**kernel_dim * channel,
-                    kernel_size=kernel_dim * (3,),
-                    padding_mode=self.padding_method,
-                    rng=self.rng,
-                    padding=1,
-                    case=len(h.shape)-2,
-                    kernel_init=default_init(1.0),
-                    dtype=self.dtype,
-                    device=self.device
-                )
+            # Upsampling Block
             h = self.conv_layers[level](h)
-            h = channel_to_space(h, block_shape=kernel_dim * (up_ratio,))
-
-        if self.res_skip_layer is None:
-            self.res_skip_layer = CombineResidualWithSkip(
-                rng=self.rng,
-                project_skip=(h.shape[1] != skips[-1].shape[1]), # channel should be here!
-                dtype=self.dtype,
-                device=self.device
-            )
+            # Shift channels to increase the resolution (only valid for 2D input data)
+            h = self.upsample_layers[level](h)
         
-        if self.conv_layers[-1] is None:
-            self.conv_layers[-1] = ConvLayer(
-                in_channels=h.shape[1],
-                out_channels=128,
-                kernel_size=kernel_dim * (3,),
-                padding_mode=self.padding_method,
-                rng=self.rng,
-                padding=1,
-                case=len(h.shape)-2,
-                kernel_init=default_init(1.0),
-                dtype=self.dtype,
-                device=self.device,
-            )
+        # Output - Input Residual Connection
         h = self.res_skip_layer(residual=h, skip=skips.pop())
+        # Output Layer
         h = self.conv_layers[-1](h)
+        
         return h
 
 
@@ -197,17 +248,17 @@ class UpsampleFourierGaussian(nn.Module):
     """
 
     def __init__(self, 
-                 new_shape: tuple[int, ...], 
-                 num_res_blocks: tuple[int, ...], 
+                 new_shape: Sequence[int], 
+                 num_res_blocks: Sequence[int], 
                  mid_channel: int,
                  out_channels:int, 
-                 rng: torch.Generator,
+                 emb_channels: int,
                  dropout_rate: int=0.0, 
                  padding_method: str='circular', 
                  use_attention: bool=True,
                  num_heads: int=8, 
                  dtype: torch.dtype=torch.float32,
-                 device: Any | None = None,
+                 device: torch.device = None,
                  up_method: str='gaussian', 
                  normalize_qk: bool = False):
         super(UpsampleFourierGaussian, self).__init__()
@@ -217,13 +268,13 @@ class UpsampleFourierGaussian(nn.Module):
         self.mid_channel = mid_channel
         self.dropout_rate = dropout_rate
         self.out_channels = out_channels
+        self.emb_channels = emb_channels
         self.padding_method = padding_method
         self.use_attention = use_attention
         self.num_heads = num_heads
         self.dtype = dtype
         self.device = device
         self.up_method = up_method
-        self.rng = rng
 
         self.conv_blocks = nn.ModuleList()
         self.attention_blocks = nn.ModuleList()
@@ -237,7 +288,7 @@ class UpsampleFourierGaussian(nn.Module):
             self.conv_blocks.append(None)
             self.attention_blocks.append(
                 AttentionBlock(
-                    rng=self.rng,
+                    in_channels=new_shape[1],
                     num_heads=self.num_heads, 
                     normalize_qk=normalize_qk,
                     dtype=self.dtype,
@@ -245,9 +296,10 @@ class UpsampleFourierGaussian(nn.Module):
                 )
             self.res_conv_blocks.append(
                 ResConv1x(
+                    in_channels=new_shape[1],
                     hidden_layer_size=self.mid_channel * 2,
                     out_channels=self.mid_channel,
-                    rng=self.rng,
+                    kernel_dim=len(new_shape[2:]),
                     dtype=self.dtype,
                     device=self.device
                 )
@@ -328,7 +380,7 @@ class UpsampleFourierGaussian(nn.Module):
                 )
       
 
-    def forward(self, x: Tensor, emb: Tensor, is_training: bool=True) -> Tuple[Tensor, Tensor]:
+    def forward(self, x: Tensor, emb: Tensor) -> Tuple[Tensor, Tensor]:
         kernel_dim = len(x.shape) - 2 # number of spatial dimensions
   
         h = x.clone()
@@ -339,8 +391,8 @@ class UpsampleFourierGaussian(nn.Module):
                 self.conv_blocks[block_id] = ConvBlock(
                     in_channels=h.shape[1],
                     out_channels=self.mid_channel,
+                    emb_channels=self.emb_channels,
                     kernel_size=kernel_dim * (3,),
-                    rng=self.rng,
                     padding_mode=self.padding_method,
                     padding=1,
                     case=kernel_dim,
@@ -348,7 +400,7 @@ class UpsampleFourierGaussian(nn.Module):
                     dtype=self.dtype,
                     device=self.device,
                 )
-            h = self.conv_blocks[block_id](h, emb, is_training=is_training)
+            h = self.conv_blocks[block_id](h, emb)
 
             if self.use_attention and self.level == 0:
                 h = reshape_jax_torch(h)
@@ -374,7 +426,6 @@ class UpsampleFourierGaussian(nn.Module):
                 out_channels=self.out_channels,
                 kernel_size=kernel_dim * (3,),
                 padding_mode=self.padding_method,
-                rng=self.rng,
                 padding=1,
                 case=kernel_dim,
                 kernel_init=default_init(),

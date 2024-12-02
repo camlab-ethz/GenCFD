@@ -108,7 +108,6 @@ def get_sampler_args(
         denoise_fn: DenoiseFn,
         tspan: TimeStepScheduler,
         integrator: SdeSolver,
-        rng: torch.Generator = None,
         device: torch.device = None,
         dtype: torch.dtype = torch.float32
     ) -> dict:
@@ -117,5 +116,5 @@ def get_sampler_args(
         'input_shape': input_shape, 'scheme': scheme, 'denoise_fn': denoise_fn,
         'tspan': tspan, 'integrator': integrator, 'guidance_transforms': (), 
         'apply_denoise_at_end': args.apply_denoise_at_end, 'return_full_paths': args.return_full_paths,
-        'rng': rng, 'device': device, 'dtype': dtype
+        'device': device, 'dtype': dtype
     }

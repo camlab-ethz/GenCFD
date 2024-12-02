@@ -122,8 +122,8 @@ def plotter_3d(
     sample = reshape_to_numpy(sample)
 
     volume = pv.wrap(sample[..., axis])
-    plotter = pv.Plotter(off_screen=True)
-    plotter.add_volume(volume, opacity="sigmoid", cmap="viridis", shade=True)
+    plotter = pv.Plotter(off_screen=save)
+    plotter.add_volume(volume, opacity="linear", cmap="viridis", shade=True)
     if save:
         save_path = os.path.join(save_dir, "gen_sample.png")
         plotter.screenshot(save_path)
@@ -136,6 +136,7 @@ def gen_gt_plotter_3d(
         gt_sample: array, 
         gen_sample: array, 
         axis: int=0, 
+        show_color_bar = False,
         save: bool = True,
         save_dir: str = None):
     """3D plotter to visualize generated and ground truth 3D data side by side"""
@@ -146,18 +147,41 @@ def gen_gt_plotter_3d(
     gt_sample = reshape_to_numpy(gt_sample)
     gen_sample = reshape_to_numpy(gen_sample)
 
+    # Absolute values:
+    # gt_sample = np.abs(gt_sample)
+    # gen_sample = np.abs(gen_sample)
+
+    # threshold = 1e-3
+    # gen_sample = np.where(gen_sample < threshold, 0, gen_sample)
+    # gt_sample = np.where(gt_sample < threshold, 0, gt_sample)
+
+
     volume_gen = pv.wrap(gen_sample[..., axis])
     volume_gt = pv.wrap(gt_sample[..., axis])
 
     # Set up the plotter with two viewports side by side
-    plotter = pv.Plotter(off_screen=True, shape=(1, 2))
+    plotter = pv.Plotter(off_screen=save, shape=(1, 2))
+
+    """
+    Dataset specific settings for visualization
+
+    3D Taylor Green: 
+        opacity: linear, cmap: viridis
+    3D Cylindrical Shear Flow:
+        opacity: sigmoid, cmap: viridis
+    """
 
     plotter.subplot(0, 0)
-    plotter.add_volume(volume_gen, opacity="sigmoid", cmap="viridis", shade=True, show_scalar_bar=False)
+    # use for the map either viridis with linear opacity or sigmoid opacity
+    plotter.add_volume(volume_gen, opacity='linear', cmap="viridis", shade=True, show_scalar_bar=False)
+    if show_color_bar:
+        plotter.add_scalar_bar(title="Generated", vertical=False)
     plotter.add_text("Generated Sample", position='upper_edge', font_size=12, color='black')
 
     plotter.subplot(0, 1)
-    plotter.add_volume(volume_gt, opacity="sigmoid", cmap="viridis", shade=True, show_scalar_bar=False)
+    plotter.add_volume(volume_gt, opacity='linear', cmap="viridis", shade=True, show_scalar_bar=False)
+    if show_color_bar:
+        plotter.add_scalar_bar(title="Ground Truth", vertical=False)
     plotter.add_text("Ground Truth Sample", position='upper_edge', font_size=12, color='black')
 
     if save:

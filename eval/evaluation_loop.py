@@ -13,7 +13,6 @@
 # limitations under the License.
 
 """Run Inference loops to generate statistical metrics or visualize results."""
-
 import os
 import numpy as np
 import torch
@@ -43,6 +42,7 @@ def run(
     visualize: bool = False,
     device: torch.device = None,
     save_dir: str = None
+
 ) -> None:
     """Run benchmark evaluation on the specified dataset.
 
@@ -83,15 +83,17 @@ def run(
         print(f"Created a directory to store metrics and visualizations: {save_dir}")
     
     # check whether problem requires a conditioning on the lead time
-    if time_cond:
-        # constant lead_time with 1 and a single step from an initial condition to 1
-        lead_time = torch.ones((batch_size, 1), dtype=torch.float32, device=device)
-    else:
-        lead_time = [None] * batch_size
+    # if time_cond:
+    #     # constant lead_time with 1 and a single step from an initial condition to 1
+    #     # lead_time_scalar = 0.25 + 0.4375 * (5 - 1)
+    #     # lead_time = torch.ones((batch_size, 1), dtype=torch.float32, device=device) * lead_time_scalar
+    #     lead_time = torch.ones((batch_size, 1), dtype=torch.float32, device=device)
+    # else:
+    #     lead_time = [None] * batch_size
 
     if compute_metrics:
-        print(" ")
         print("Compute Metrics")
+        print(" ")
         # initialize the dataloader where the samples are drawn from a uniform discrete distribution
         dataloader = iter(dataloader)
         
@@ -103,8 +105,14 @@ def run(
         for i in tqdm(range(n_iter), desc="Evaluating Monte Carlo Samples"):
             # run n_iter number of iterations
             batch = next(dataloader)
-            u0 = batch[:, :dataset.output_channel, ...].to(device=device)
-            u = batch[:, dataset.output_channel:, ...].to(device=device)
+            batch = {k: v.to(device, non_blocking=True) for k, v in batch.items()}
+
+            u0 = batch['initial_cond']
+            u = batch['target_cond']
+            if time_cond:
+                lead_time = batch['lead_time'].reshape(-1,1)
+            else:
+                lead_time = [None] * batch_size
 
             # normalize inputs (initial conditions) and outputs (solutions)
             # u0_norm = reshape_jax_torch(dataset.normalize_input(reshape_jax_torch(u0)))
@@ -118,7 +126,6 @@ def run(
             
             gen_batch = torch.empty(u.shape, device=device)
             for batch in range(batch_size):
-
                 gen_sample = sampler.generate(
                     num_samples=1, 
                     y=u0_norm[batch, ...].unsqueeze(0), 
@@ -126,8 +133,8 @@ def run(
                 ).detach()
 
                 gen_batch[batch] = gen_sample.squeeze(0)
-
             # update relevant metrics and denormalize the generated results
+            # u_gen = reshape_jax_torch(dataset.denormalize_output(reshape_jax_torch(gen_batch)))
             u_gen = reshape_jax_torch(
                 denormalize(
                     reshape_jax_torch(gen_batch),
@@ -170,10 +177,10 @@ def run(
 
     if visualize:
         # Run a single run to visualize results without computing metrics
-
-        batch = next(iter(dataloader))
-        u0 = batch[:, :dataset.output_channel, ...].to(device=device)
-        u = batch[:, dataset.output_channel:, ...].to(device=device)
+        batch = next(iter(dataloader)) # uniform random distribution
+        batch = {k: v.to(device, non_blocking=True) for k, v in batch.items()}
+        u0 = batch['initial_cond']
+        u = batch['target_cond']
 
         # normalize inputs (initial conditions) and outputs (solutions)
         u0_norm = reshape_jax_torch(

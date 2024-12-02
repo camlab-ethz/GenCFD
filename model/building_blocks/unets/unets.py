@@ -18,7 +18,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from typing import Any
+from typing import Any, Sequence
 
 from utils.model_utils import default_init
 from model.building_blocks.stacks.dtstack import DStack
@@ -37,24 +37,29 @@ class UNet(nn.Module):
   based version. Derived from Wan et al. (https://arxiv.org/abs/2305.15618)
   """
 
-  def __init__(self, 
-               out_channels: int,
-               rng: torch.Generator, 
-               resize_to_shape: tuple[int, ...] | None = None,
-               use_hr_residual: bool = False,
-               num_channels: tuple[int, ...] = (128, 256, 256),
-               downsample_ratio : tuple[int, ...] = (2, 2, 2), 
-               num_blocks: int = 4, 
-               noise_embed_dim: int = 128, 
-               padding_method: str = 'circular', 
-               dropout_rate: float = 0.0, 
-               use_attention: bool = True, 
-               use_position_encoding: bool = True, 
-               num_heads: int = 8,
-               normalize_qk: bool = False, 
-               dtype: torch.dtype = torch.float32, 
-               device: Any | None = None,
-               buffer_dict: dict = None
+  def __init__(
+      self, 
+      in_channels: int,
+      out_channels: int,
+      spatial_resolution: Sequence[int],
+      time_cond: bool,
+      resize_to_shape: Sequence[int] | None = None,
+      use_hr_residual: bool = False,
+      num_channels: Sequence[int] = (128, 256, 256),
+      downsample_ratio : Sequence[int] = (2, 2, 2), 
+      num_blocks: int = 4, 
+      noise_embed_dim: int = 128, 
+      input_proj_channels: int = 128,
+      output_proj_channels: int = 128,
+      padding_method: str = 'circular', 
+      dropout_rate: float = 0.0, 
+      use_attention: bool = True, 
+      use_position_encoding: bool = True, 
+      num_heads: int = 8,
+      normalize_qk: bool = False, 
+      dtype: torch.dtype = torch.float32, 
+      device: Any | None = None,
+      buffer_dict: dict = None
     ):
     super(UNet, self).__init__()
 
@@ -63,13 +68,20 @@ class UNet(nn.Module):
         for name, tensor in buffer_dict.items():
           self.register_buffer(name, tensor)
 
+    self.in_channels = in_channels
     self.out_channels = out_channels
+    self.spatial_resolution = spatial_resolution
+    self.time_cond = time_cond # can be used if additional conditioning on time is required
+    self.kernel_dim = len(spatial_resolution)
+    # resize_to_shape can be utilized if the dataset resolution changes within batches
     self.resize_to_shape = resize_to_shape
     self.num_channels = num_channels
     self.downsample_ratio = downsample_ratio
     self.use_hr_residual = use_hr_residual
     self.num_blocks = num_blocks
     self.noise_embed_dim = noise_embed_dim
+    self.input_proj_channels = input_proj_channels
+    self.output_proj_channels = output_proj_channels
     self.padding_method = padding_method
     self.dropout_rate = dropout_rate
     self.use_attention = use_attention
@@ -78,7 +90,6 @@ class UNet(nn.Module):
     self.normalize_qk = normalize_qk
     self.dtype = dtype
     self.device = device
-    self.rng = rng
 
     self.embedding = FourierEmbedding(
       dims=self.noise_embed_dim,
@@ -86,52 +97,79 @@ class UNet(nn.Module):
       device=self.device
     )
 
+    self.emb_channels = self.noise_embed_dim * 2 if self.time_cond else self.noise_embed_dim
+
     self.DStack = DStack(
+      in_channels=self.in_channels,
+      spatial_resolution=self.spatial_resolution,
+      emb_channels=self.emb_channels,
       num_channels=self.num_channels,
       num_res_blocks=len(self.num_channels) * (self.num_blocks,),
       downsample_ratio=self.downsample_ratio,
-      rng=self.rng,
+      num_input_proj_channels=self.input_proj_channels,
       padding_method=self.padding_method,
       dropout_rate=self.dropout_rate,
       use_attention=self.use_attention,
       num_heads=self.num_heads,
-      use_positional_encoding=self.use_position_encoding,
+      use_position_encoding=self.use_position_encoding,
       normalize_qk=self.normalize_qk,
       dtype=self.dtype,
       device=self.device
     )
 
     self.UStack = UStack(
+      spatial_resolution=self.spatial_resolution,
+      emb_channels=self.emb_channels,
       num_channels=self.num_channels[::-1],
       num_res_blocks=len(self.num_channels) * (self.num_blocks,),
       upsample_ratio=self.downsample_ratio[::-1],
-      rng=self.rng,
       padding_method=self.padding_method,
       dropout_rate=self.dropout_rate,
       use_attention=self.use_attention,
+      num_input_proj_channels=self.input_proj_channels,
+      num_output_proj_channels=self.output_proj_channels,
       num_heads=self.num_heads,
       normalize_qk=self.normalize_qk,
       dtype=self.dtype,
       device=self.device
     )
 
-    self.norm = None
-    self.conv_layer = None
+    self.norm = nn.GroupNorm(
+      min(max(self.output_proj_channels // 4, 1), 32), 
+      self.output_proj_channels,
+      device=self.device,
+      dtype=self.dtype
+    )
+
+    self.conv_layer = ConvLayer(
+      in_channels=self.output_proj_channels,
+      out_channels=self.out_channels,
+      kernel_size=self.kernel_dim * (3,),
+      padding_mode=self.padding_method,
+      padding=1,
+      case=self.kernel_dim,
+      kernel_init=default_init(),
+      dtype=self.dtype,
+      device=self.device
+    )
     
     if self.use_hr_residual:
       self.upsample = None
       self.res_skip = None
 
-
-  def forward(self, x: Tensor, sigma: Tensor, is_training: bool = True, 
-                down_only: bool = False) -> Tensor:
+  def forward(
+      self, 
+      x: Tensor, 
+      sigma: Tensor, 
+      time: Tensor = None, 
+      down_only: bool = False
+    ) -> Tensor:
     """Predicts denosied given noise input and noise level.
     
     Args:
       x: The model input (i.e. noise sample) with shape (bs, **spatial_dims, c)
       sigma: The noise level, which either shares the same bs dim as 'x' 
               or is a scalar
-      is_training: A flag that indicates whether the module runs in training mode.
       down_only: If set to 'True', only returns 'skips[-1]' (used for downstream
                   tasks) as an embedding. If set to 'False' it then does the full
                   UNet usual computation.
@@ -152,7 +190,8 @@ class UNet(nn.Module):
 
     emb = self.embedding(sigma)
 
-    skips = self.DStack(x, emb, is_training=is_training)
+    # Downsampling
+    skips = self.DStack(x, emb)
 
     if down_only:
       return skips[-1]
@@ -164,7 +203,7 @@ class UNet(nn.Module):
         num_res_blocks=len(self.num_channels) * (self.num_blocks,),
         mid_channel=256,
         out_channels=self.out_channels,
-        rng=self.rng,
+        emb_channels=self.emb_channels,
         padding_method=self.padding_method,
         dropout_rate=self.dropout_rate,
         use_attention=self.use_attention,
@@ -173,40 +212,20 @@ class UNet(nn.Module):
         device=self.device,
         normalize_qk=self.normalize_qk
       )
-      high_res_residual, _ = self.upsample(skips[-1], emb, is_training=is_training)
+      high_res_residual, _ = self.upsample(skips[-1], emb)
     
-    h = self.UStack(skips[-1], emb, skips, is_training=is_training)
-
-    if self.norm is None:
-      self.norm = nn.GroupNorm(
-        min(max(h.shape[1] // 4, 1), 32), 
-        h.shape[1],
-        device=self.device,
-        dtype=self.dtype
-        )
+    # Upsampling
+    h = self.UStack(skips[-1], emb, skips)
 
     h = F.silu(self.norm(h))
-
-    if self.conv_layer is None:
-      self.conv_layer = ConvLayer(
-        in_channels=h.shape[1],
-        out_channels=self.out_channels,
-        kernel_size=kernel_dim * (3,),
-        padding_mode=self.padding_method,
-        rng=self.rng,
-        padding=1,
-        case=kernel_dim,
-        kernel_init=default_init(),
-        dtype=self.dtype,
-        device=self.device
-      )
-    
     h = self.conv_layer(h)
 
     if self.use_hr_residual:
       if self.res_skip is None:
         self.res_skip = CombineResidualWithSkip(
-          rng=self.rng,
+          residual_channels=h.shape[1],
+          skip_channels=high_res_residual,
+          kernel_dim=self.kernel_dim,
           project_skip=not(h.shape[1] == high_res_residual.shape[1]),
           dtype = self.dtype,
           device=self.device
@@ -219,43 +238,54 @@ class UNet(nn.Module):
 class PreconditionedDenoiser(UNet):
   """Preconditioned denoising model."""
 
-  def __init__(self, 
-               out_channels: int,
-               rng: torch.Generator, 
-               resize_to_shape: tuple[int, ...] | None = None,
-               use_hr_residual: bool = False,
-               num_channels: tuple[int, ...] = (128, 256, 256),
-               downsample_ratio : tuple[int, ...] = (2, 2, 2), 
-               num_blocks: int = 4, 
-               noise_embed_dim: int = 128, 
-               padding_method: str = 'circular', 
-               dropout_rate: float = 0.0, 
-               use_attention: bool = True, 
-               use_position_encoding: bool = True, 
-               num_heads: int = 8,
-               normalize_qk: bool = False, 
-               dtype: torch.dtype = torch.float32, 
-               device: Any | None = None,
-               buffer_dict: dict = None,
-               sigma_data: float = 1.0
+  def __init__(
+      self, 
+      in_channels: int,
+      out_channels: int,
+      spatial_resolution: Sequence[int],
+      time_cond: bool,
+      resize_to_shape: tuple[int, ...] | None = None,
+      use_hr_residual: bool = False,
+      num_channels: tuple[int, ...] = (128, 256, 256),
+      downsample_ratio : tuple[int, ...] = (2, 2, 2), 
+      num_blocks: int = 4, 
+      noise_embed_dim: int = 128, 
+      input_proj_channels: int = 128,
+      output_proj_channels: int = 128,
+      padding_method: str = 'circular', 
+      dropout_rate: float = 0.0, 
+      use_attention: bool = True, 
+      use_position_encoding: bool = True, 
+      num_heads: int = 8,
+      normalize_qk: bool = False, 
+      dtype: torch.dtype = torch.float32, 
+      device: Any | None = None,
+      buffer_dict: dict = None,
+      sigma_data: float = 1.0
     ):
-    super().__init__(out_channels=out_channels,
-                     rng=rng,
-                     resize_to_shape=resize_to_shape,
-                     use_hr_residual=use_hr_residual,
-                     num_channels=num_channels,
-                     downsample_ratio=downsample_ratio,
-                     num_blocks=num_blocks,
-                     noise_embed_dim=noise_embed_dim,
-                     padding_method=padding_method,
-                     dropout_rate=dropout_rate,
-                     use_attention=use_attention,
-                     use_position_encoding=use_position_encoding,
-                     num_heads=num_heads,
-                     normalize_qk=normalize_qk,
-                     dtype=dtype,
-                     device=device,
-                     buffer_dict=buffer_dict)
+    super().__init__(
+      in_channels=in_channels,
+      out_channels=out_channels,
+      spatial_resolution=spatial_resolution,
+      time_cond=time_cond,
+      resize_to_shape=resize_to_shape,
+      use_hr_residual=use_hr_residual,
+      num_channels=num_channels,
+      downsample_ratio=downsample_ratio,
+      num_blocks=num_blocks,
+      noise_embed_dim=noise_embed_dim,
+      input_proj_channels=input_proj_channels,
+      output_proj_channels=output_proj_channels,
+      padding_method=padding_method,
+      dropout_rate=dropout_rate,
+      use_attention=use_attention,
+      use_position_encoding=use_position_encoding,
+      num_heads=num_heads,
+      normalize_qk=normalize_qk,
+      dtype=dtype,
+      device=device,
+      buffer_dict=buffer_dict
+    )
     
     self.sigma_data = sigma_data
     
@@ -263,10 +293,10 @@ class PreconditionedDenoiser(UNet):
   def forward(
       self, 
       x: Tensor, 
-      sigma: Tensor, 
+      sigma: Tensor,
       y: Tensor = None,
+      time: Tensor = None,
       down_only: bool = False, 
-      is_training: bool = True
     ) -> Tensor:
     """Runs preconditioned denoising."""
     if sigma.dim() < 1:
@@ -289,20 +319,19 @@ class PreconditionedDenoiser(UNet):
     c_in = c_in.view(*expand_shape)
     c_out = c_out.view(*expand_shape)
     c_skip = c_skip.view(*expand_shape)
-    
-    if y is None:
-      f_x = super().forward(
-        c_in*x, c_noise, is_training=is_training, down_only=down_only
-      )
-      
-    elif y is not None:
-      f_x = super().forward(
-        torch.cat((c_in * x, y), dim=1), 
-        c_noise, 
-        is_training=is_training, 
-        down_only=down_only
-      )
 
+    inputs = c_in * x
+    if y is not None:
+      # stack conditioning y
+      inputs = torch.cat((inputs, y), dim=1)
+
+    f_x = super().forward(
+      inputs,
+      sigma=c_noise,
+      time=time,
+      down_only=down_only
+    )
+ 
     if down_only:
       return f_x
     

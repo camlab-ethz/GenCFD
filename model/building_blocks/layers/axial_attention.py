@@ -20,7 +20,6 @@ import torch
 
 from model.building_blocks.layers.multihead_attention import MultiHeadDotProductAttention
 
-
 Tensor = torch.Tensor
 
 
@@ -29,6 +28,8 @@ class AddAxialPositionEmbedding(nn.Module):
 
     def __init__(self, 
                position_axis: int, 
+               spatial_resolution: int,
+               input_channels: int,
                initializer: nn.init = nn.init.normal_,
                std: float = 0.02,
                dtype: torch.dtype = torch.float32,
@@ -38,47 +39,50 @@ class AddAxialPositionEmbedding(nn.Module):
 
         self.initializer = initializer
         self.position_axis = position_axis
+        self.spatial_resolution = spatial_resolution
+        self.input_channels = input_channels
+        self.kernel_dim = len(spatial_resolution)
+        self.input_dim = self.kernel_dim + 2 # channel and batch_size in addition
         self.std = std
         self.dtype = dtype
         self.device = device
 
-        self.embedding = None
+        pos_axis = self.position_axis 
+        pos_axis = pos_axis if pos_axis >= 0 else pos_axis + self.input_dim
 
-
-    def forward(self, inputs: Tensor) -> Tensor:
-        # Tensor should be off shape: (bs, width, height, c)
-        pos_axis = self.position_axis
-        pos_axis = pos_axis if pos_axis >= 0 else pos_axis + inputs.ndim
-
-        if not 0 <= pos_axis < inputs.ndim:
+        if not 0 <= pos_axis < self.input_dim:
             raise ValueError(
                 f"Invalid position ({self.position_axis}) or feature axis"
             )
 
-        feat_axis = inputs.ndim - 1
-        if pos_axis == feat_axis:
+        self.feat_axis = self.input_dim - 1
+        if pos_axis == self.feat_axis:
             raise ValueError(
                 f"Position axis ({self.position_axis}) must not coincide with feature"
-                f" axis ({feat_axis})!"
+                f" axis ({self.feat_axis})!"
             )
 
-        unsqueeze_axes = tuple(set(range(inputs.ndim)) - {pos_axis, feat_axis})
+        unsqueeze_axes = tuple(set(range(self.input_dim)) - {pos_axis, self.feat_axis})
+        self.unsqueeze_axes = sorted(unsqueeze_axes)
 
-        if self.embedding is None:
-            self.embedding = nn.Parameter(
-                self.initializer(
-                    torch.empty(
-                        (inputs.shape[pos_axis], inputs.shape[feat_axis]), 
-                        dtype=self.dtype, 
-                        device=self.device),
-                    std=self.std
-                )
+        self.embedding = nn.Parameter(
+            self.initializer(
+                torch.empty(
+                    (spatial_resolution[pos_axis-1], input_channels), 
+                    dtype=self.dtype, 
+                    device=self.device),
+                std=self.std
             )
-        
+        )
+
+
+    def forward(self, inputs: Tensor) -> Tensor:
+        # Tensor should be off shape: (bs, width, height, depth, c)
+
         embedding = self.embedding
-        
-        if unsqueeze_axes:
-            for axis in sorted(unsqueeze_axes):
+
+        if self.unsqueeze_axes:
+            for axis in self.unsqueeze_axes:
                 embedding = embedding.unsqueeze(dim=axis)
 
         return inputs + embedding
@@ -88,8 +92,8 @@ class AxialSelfAttention(nn.Module):
     """Axial self-attention for multidimensional inputs."""
 
     def __init__(self,
+                 emb_dim: int,
                  num_heads: int,
-                 rng: torch.Generator,
                  attention_axis: int = -2,
                  dropout: float = 0.0,
                  normalize_qk: bool = False,
@@ -97,15 +101,22 @@ class AxialSelfAttention(nn.Module):
                  device: torch.device = None
         ):
         super(AxialSelfAttention, self).__init__()
+        self.emb_dim = emb_dim
         self.num_heads = num_heads
         self.attention_axis = attention_axis
         self.dropout = dropout
         self.normalize_qk = normalize_qk
         self.dtype = dtype 
-        self.rng = rng
         self.device = device
 
-        self.attention = None
+        self.attention = MultiHeadDotProductAttention(
+            emb_dim=self.emb_dim,
+            num_heads=self.num_heads,
+            normalize_qk=self.normalize_qk,
+            dropout=self.dropout,
+            device=self.device,
+            dtype=self.dtype
+        )
 
 
     def forward(self, inputs: Tensor) -> Tensor:
@@ -123,17 +134,6 @@ class AxialSelfAttention(nn.Module):
 
         inputs = torch.swapaxes(inputs, self.attention_axis, -2)
         query = inputs.reshape(-1, *inputs.shape[-2:])
-
-        if self.attention is None:
-            self.attention = MultiHeadDotProductAttention(
-                emb_dim=inputs.shape[-1],
-                num_heads=self.num_heads,
-                rng=self.rng,
-                normalize_qk=self.normalize_qk,
-                dropout=self.dropout,
-                device=self.device,
-                dtype=self.dtype
-            )
 
         out = self.attention(query=query)
 
