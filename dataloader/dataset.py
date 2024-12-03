@@ -464,8 +464,6 @@ class ConditionalDataIC_Vel(ConditionalBase):
         )
 
         return {
-            # lead time needs to be changed depending on your start index
-            'lead_time': torch.tensor(1., dtype=torch.float32),
             'initial_cond': initial_cond,
             'target_cond': target_cond
         }

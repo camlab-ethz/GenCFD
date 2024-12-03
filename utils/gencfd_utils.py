@@ -68,32 +68,26 @@ def get_dataset(
     """
 
     if name == 'DataIC_Vel':
-        # dataset = DataIC_Vel(device=device)
         dataset = DataIC_Vel()
         time_cond = False
     
     elif name == 'DataIC_3D_Time':
-        # dataset = DataIC_3D_Time(device=device)
         dataset = DataIC_3D_Time()
         time_cond = True
 
     elif name == 'DataIC_3D_Time_TG':
-        # dataset = DataIC_3D_Time_TG(device=device)
         dataset = DataIC_3D_Time_TG()
         time_cond = True
     
     elif name == 'ConditionalDataIC_Vel':
-        # dataset = ConditionalDataIC_Vel(device=device)
         dataset = ConditionalDataIC_Vel()
         time_cond = False
     
     elif name == 'ConditionalDataIC_3D':
-        # dataset = ConditionalDataIC_3D(device=device)
         dataset = ConditionalDataIC_3D()
         time_cond = True
     
     elif name == 'ConditionalDataIC_3D_TG':
-        # dataset = ConditionalDataIC_3D_TG(device=device)
         dataset = ConditionalDataIC_3D_TG()
         time_cond = True
     
