@@ -117,6 +117,27 @@ class UNet(nn.Module):
       device=self.device
     )
 
+    if self.use_hr_residual:
+      self.upsample = UpsampleFourierGaussian(
+        new_shape=(self.in_channels,)+self.spatial_resolution,
+        num_res_blocks=len(self.num_channels) * (self.num_blocks,),
+        num_channels=self.num_channels[::-1],
+        num_blocks=self.num_blocks,
+        mid_channels=256,
+        out_channels=self.out_channels,
+        emb_channels=self.emb_channels,
+        kernel_dim=self.kernel_dim,
+        upsample_ratio=self.downsample_ratio[::-1],
+        padding_method=self.padding_method,
+        dropout_rate=self.dropout_rate,
+        use_attention=self.use_attention,
+        num_heads=self.num_heads,
+        dtype=self.dtype,
+        device=self.device,
+        up_method='gaussian',
+        normalize_qk=self.normalize_qk
+      )
+
     self.UStack = UStack(
       spatial_resolution=self.spatial_resolution,
       emb_channels=self.emb_channels,
@@ -154,8 +175,15 @@ class UNet(nn.Module):
     )
     
     if self.use_hr_residual:
-      self.upsample = None
-      self.res_skip = None
+      self.res_skip = CombineResidualWithSkip(
+        residual_channels=self.out_channels,
+        skip_channels=self.out_channels,
+        kernel_dim=self.kernel_dim,
+        # Since both outputs are self.out_channels
+        project_skip=False,
+        dtype = self.dtype,
+        device=self.device
+      )
 
   def forward(
       self, 
@@ -186,8 +214,6 @@ class UNet(nn.Module):
         f" ({x.shape[0]})"
       )
 
-    kernel_dim = x.dim() - 2
-
     emb = self.embedding(sigma)
 
     # Downsampling
@@ -195,23 +221,10 @@ class UNet(nn.Module):
 
     if down_only:
       return skips[-1]
-    
+
     if self.use_hr_residual:
-      if self.upsample is None:
-        self.upsample = UpsampleFourierGaussian(
-        new_shape=x.shape,
-        num_res_blocks=len(self.num_channels) * (self.num_blocks,),
-        mid_channel=256,
-        out_channels=self.out_channels,
-        emb_channels=self.emb_channels,
-        padding_method=self.padding_method,
-        dropout_rate=self.dropout_rate,
-        use_attention=self.use_attention,
-        num_heads=self.num_heads,
-        dtype=self.dtype,
-        device=self.device,
-        normalize_qk=self.normalize_qk
-      )
+      # Upsample output of the lowest level from DStack 
+      # up to the input dimension and shape
       high_res_residual, _ = self.upsample(skips[-1], emb)
     
     # Upsampling
@@ -221,17 +234,10 @@ class UNet(nn.Module):
     h = self.conv_layer(h)
 
     if self.use_hr_residual:
-      if self.res_skip is None:
-        self.res_skip = CombineResidualWithSkip(
-          residual_channels=h.shape[1],
-          skip_channels=high_res_residual,
-          kernel_dim=self.kernel_dim,
-          project_skip=not(h.shape[1] == high_res_residual.shape[1]),
-          dtype = self.dtype,
-          device=self.device
-        )
+      # Use residual between output of the Upsampled UNet ant the 
+      # computed skip from the directly upsampled DStack
       h = self.res_skip(residual=h, skip=high_res_residual)
-    
+
     return h
   
 

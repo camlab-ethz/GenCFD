@@ -62,6 +62,7 @@ if __name__ == "__main__":
         name=args.dataset, 
         batch_size=args.batch_size, 
         num_worker=args.worker, 
+        prefetch_factor=2, # Default DataLoader value
         split=True,
         split_ratio=split_ratio
     )

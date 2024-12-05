@@ -73,6 +73,7 @@ if __name__=="__main__":
         name=args.dataset, 
         batch_size=args.batch_size, 
         num_worker=args.worker, 
+        prefetch_factor=2, # Default DataLoader Value
         split=False
     )
 
@@ -177,6 +178,8 @@ if __name__=="__main__":
         ndim=len(out_shape)-1, 
         channels=dataset.output_channel, 
         data_shape=out_shape,
+        monte_carlo_samples=args.monte_carlo_samples,
+        num_samples=1000, # Choose 1000 random pixel values
         device=device
     )
 

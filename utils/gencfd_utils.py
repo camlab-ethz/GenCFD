@@ -39,11 +39,13 @@ from diffusion.diffusion import (
 from dataloader.dataset import (
     TrainingSetBase,
     DataIC_Vel,
+    DataIC_Cloud_Shock_2D,
     DataIC_3D_Time,
     DataIC_3D_Time_TG,
     ConditionalDataIC_Vel,
     ConditionalDataIC_3D,
-    ConditionalDataIC_3D_TG
+    ConditionalDataIC_3D_TG,
+    ConditionalDataIC_Cloud_Shock_2D
 )
 from utils.callbacks import Callback ,TqdmProgressBar, TrainStateCheckpoint
 from diffusion.samplers import SdeSampler, Sampler
@@ -71,6 +73,10 @@ def get_dataset(
         dataset = DataIC_Vel()
         time_cond = False
     
+    elif name == 'DataIC_Cloud_Shock_2D':
+        dataset = DataIC_Cloud_Shock_2D()
+        time_cond = False
+    
     elif name == 'DataIC_3D_Time':
         dataset = DataIC_3D_Time()
         time_cond = True
@@ -81,6 +87,10 @@ def get_dataset(
     
     elif name == 'ConditionalDataIC_Vel':
         dataset = ConditionalDataIC_Vel()
+        time_cond = False
+
+    elif name == 'ConditionalDataIC_Cloud_Shock_2D':
+        dataset = ConditionalDataIC_Cloud_Shock_2D()
         time_cond = False
     
     elif name == 'ConditionalDataIC_3D':
@@ -104,6 +114,7 @@ def get_dataset_loader(
         name: str, 
         batch_size: int = 5,
         num_worker: int = 0,
+        prefetch_factor: int = 2, # default DataLoader value
         split: bool = True, 
         split_ratio: float = 0.8,
     ) -> Tuple[DataLoader, DataLoader] | DataLoader:
@@ -121,6 +132,7 @@ def get_dataset_loader(
             shuffle=True, 
             pin_memory=True,
             num_workers=num_worker,
+            prefetch_factor=prefetch_factor
         )
         eval_dataloader = DataLoader(
             dataset=eval_dataset, 
@@ -128,6 +140,7 @@ def get_dataset_loader(
             shuffle=True,
             pin_memory=True,
             num_workers=num_worker,
+            prefetch_factor=prefetch_factor
         )
         return (train_dataloader, eval_dataloader, dataset, time_cond)
     else:
@@ -137,6 +150,7 @@ def get_dataset_loader(
             shuffle=True, 
             pin_memory=True,
             num_workers=num_worker,
+            prefetch_factor=prefetch_factor
         )
         return (dataloader, dataset, time_cond)
 

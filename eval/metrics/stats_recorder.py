@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import torch
+from typing import Sequence
 
 Tensor = torch.Tensor
 
@@ -24,7 +25,9 @@ class StatsRecorder:
                  batch_size: int, 
                  ndim: int, 
                  channels: int, 
-                 data_shape: tuple,
+                 data_shape: Sequence[int],
+                 monte_carlo_samples: int,
+                 num_samples: int = 1000,
                  device: torch.device = None
         ):
         self.device = device
@@ -35,6 +38,15 @@ class StatsRecorder:
         self.axis = self._set_axis(ndim) # axis for channel wise mean
         self.channels = channels
         self.data_shape = data_shape
+        self.monte_carlo_samples = monte_carlo_samples
+        self.num_samples = num_samples
+
+        # storage for sampled points
+        self.gen_samples = torch.zeros((monte_carlo_samples, num_samples, channels), device=device)
+        self.gt_samples = torch.zeros((monte_carlo_samples, num_samples, channels), device=device)
+
+        # Pre-sample indices for unique points
+        self.sample_indices = self._sample_unique_indices(data_shape[1:], ndim) # only spatial resolution
 
         # initialize mean and std
         self.mean_gt = torch.zeros(data_shape, device=device)
@@ -55,7 +67,31 @@ class StatsRecorder:
             return (1, 2, 3)
         else:
             raise ValueError(f"Only 2D or 3D data supported, got {ndim}D data.")
-        
+    
+
+    def _sample_unique_indices(self, spatial_resolution: Sequence[int], ndim: int):
+        """Sample unique pixel values to store the generated and gt results"""
+
+        if ndim == 2:
+            height, width = spatial_resolution
+            # random unique indices
+            flat_indices = torch.randperm(width * height)[:self.num_samples]
+            y_indices = flat_indices // width
+            x_indices = flat_indices % width
+            return torch.stack((x_indices, y_indices), dim=-1).to(self.device) 
+
+        elif ndim == 3:
+            depth, height, width = spatial_resolution
+            # random unique indices
+            flat_indices = torch.randperm(width * height * depth)[:self.num_samples]
+            z_indices = flat_indices // (width * height)
+            y_indices = (flat_indices % (width * height)) // width
+            x_indices = flat_indices % width
+            return torch.stack((x_indices, y_indices, z_indices), dim=-1).to(self.device) 
+
+        else:
+            raise ValueError(f"Only 2D or 3D supported, not {ndim}D")
+
     
     def _validate_data(self, gen_data: Tensor, gt_data: Tensor):
         """Validates the dimensionality and types of gen_data and gt_data."""
@@ -75,7 +111,37 @@ class StatsRecorder:
 
         self._validate_data(gen_data, gt_data)
         self.update_step_mean_and_std(gen_data, gt_data)
+        self.sample_points(gen_data, gt_data, self.ndim)
+
         self.observation += self.batch_size
+
+    
+    def sample_points(self, gen_data: Tensor, gt_data: Tensor, ndim: int):
+        """Extract sampled points based on precomputed indices."""
+
+        # Retrieve the current step
+        current_step = self.observation # current number of observations
+        final_step = self.observation + self.batch_size
+
+        x, y = self.sample_indices[:, 0], self.sample_indices[:, 1]
+
+        if ndim == 2:
+            sampled_gen = gen_data[..., y, x]
+            sampled_gt = gt_data[..., y, x]
+        elif ndim == 3:
+            z = self.sample_indices[:, 2]
+            sampled_gen = gen_data[..., z, y, x]
+            sampled_gt = gt_data[..., z, y, x]
+        else:
+            raise ValueError(f"Only 2D or 3D supported, not {self.ndim}D")
+
+        # Reshape to (batch_size, num_samples, channels)
+        sampled_gen = sampled_gen.permute(0, 2, 1)
+        sampled_gt = sampled_gt.permute(0, 2, 1)
+
+        # Store the current Monte Carlo step
+        self.gen_samples[current_step : final_step] = sampled_gen
+        self.gt_samples[current_step : final_step] = sampled_gt
 
 
     def update_step_mean_and_std(self, gen_data: Tensor, gt_data: Tensor):
@@ -112,5 +178,3 @@ class StatsRecorder:
         # update the mean values
         self.mean_gt = m / (m + n) * self.mean_gt + n / (m + n) * mean_gt_data
         self.mean_gen = m / (m + n) * self.mean_gen + n / (m + n) * mean_gen_data
-        
-        

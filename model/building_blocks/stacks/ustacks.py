@@ -211,7 +211,6 @@ class UStack(nn.Module):
             == len(self.num_res_blocks)
             == len(self.upsample_ratio)
         )
-        kernel_dim = len(x.shape) - 2
         h = x
 
         for level, channel in enumerate(self.num_channels):
@@ -222,12 +221,15 @@ class UStack(nn.Module):
                 h = self.conv_blocks[level][block_id](h, emb)
                 # Spatial Attention Blocks
                 if self.use_attention and level == 0:
-                    h = reshape_jax_torch(h) # (bs, width, height, c)
+                    h = reshape_jax_torch(h, kernel_dim=self.kernel_dim) # (bs, width, height, c)
                     b, *hw, c = h.shape
                     
                     h = self.attention_blocks[block_id](h.reshape(b, -1, c))
-                    h = reshape_jax_torch(self.res_conv_blocks[block_id](reshape_jax_torch(h))).reshape(b, *hw, c)
-                    h = reshape_jax_torch(h) # (bs, c, width, height)
+                    h = reshape_jax_torch(
+                        self.res_conv_blocks[block_id](reshape_jax_torch(h, kernel_dim=1)),
+                        kernel_dim=1
+                    ).reshape(b, *hw, c)
+                    h = reshape_jax_torch(h, kernel_dim=self.kernel_dim) # (bs, c, width, height)
 
             # Upsampling Block
             h = self.conv_layers[level](h)
@@ -247,28 +249,38 @@ class UpsampleFourierGaussian(nn.Module):
     or gaussian interpolation
     """
 
-    def __init__(self, 
-                 new_shape: Sequence[int], 
-                 num_res_blocks: Sequence[int], 
-                 mid_channel: int,
-                 out_channels:int, 
-                 emb_channels: int,
-                 dropout_rate: int=0.0, 
-                 padding_method: str='circular', 
-                 use_attention: bool=True,
-                 num_heads: int=8, 
-                 dtype: torch.dtype=torch.float32,
-                 device: torch.device = None,
-                 up_method: str='gaussian', 
-                 normalize_qk: bool = False):
+    def __init__(
+            self, 
+            new_shape: Sequence[int], 
+            num_res_blocks: Sequence[int], 
+            num_channels: Sequence[int],
+            num_blocks: int,
+            mid_channels: int,
+            out_channels:int, 
+            emb_channels: int,
+            kernel_dim: int,
+            upsample_ratio: Sequence[int] = None,
+            dropout_rate: int=0.0, 
+            padding_method: str='circular', 
+            use_attention: bool=True,
+            num_heads: int=8, 
+            dtype: torch.dtype=torch.float32,
+            device: torch.device = None,
+            up_method: str='gaussian', 
+            normalize_qk: bool = False
+        ):
         super(UpsampleFourierGaussian, self).__init__()
 
         self.new_shape = new_shape
         self.num_res_blocks = num_res_blocks
-        self.mid_channel = mid_channel
+        self.num_channels = num_channels
+        self.num_blocks = num_blocks
+        self.mid_channels = mid_channels
         self.dropout_rate = dropout_rate
         self.out_channels = out_channels
         self.emb_channels = emb_channels
+        self.kernel_dim = kernel_dim
+        self.upsample_ratio = upsample_ratio # only relevant if up_method == 'fourier'
         self.padding_method = padding_method
         self.use_attention = use_attention
         self.num_heads = num_heads
@@ -276,92 +288,153 @@ class UpsampleFourierGaussian(nn.Module):
         self.device = device
         self.up_method = up_method
 
+        conv_block_channels = [self.num_channels[0]]
+
         self.conv_blocks = nn.ModuleList()
         self.attention_blocks = nn.ModuleList()
         self.res_conv_blocks = nn.ModuleList()
-        self.conv_layers = None
-        self.norm = None
 
         self.level = 0
 
         for i in range(self.num_res_blocks[self.level]):
-            self.conv_blocks.append(None)
+            self.conv_blocks.append(
+                ConvBlock(
+                    in_channels=conv_block_channels[i],
+                    out_channels=self.mid_channels,
+                    emb_channels=self.emb_channels,
+                    kernel_size=self.kernel_dim * (3,),
+                    padding_mode=self.padding_method,
+                    padding=1,
+                    case=self.kernel_dim,
+                    dropout=self.dropout_rate,
+                    dtype=self.dtype,
+                    device=self.device,
+                )
+            )
             self.attention_blocks.append(
                 AttentionBlock(
-                    in_channels=new_shape[1],
+                    in_channels=256, # TODO: Calculate!
                     num_heads=self.num_heads, 
                     normalize_qk=normalize_qk,
                     dtype=self.dtype,
                     device=self.device)
                 )
+
             self.res_conv_blocks.append(
                 ResConv1x(
-                    in_channels=new_shape[1],
-                    hidden_layer_size=self.mid_channel * 2,
-                    out_channels=self.mid_channel,
-                    kernel_dim=len(new_shape[2:]),
+                    in_channels=256,
+                    hidden_layer_size=self.mid_channels * 2,
+                    out_channels=self.mid_channels,
+                    kernel_dim=1, # due to tokenization
                     dtype=self.dtype,
                     device=self.device
                 )
             )
+            conv_block_channels.append(self.mid_channels)
+        
+
+        self.norm = nn.GroupNorm(
+            min(max(self.mid_channels // 4, 1), 32), 
+            self.mid_channels,
+            device=self.device,
+            dtype=self.dtype
+        )
+
+
+        self.conv_layers = ConvLayer(
+            in_channels=self.mid_channels,
+            out_channels=self.out_channels,
+            kernel_size=self.kernel_dim * (3,),
+            padding_mode=self.padding_method,
+            padding=1,
+            case=self.kernel_dim,
+            kernel_init=default_init(),
+            dtype=self.dtype,
+            device=self.device,
+        )
+
+        # precomputation required tuples and tensors for fourier based upsampling scheme
+        if self.up_method == 'fourier':
+
+            # Now calculate the downsampled resolutions
+            # calculate list of upsample resolutions
+            list_upsample_resolutions = [self.new_shape[1:]]
+            for level, channel in enumerate(self.num_channels):
+                downsampled_resolution = tuple(
+                    [int(res / self.upsample_ratio[level]) for res in list_upsample_resolutions[-1]]
+                )
+                list_upsample_resolutions.append(downsampled_resolution)
+            list_upsample_resolutions = list_upsample_resolutions[::-1]
+            list_upsample_resolutions.pop()
+
+            # N ... width, M ... height, W ... depth
+            axes_map = {
+                1: (2,),      # for input shape (bs, c, N)
+                2: (2, 3),    # for input shape (bs, c, M, N)
+                3: (2, 3, 4)  # for input shape (bs, c, W, M, N)
+            }
+
+            if self.kernel_dim not in axes_map:
+                raise ValueError(
+                "Input must be either 2D, 3D or 4D with including the channel dim"
+                )
+            
+            self.axes = axes_map[self.kernel_dim]
+            input_resolution = list_upsample_resolutions[0]
+            
+            pad_sizes = [(0, 0)] * (self.kernel_dim + 2) # batch and channel dimension added
+            for axis in self.axes:
+                # self.new_shape is only off shape (c, M, N) for the 2D case thus -1 is necessary
+                pad_size = self.new_shape[axis-1] - input_resolution[axis-2]
+                assert pad_size >= 0, "Padding for Upsampling can't be negative"
+                pad_sizes[axis] = (pad_size // 2, pad_size - pad_size // 2)
+            pad_sizes = torch.tensor(pad_sizes[::-1], dtype=torch.int).flatten()
+            self.pad_sizes = tuple(pad_sizes.tolist())
+
+        elif self.up_method == 'gaussian':
+            # methods within gaussian are linear and lanczos, where lanczos is only valid for 2D
+            self.method = 'linear' # lanczos requires proper device handling!
+
 
     def _upsample_fourier_(self, x: Tensor) -> Tensor:
         """Upsampling with the Fourier Transformation for each batch individually"""
-        ndim = len(x.shape) - 2 # exlcuding the channel dim c and bs
-        # N ... width, M ... height, W ... depth
-        axes_map = {
-            1: (2,),      # for input shape (bs, c, N)
-            2: (2, 3),    # for input shape (bs, c, M, N)
-            3: (2, 3, 4)  # for input shape (bs, c, W, M, N)
-        }
-        if ndim not in axes_map:
-            raise ValueError(
-            "Input must be either 2D, 3D or 4D with including the channel dim"
-            )
         
-        axes = axes_map[ndim]
+        x_fft = torch.fft.fftshift(
+            torch.fft.fftn(x, dim=self.axes, norm='forward'), 
+            dim=self.axes)
         
-        x_fft = torch.fft.fftshift(torch.fft.fftn(x, dim=axes, norm='forward'), 
-                                    dim=axes)
-        
-        pad_sizes = [(0, 0)] * len(x.shape)
-        for axis in axes:
-            pad_size = self.new_shape[axis] - x.size(axis)
-            assert pad_size >= 0, "Padding for Upsampling can't be negative"
-            pad_sizes[axis] = (pad_size // 2, pad_size - pad_size // 2)
+        x_fft_padded = F.pad(x_fft, self.pad_sizes, mode='constant')
 
-        x_fft_padded = F.pad(x_fft, tuple(np.ravel(pad_sizes[::-1])), mode='constant')
-
-        x_upsampled = torch.fft.ifftn(torch.fft.ifftshift(x_fft_padded, dim=axes), 
-                                        dim=axes, norm='forward')
+        x_upsampled = torch.fft.ifftn(
+            torch.fft.ifftshift(x_fft_padded, dim=self.axes), 
+            dim=self.axes, norm='forward')
         
         return torch.real(x_upsampled)
 
 
-    def _upsample_gaussian_(self, x: Tensor, method: str='linear') -> Tensor:
+    def _upsample_gaussian_(self, x: Tensor) -> Tensor:
         """Upsampling by using Bilinear or Trilinear Interpolation"""
-
-        ndim = len(x.shape) - 2
-        if ndim == 1:
-            assert len(self.new_shape) == 3, "new_shape needs to be a 3D tuple"
-            size = (self.new_shape[2],)
+        # new_shape is (c, w, h) for the 2D case, excluding the batch dimension
+        if self.kernel_dim == 1:
+            assert len(self.new_shape) == 2, "new_shape needs to be a 2D tuple"
+            size = (self.new_shape[1],)
             mode = 'linear'
-        elif ndim == 2:
-            assert len(self.new_shape) == 4, "new_shape needs to be a 4D tuple"
-            size = (self.new_shape[2], self.new_shape[3])
+        elif self.kernel_dim == 2:
+            assert len(self.new_shape) == 3, "new_shape needs to be a 3D tuple"
+            size = (self.new_shape[1], self.new_shape[2])
             mode = 'bilinear'
-        elif ndim == 3:
-            assert len(self.new_shape) == 5, "new_shape needs to be a 5D tuple"
-            size = (self.new_shape[2], self.new_shape[3], self.new_shape[4])
+        elif self.kernel_dim == 3:
+            assert len(self.new_shape) == 4, "new_shape needs to be a 4D tuple"
+            size = (self.new_shape[1], self.new_shape[2], self.new_shape[3])
             mode = 'trilinear'
         else:
             raise ValueError("Input must be either 1D, 2D, or 3D without channel")
         
-        if method == 'linear':
+        if self.method == 'linear':
             return F.interpolate(x, size=size, mode=mode, align_corners=True)
         
-        elif method == 'lanczos':
-            assert len(x.shape) - 2 == 2, "LACZOS is only valid for a 2D grid!"
+        elif self.method == 'lanczos':
+            assert self.kernel_dim == 2, "LACZOS is only valid for a 2D grid!"
             bs, c, h, w = x.shape
             to_pil = ToPILImage()
             to_tensor = ToTensor()
@@ -381,57 +454,25 @@ class UpsampleFourierGaussian(nn.Module):
       
 
     def forward(self, x: Tensor, emb: Tensor) -> Tuple[Tensor, Tensor]:
-        kernel_dim = len(x.shape) - 2 # number of spatial dimensions
   
-        h = x.clone()
+        h = x
             
         for block_id in range(self.num_res_blocks[self.level]):
-            if self.conv_blocks[block_id] is None:
-                # Initialize
-                self.conv_blocks[block_id] = ConvBlock(
-                    in_channels=h.shape[1],
-                    out_channels=self.mid_channel,
-                    emb_channels=self.emb_channels,
-                    kernel_size=kernel_dim * (3,),
-                    padding_mode=self.padding_method,
-                    padding=1,
-                    case=kernel_dim,
-                    dropout=self.dropout_rate,
-                    dtype=self.dtype,
-                    device=self.device,
-                )
             h = self.conv_blocks[block_id](h, emb)
 
             if self.use_attention and self.level == 0:
-                h = reshape_jax_torch(h)
+                h = reshape_jax_torch(h, kernel_dim=self.kernel_dim)
                 bs, *hw, c = h.shape
 
-                h = self.attention_blocks[block_id](h.reshape(bs, -1, c), True)
-                h = reshape_jax_torch(self.res_conv_blocks[block_id](reshape_jax_torch(h)).reshape(bs, *hw, c))
+                h = self.attention_blocks[block_id](h.reshape(bs, -1, c))
 
-        if self.norm is None:
-            self.norm = nn.GroupNorm(
-                min(max(h.shape[1] // 4, 1), 32), 
-                h.shape[1],
-                device=self.device,
-                dtype=self.dtype
+                h = reshape_jax_torch(
+                    self.res_conv_blocks[block_id](
+                        reshape_jax_torch(h, kernel_dim=1)).reshape(bs, *hw, c), 
+                    kernel_dim=self.kernel_dim
                 )
 
         h = F.silu(self.norm(h))
-
-        if self.conv_layers is None:
-            # Initialize:
-            self.conv_layers = ConvLayer(
-                in_channels=h.shape[1],
-                out_channels=self.out_channels,
-                kernel_size=kernel_dim * (3,),
-                padding_mode=self.padding_method,
-                padding=1,
-                case=kernel_dim,
-                kernel_init=default_init(),
-                dtype=self.dtype,
-                device=self.device,
-            )
         h = self.conv_layers(h)
 
         if self.up_method == 'fourier':

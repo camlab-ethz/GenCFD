@@ -20,10 +20,10 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from eval.metrics.stats_recorder import StatsRecorder
-from eval.metrics.probabilistic_forecast import relative_L2_norm, absolute_L2_norm
 from dataloader.dataset import TrainingSetBase
 from utils.dataloader_utils import normalize, denormalize
 from utils.model_utils import reshape_jax_torch
+from utils.eval_utils import summarize_metric_results
 from utils.visualization_utils import plot_2d_sample, gen_gt_plotter_3d
 from diffusion.samplers import Sampler
 
@@ -71,8 +71,12 @@ def run(
         None
     """
     batch_size = dataloader.batch_size
+
     # first check if the correct dataset is used to compute statistics
-    if dataset_module not in ['ConditionalDataIC_Vel', 'ConditionalDataIC_3D', 'ConditionalDataIC_3D_TG']:
+    if dataset_module not in [
+        'ConditionalDataIC_Vel', 'ConditionalDataIC_Cloud_Shock_2D',
+        'ConditionalDataIC_3D', 'ConditionalDataIC_3D_TG'
+    ]:
         raise ValueError(f"To compute statistics use a conditional dataset, not {dataset_module}!")
     
     # To store either visualization or metric results a save_dir needs to be specified
@@ -81,15 +85,6 @@ def run(
     if not os.path.exists(save_dir):
         os.makedirs(save_dir)
         print(f"Created a directory to store metrics and visualizations: {save_dir}")
-    
-    # check whether problem requires a conditioning on the lead time
-    # if time_cond:
-    #     # constant lead_time with 1 and a single step from an initial condition to 1
-    #     # lead_time_scalar = 0.25 + 0.4375 * (5 - 1)
-    #     # lead_time = torch.ones((batch_size, 1), dtype=torch.float32, device=device) * lead_time_scalar
-    #     lead_time = torch.ones((batch_size, 1), dtype=torch.float32, device=device)
-    # else:
-    #     lead_time = [None] * batch_size
 
     if compute_metrics:
         print("Compute Metrics")
@@ -146,34 +141,7 @@ def run(
             # solutions are stored with shape (bs, c, z, y, x)
             stats_recorder.update_step(u_gen, u)
         
-        # Show results accumulated over the number of monte carlo samples
-        mean_gt = stats_recorder.mean_gt
-        mean_gen = stats_recorder.mean_gen
-
-        std_gt = stats_recorder.std_gt
-        std_gen = stats_recorder.std_gen
-
-        rel_mean = relative_L2_norm(gen_tensor=mean_gen, gt_tensor=mean_gt, axis=stats_recorder.axis)
-        rel_std = relative_L2_norm(gen_tensor=std_gen, gt_tensor=std_gt, axis=stats_recorder.axis)
-
-        abs_mean = absolute_L2_norm(gen_tensor=mean_gen, gt_tensor=mean_gt, axis=stats_recorder.axis)
-        abs_std = absolute_L2_norm(gen_tensor=std_gen, gt_tensor=std_gt, axis=stats_recorder.axis)
-
-        print(" ")
-        print("Relative RMSE for each metric and channel")
-        print(f"Mean Metric: {rel_mean}    STD Metric {rel_std}")
-        print(" ")
-        print("Absolute RMSE for each metric and channel")
-        print(f"Mean Metric: {abs_mean}    STD Metric {abs_std}")
-
-        # save results
-        np.savez(
-            os.path.join(save_dir, f'eval_results_{monte_carlo_samples}_samples.npz'), 
-            rel_mean=rel_mean.cpu().numpy(), 
-            rel_std=rel_std.cpu().numpy(),
-            abs_mean=abs_mean.cpu().numpy(),
-            abs_std=abs_std.cpu().numpy()
-        )
+        summarize_metric_results(stats_recorder, save_dir)
 
     if visualize:
         # Run a single run to visualize results without computing metrics
@@ -181,6 +149,11 @@ def run(
         batch = {k: v.to(device, non_blocking=True) for k, v in batch.items()}
         u0 = batch['initial_cond']
         u = batch['target_cond']
+
+        if time_cond:
+            lead_time = batch['lead_time'].reshape(-1,1)
+        else:
+            lead_time = [None] * batch_size
 
         # normalize inputs (initial conditions) and outputs (solutions)
         u0_norm = reshape_jax_torch(

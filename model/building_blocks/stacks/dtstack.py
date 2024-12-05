@@ -73,6 +73,12 @@ class DStack(nn.Module):
     self.normalize_qk = normalize_qk
     self.device = device
 
+    assert (
+      len(self.num_channels)
+      == len(self.num_res_blocks)
+      == len(self.downsample_ratio)
+    )
+
     self.conv_layer = ConvLayer(
       in_channels=self.in_channels,
       out_channels=self.num_input_proj_channels,
@@ -159,12 +165,7 @@ class DStack(nn.Module):
           )
 
   def forward(self, x: Tensor, emb: Tensor) -> list[Tensor]:
-    assert (
-      len(self.num_channels)
-      == len(self.num_res_blocks)
-      == len(self.downsample_ratio)
-    )
-    kernel_dim = len(x.shape) - 2
+
     skips = []
     
     h = self.conv_layer(x)
@@ -181,12 +182,16 @@ class DStack(nn.Module):
         if self.use_attention and level == len(self.num_channels) - 1:
           if self.use_position_encoding:
             h = self.pos_emb_layers[block_id](h)
-          h = reshape_jax_torch(h) # (bs, width, height, c)
+          h = reshape_jax_torch(h, kernel_dim=self.kernel_dim) # (bs, width, height, c)
           b, *hw, c = h.shape
           h = self.attention_blocks[block_id](h.reshape(b, -1, c))
           # reshaping h first to get (bs, c, *hw), then in the end reshape again to get (bs, c, h, w)
-          h = reshape_jax_torch(self.res_conv_blocks[block_id](reshape_jax_torch(h))).reshape(b, *hw, c)
-          h = reshape_jax_torch(h)
+          h = reshape_jax_torch(
+            self.res_conv_blocks[block_id](reshape_jax_torch(h, kernel_dim=1)),
+            kernel_dim=1
+          ).reshape(b, *hw, c)
+
+          h = reshape_jax_torch(h, kernel_dim=self.kernel_dim)
         
         skips.append(h)
 
