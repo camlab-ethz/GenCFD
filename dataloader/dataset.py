@@ -27,9 +27,11 @@ import os
 import netCDF4
 import numpy as np
 import torch
+import torch.distributed as dist
 import shutil
-from typing import Union, Tuple
-from torch.distributed import broadcast_object_list, is_initialized
+from typing import Union, Any
+from torch.distributed import is_initialized
+from torch.utils.data import Subset
 
 DIR_PATH_LOADER = '/cluster/work/math/camlab-data/data/diffusion_project'
 
@@ -37,13 +39,59 @@ array = np.ndarray
 Tensor = torch.Tensor
 
 
+def train_test_split(dataset, split_ratio=0.8, seed=42):
+    """
+    Split a dataset into training and testing subsets.
+
+    Args:
+        dataset: The dataset to split.
+        split_ratio: Proportion of the dataset to use for training (default: 0.8).
+        seed: Random seed for reproducibility (default: 42).
+    
+    Returns:
+        A tuple (train_dataset, test_dataset) as subsets of the input dataset.
+    """
+    num_samples = len(dataset)
+    indices = np.arange(num_samples)
+
+    # Shuffle indices deterministically
+    rng = np.random.RandomState(seed)
+    rng.shuffle(indices)
+
+    split_idx = int(num_samples * split_ratio)
+
+    train_indices = indices[:split_idx]
+    eval_indices = indices[split_idx:]
+
+    train_subset = Subset(dataset, train_indices)
+    eval_subset = Subset(dataset, eval_indices)
+
+    return train_subset, eval_subset
+
+
+def create_file_system(metadata: Any) -> dict:
+    """Creates the filesystem with the metadata provided
+    Some parts are None values and just placeholders."""
+
+    return {
+        'file_name': metadata.file_name,
+        'origin': metadata.origin,
+        'mean_file': metadata.mean_file,
+        'std_file': metadata.std_file,
+        'stats_file': metadata.stats_file,
+        'origin_stats': metadata.origin_stats,
+        'conditional_path': metadata.conditional_path
+    }
+
+
 class TrainingSetBase:
-    def __init__(self,
-                 training_samples: int,
-                 file_system: dict,
-                 input_channel: int,
-                 output_channel: int,
-                 start: int = 0,
+    def __init__(
+        self,
+        training_samples: int,
+        file_system: dict,
+        input_channel: int,
+        output_channel: int,
+        start: int = 0,
     ) -> None:
 
         self.start = start
@@ -80,15 +128,16 @@ class TrainingSetBase:
         
         # Only copy if the file doesn't exist at the destination
         if not os.path.exists(dest_path) and (RANK == 0 or RANK == -1):
+            print(" ")
             print(f"Start copying {file} to {dest_path}...")
             shutil.copy(data_dir, dest_path)
             print("Finished data copy.")
-        
-        # Synchronize across processes if distributed is initialized
+
         if is_initialized():
-            dest_path = broadcast_object_list([dest_path], src=0)[0]
+            dist.barrier(device_ids=[RANK])
         
         return dest_path
+
 
     def file_on_local_scratch(self, file_name: str, origin: str) -> str:
         """Checks whether the file is in the local scratch directory or a default path.
@@ -112,7 +161,6 @@ class TrainingSetBase:
             print(f"Using file from local scratch: {tmpdir_file_path}")
             return tmpdir_file_path
         
-        print("Using default file path")
         default_file_path = os.path.join(origin, file_name)
         if os.path.exists(default_file_path):
             return default_file_path
@@ -123,10 +171,21 @@ class TrainingSetBase:
         raise ValueError(f"File not found: {file_name}")
 
     
-    def retrieve_stats_from_file(self, file_system: dict, ndim: int) -> None:
+    def retrieve_stats_from_file(
+            self, 
+            file_system: dict, 
+            ndim: int,
+            get_values: bool = False
+        ) -> None:
         """Given some stats files, the mean and std for training input and output 
-        can be retrieved"""
-
+        can be retrieved
+        
+        Args:
+            file_system: dictionary with relevant files for the mean and the data
+            ndim: dimensionality of the file (number of channels)
+            get_values: in some cases the mean can be extracted directly without calculation
+        """
+        
         mean_path = os.path.join(file_system['origin_stats'], file_system['mean_file'])
         std_path = os.path.join(file_system['origin_stats'], file_system['std_file'])
 
@@ -150,17 +209,25 @@ class TrainingSetBase:
         mean_training_output = mean_training_output[..., :self.output_channel]
         std_training_output = std_training_output[..., :self.output_channel]
 
-        # Compute the resulting tensors
-        if ndim == 2:
-            stats_axis = (0, 1)
-        elif ndim == 3:
-            stats_axis = (0, 1, 2)
+        if get_values:
+            # Exract values directly
+            self.mean_training_input = mean_training_input
+            self.std_training_input = std_training_input
+            self.mean_training_output = mean_training_output
+            self.std_training_output = std_training_output
+
         else:
-            raise ValueError(f"Only 2D or 3D datasets are supported and not {ndim}D")
-        self.mean_training_input = mean_training_input.mean(axis=stats_axis)
-        self.std_training_input = np.mean(std_training_input ** 2, stats_axis) ** 0.5
-        self.mean_training_output = mean_training_output.mean(axis=stats_axis)
-        self.std_training_output = np.mean(std_training_output ** 2, stats_axis) ** 0.5
+            # Compute the resulting tensors
+            if ndim == 2:
+                stats_axis = (0, 1)
+            elif ndim == 3:
+                stats_axis = (0, 1, 2)
+            else:
+                raise ValueError(f"Only 2D or 3D datasets are supported and not {ndim}D")
+            self.mean_training_input = mean_training_input.mean(axis=stats_axis)
+            self.std_training_input = np.mean(std_training_input ** 2, stats_axis) ** 0.5
+            self.mean_training_output = mean_training_output.mean(axis=stats_axis)
+            self.std_training_output = np.mean(std_training_output ** 2, stats_axis) ** 0.5
 
 
     def normalize_input(self, u_: Union[array, Tensor]) -> Union[array, Tensor]:
@@ -226,9 +293,10 @@ class TrainingSetBase:
 class DataIC_Vel(TrainingSetBase):
     def __init__(
         self, 
+        metadata: Any,
         start: int = 0,
         file: str = None,
-        move_to_local_scratch: bool = True
+        move_to_local_scratch: bool = True,
     ):
         
         self.class_name = self.__class__.__name__
@@ -238,22 +306,9 @@ class DataIC_Vel(TrainingSetBase):
         self.spatial_resolution = (128, 128)
         self.input_shape = (4, 128, 128)
         self.output_shape = (2, 128, 128)
-
-        # file_system = {
-        #     'file_name': 'ddsl_fast_resize_wrap_128_tr2.nc',
-        #     'origin': DIR_PATH_LOADER,
-        #     'mean_file': 'mean_20000_0_128_False.npy',
-        #     'std_file': 'std_20000_0_128_False.npy',
-        #     'origin_stats': '/cluster/work/math/camlab-data/data/diffusion_project/TrainingStats_resize_wrap_DataIC_XR'
-        # }
-
-        file_system = {
-            'file_name': 'ddsl_fast_nothing_128_tr2.nc',
-            'origin': DIR_PATH_LOADER,
-            'mean_file': 'mean_100_0_128_False.npy',
-            'std_file': 'std_100_0_128_False.npy',
-            'origin_stats': '/cluster/work/math/camlab-data/data/diffusion_project/TrainingStats_nothing_DataIC_Vel'
-        }
+    
+        self.metadata = metadata
+        file_system = create_file_system(metadata)
 
         if move_to_local_scratch:
             # Copy file to local scratch
@@ -269,7 +324,7 @@ class DataIC_Vel(TrainingSetBase):
             training_samples=self.file['data'].shape[0], 
             file_system=file_system,
             input_channel=input_channel, 
-            output_channel=output_channel, 
+            output_channel=output_channel,
         )
 
         # Set mean and std for training input and output
@@ -291,25 +346,28 @@ class DataIC_Vel(TrainingSetBase):
             torch.from_numpy(data_input)
             .type(torch.float32)
             .permute(2, 1, 0)
+            .cpu()
         )
 
         target_cond = (
             torch.from_numpy(data_output)
             .type(torch.float32)
             .permute(2, 1, 0)
+            .cpu()
         )
 
         return {
             'initial_cond': initial_cond,
             'target_cond': target_cond
         }
-
+        
 
 #################### 2D CLOUD SHOCK DATASETS ####################
 
 class DataIC_Cloud_Shock_2D(TrainingSetBase):
     def __init__(
             self, 
+            metadata: Any,
             start = 0, 
             file = None,
             move_to_local_scratch: bool = True
@@ -322,14 +380,8 @@ class DataIC_Cloud_Shock_2D(TrainingSetBase):
         self.input_shape = (8, 128, 128)
         self.output_shape = (4, 128, 128)
 
-        file_system = {
-            'file_name': 'cloud_shock_all_128_cons_resize_wrap.nc',
-            'origin': DIR_PATH_LOADER,
-            'mean_file': 'mean_20000_0_128_False.npy',
-            'std_file': 'std_20000_0_128_False.npy',
-            'origin_stats': '/cluster/work/math/camlab-data/data/diffusion_project/TrainingStats_resize_wrap_DataIC_Euler_Cons',
-            'conditional_path': '/cluster/work/math/camlab-data/data/micro_macro_cloudshock_processed_EULER_SCRIPT.nc'
-        }
+        self.metadata = metadata
+        file_system = create_file_system(metadata)
 
         if move_to_local_scratch:
             # Copy file to local scratch
@@ -378,11 +430,90 @@ class DataIC_Cloud_Shock_2D(TrainingSetBase):
             'target_cond': target_cond
         }
 
+#################### 2D RICHTMYER-MESHKOV DATASETS ####################
+
+class RichtmyerMeshkov2D(TrainingSetBase):
+    def __init__(
+            self, 
+            metadata: Any,
+            start = 0, 
+            file = None,
+            move_to_local_scratch: bool = True
+        ):
+
+        self.class_name = self.__class__.__name__
+
+        # Channels: ['rho', 'E', 'mx', 'my']
+        input_channel = 4
+        output_channel = 4
+        self.spatial_resolution = (128, 128)
+        self.input_shape = (8, 128, 128)
+        self.output_shape = (4, 128, 128)
+
+        self.metadata = metadata
+        file_system = create_file_system(metadata)
+
+        if move_to_local_scratch:
+            # Copy file to local scratch
+            file_path = self._move_to_local_scratch(file_system=file_system, scratch_dir='TMPDIR')
+        else:
+            # Get the correct file_path and check whether file is on local scratch
+            file_path = self.file_on_local_scratch(file_system['file_name'], file_system['origin'])
+
+        self.file = netCDF4.Dataset(file_path, 'r')
+
+        super().__init__(
+            training_samples=self.file.dimensions['member'].size,
+            file_system=file_system,
+            input_channel=input_channel,
+            output_channel=output_channel,
+            start=start
+        )
+
+        self.retrieve_stats_from_file(file_system=file_system, ndim=2, get_values=True)
+
+    def __getitem__(self, index):
+
+        index += self.start  
+  
+        # Load the data for the given index
+        rho_data = self.file.variables['rho'][index]  # Shape: (2, 128, 128)
+        E_data = self.file.variables['E'][index]
+        mx_data = self.file.variables['mx'][index]
+        my_data = self.file.variables['my'][index]
+
+        # Stack along the new last dimension (axis=-1)
+        combined_data = np.stack((rho_data, E_data, mx_data, my_data), axis=-1)  # Shape: (2, 128, 128, 4)
+
+        # Extract initial and final conditions
+        initial_condition = self.normalize_input(
+            combined_data[0, ...])  # Shape: (128, 128, 4)
+        target_condition = self.normalize_output(
+            combined_data[1, ...])  # Shape: (128, 128, 4)
+
+        initial_cond = (
+            torch.from_numpy(initial_condition)
+            .type(torch.float32)
+            .permute(2, 1, 0)
+        )
+
+        target_cond = (
+            torch.from_numpy(target_condition)
+            .type(torch.float32)
+            .permute(2, 1, 0)
+        )
+
+        return {
+            'initial_cond': initial_cond,
+            'target_cond': target_cond
+        }
+
 #################### 3D SHEAR LAYER DATASETS ####################
 
 class DataIC_3D_Time(TrainingSetBase):
     def __init__(
             self,
+            metadata: Any,
             start=0,
             file = None,
             move_to_local_scratch: bool = True
@@ -394,10 +525,8 @@ class DataIC_3D_Time(TrainingSetBase):
         self.input_shape = (6, 64, 64, 64)
         self.output_shape = (3, 64, 64, 64)
 
-        file_system = {
-            'file_name': 'shear_layer_3D_64_all_time_2.nc' if start == 0 else 'shear_layer_3D_64_smaller.nc',
-            'origin': DIR_PATH_LOADER
-        }
+        self.metadata = metadata
+        file_system = create_file_system(metadata)
 
         if move_to_local_scratch:
             # Copy file to local scratch
@@ -462,6 +591,7 @@ class DataIC_3D_Time_TG(TrainingSetBase):
     
     def __init__(
             self,
+            metadata: Any,
             start: int = 0,
             file: str = None,
             min_time: int = 0,
@@ -472,13 +602,8 @@ class DataIC_3D_Time_TG(TrainingSetBase):
         input_channel = 3
         output_channel = 3
 
-        file_system = {
-            'file_name': 'N128_64.nc',
-            'origin': '/cluster/work/math/camlab-data/data/incompressible/tg',
-            'mean_file': 'mean_99000_0_64_False.npy',
-            'std_file': 'std_99000_0_64_False.npy',
-            'origin_stats': '/cluster/work/math/camlab-data/data/diffusion_project/TrainingStats_nothing_DataIC_3D_Time_TG'
-        }
+        self.metadata = metadata
+        file_system = create_file_system(metadata)
 
         if move_to_local_scratch:
             # Copy file to local scratch
@@ -536,10 +661,6 @@ class DataIC_3D_Time_TG(TrainingSetBase):
         final_condition = self.normalize_output(
             combined_data[t_final])  # Shape: (64, 64, 64, 3)
         
-        # Concatenate along the last axis to form the output tensor
-        output_tensor = np.concatenate(
-            (initial_condition, final_condition), axis=-1)  # Shape: (64, 64, 64, 6)
-        
         # Linearly remap the lead_time in the interval [0.25, 2.0].
         lead_time = float(t_final - t_initial)
         lead_time_normalized = 0.25 + 0.4375 * (lead_time - 1)
@@ -575,17 +696,19 @@ perturbations are in the area of 1 grid cell.
 
 class ConditionalBase(TrainingSetBase):
 
-    def __init__(self,
-                 training_samples: int,
-                 file_system: dict,
-                 input_channel: int,
-                 output_channel: int,
-                 start: int = 0,
-                 micro_perturbation: int = 0,
-                 macro_perturbation: int = 0,
-                 file_path: str = None,
-                 stat_folder: str = None,
-                 t_final: int = None) -> None : 
+    def __init__(
+            self,
+            training_samples: int,
+            file_system: dict,
+            input_channel: int,
+            output_channel: int,
+            start: int = 0,
+            micro_perturbation: int = 0,
+            macro_perturbation: int = 0,
+            file_path: str = None,
+            stat_folder: str = None,
+            t_final: int = None
+        ) -> None : 
 
         super().__init__(
             training_samples=training_samples, 
@@ -650,7 +773,11 @@ class ConditionalBase(TrainingSetBase):
 #--------------------------------------
 
 class ConditionalDataIC_Vel(ConditionalBase):
-    def __init__(self, move_to_local_scratch: bool = True):
+    def __init__(
+            self, 
+            metadata: Any,
+            move_to_local_scratch: bool = True
+        ):
         
         input_channel = 2
         output_channel = 2
@@ -659,12 +786,8 @@ class ConditionalDataIC_Vel(ConditionalBase):
         self.input_shape = (4, 128, 128)
         self.output_shape = (2, 128, 128)
 
-        file_system = {
-            'file_name': 'macro_micro_id_2d.nc',
-            'origin': DIR_PATH_LOADER,
-            'stats_file': 'GroundTruthStats_ConditionalDataIC_Vel_nothing_128_10000',
-            'origin_stats': DIR_PATH_LOADER 
-        }
+        self.metadata = metadata
+        file_system = create_file_system(metadata)
 
         if move_to_local_scratch:
             # Copy file to local scratch
@@ -727,7 +850,11 @@ class ConditionalDataIC_Vel(ConditionalBase):
 
 
 class ConditionalDataIC_Cloud_Shock_2D(ConditionalBase):
-    def __init__(self, move_to_local_scratch: bool = True):
+    def __init__(
+            self, 
+            metadata: Any,
+            move_to_local_scratch: bool = True
+        ):
         
         input_channel = 4
         output_channel = 4
@@ -736,10 +863,8 @@ class ConditionalDataIC_Cloud_Shock_2D(ConditionalBase):
         self.input_shape = (8, 128, 128)
         self.output_shape = (4, 128, 128)
         
-        file_system = {
-            'file_name': 'micro_macro_cloudshock_processed_EULER_SCRIPT.nc',
-            'origin': '/cluster/work/math/camlab-data/data'
-        }
+        self.metadata = metadata
+        file_system = create_file_system(metadata)
 
         if move_to_local_scratch:
             # Copy file to local scratch
@@ -795,7 +920,11 @@ class ConditionalDataIC_Cloud_Shock_2D(ConditionalBase):
 
 
 class ConditionalDataIC_3D(ConditionalBase):
-    def __init__(self, move_to_local_scratch: bool = True):
+    def __init__(
+            self, 
+            metadata: Any,
+            move_to_local_scratch: bool = True
+        ):
 
         input_channel = 3
         output_channel = 3
@@ -809,10 +938,8 @@ class ConditionalDataIC_3D(ConditionalBase):
 
         self.time_step = -1
 
-        file_system = {
-            'file_name': 'macro_micro_id_3d.nc',
-            'origin': DIR_PATH_LOADER
-        }
+        self.metadata = metadata
+        file_system = create_file_system(metadata)
 
         if move_to_local_scratch:
             # Copy file to local scratch
@@ -880,7 +1007,11 @@ class ConditionalDataIC_3D(ConditionalBase):
 
 
 class ConditionalDataIC_3D_TG(ConditionalBase):
-    def __init__(self, t_final: int = 5, move_to_local_scratch: bool = True):
+    def __init__(
+            self, 
+            metadata: Any,
+            t_final: int = 5, 
+            move_to_local_scratch: bool = True):
 
         input_channel = 3
         output_channel = 3
@@ -894,11 +1025,9 @@ class ConditionalDataIC_3D_TG(ConditionalBase):
         self.start = 0
         self.start_index = 0
         
-        file_system = {
-            'file_name': 'micro_ref_sol_N128_64.nc',
-            'origin': '/cluster/work/math/camlab-data/data/incompressible/tg'
-        }
-
+        self.metadata = metadata
+        file_system = create_file_system(metadata)
+        
         if move_to_local_scratch:
             # Copy file to local scratch
             file_path = self._move_to_local_scratch(file_system=file_system, scratch_dir='TMPDIR')

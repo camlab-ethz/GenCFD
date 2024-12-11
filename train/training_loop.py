@@ -18,19 +18,21 @@
 import os
 from typing import Any, Sequence, Optional
 import torch
+import torch.distributed as dist
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 from utils import callbacks as cb
 from train import trainers
 from utils import train_utils
-import os
 
-# TODO: package parameters into logical groupings (see cl/497196196)
 def run(
     *,
     train_dataloader: DataLoader,
     trainer: trainers.BaseTrainer,
     workdir: str,
+    # DDP configs
+    world_size: int,
+    local_rank: int,
     # training configs
     total_train_steps: int,
     metric_aggregation_steps: int = 50,
@@ -42,8 +44,6 @@ def run(
     # other configs
     metric_writer: Optional[SummaryWriter] = None,
     callbacks: Sequence[cb.Callback] = (),
-    # model configs
-    compile_model: bool = False
 ) -> None:
   """Runs trainer for a training task.
 
@@ -59,6 +59,7 @@ def run(
     trainer: A trainer object hosting the train and eval logic.
     workdir: The working directory where results (e.g. train & eval metrics) and
       progress (e.g. checkpoints) are saved.
+    world_size: describes if model is in ddp mode trained (world_size > 1)
     total_train_steps: Total number of training steps to run.
     metric_aggregation_steps: The trainer runs this number of steps at a time,
       after which training metrics are aggregated and logged.
@@ -76,7 +77,6 @@ def run(
       also accessible to callbacks for custom writing in other formats.
     callbacks: A sequence of self-contained programs executing non-essential
       logic (e.g. checkpoint saving, logging, timing, profiling etc.).
-    compile_model: For faster training the model can be compiled with torch.compile()
   """
   if not os.path.exists(workdir):
     os.makedirs(workdir)
@@ -95,11 +95,11 @@ def run(
     if run_sanity_eval_batch:
       trainer.eval(eval_iter, num_steps=1)
 
-  if metric_writer is None:
+  if metric_writer is None and local_rank in {0, -1}:
     metric_writer = SummaryWriter(log_dir=workdir)
 
   for callback in callbacks:
-    callback.metric_writer = metric_writer
+    callback.metric_writer = metric_writer if local_rank in {0, -1} else None
     callback.on_train_begin(trainer)
 
   cur_step = trainer.train_state.int_step
@@ -115,6 +115,10 @@ def run(
   step_diff_train = 0
   epochs_train_steps = epoch_train * len(train_dataloader) - step_diff_train
 
+  # Barrier before training
+  if world_size > 1:
+    dist.barrier(device_ids=[local_rank])
+
   while cur_step < total_train_steps:
     for callback in callbacks:
       callback.on_train_batches_begin(trainer)
@@ -123,14 +127,21 @@ def run(
 
     # evaluate if training dataset reinitialization is necessary
     if cur_step + num_steps > epochs_train_steps:
+      epoch_train += 1 # increase epoch for training dataset
+
+      if world_size > 1:
+        # Reset for random shuffling
+        train_dataloader.sampler.set_epoch(epoch_train)
+
       train_iter = iter(train_dataloader)
-      epoch_train += 1
       step_diff_train += epochs_train_steps - cur_step
       epochs_train_steps = epoch_train * len(train_dataloader) - step_diff_train
 
     train_metrics = trainer.train(train_iter, num_steps).compute() 
     cur_step += num_steps
-    metric_writer.add_scalars('train', train_metrics, cur_step)
+
+    if (local_rank == 0 or local_rank == -1):
+      metric_writer.add_scalars('train', train_metrics, cur_step)
 
     # At train/eval batch end, callbacks are called in reverse order so that
     # they are last-in-first-out, loosely resembling nested python contexts.
@@ -146,8 +157,13 @@ def run(
 
         # evaluate if evaluation iterator needs to be reinitialized
         if cur_step + num_batches_per_eval > epochs_eval_steps:
+          epoch_eval += 1 # increase epoch for evaluation dataset
+
+          if world_size > 1:
+            # Reset for random shuffling
+            eval_dataloader.sampler.set_epoch(epoch_eval)
+
           eval_iter = iter(eval_dataloader)
-          epoch_eval += 1
           step_diff_eval += epochs_eval_steps - cur_step
           epochs_eval_steps = epoch_eval * eval_steps_per_epoch - step_diff_eval
 
@@ -155,7 +171,9 @@ def run(
         eval_metrics_to_log = {
             k: v for k, v in eval_metrics.items() if train_utils.is_scalar(v)
         }
-        metric_writer.add_scalars('eval', eval_metrics_to_log, cur_step)
+        
+        if (local_rank == 0 or local_rank == -1):
+          metric_writer.add_scalars('eval', eval_metrics_to_log, cur_step)
 
         for callback in reversed(callbacks):
           callback.on_eval_batches_end(trainer, eval_metrics)
@@ -163,4 +181,5 @@ def run(
   for callback in reversed(callbacks):
     callback.on_train_end(trainer)
 
-  metric_writer.flush()
+  if (local_rank == 0 or local_rank == -1):
+    metric_writer.flush()

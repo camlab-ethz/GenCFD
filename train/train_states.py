@@ -58,7 +58,8 @@ class TrainState:
   def restore_from_checkpoint(
       cls,
       ckpt_path: str,
-      ref_state: Optional["TrainState"] = None) -> "TrainState":
+      ref_state: Optional["TrainState"] = None
+    ) -> "TrainState":
     """Restores train state from an orbax checkpoint directory.
 
     Args:
@@ -129,23 +130,52 @@ class BasicTrainState(TrainState):
     self.opt_state = opt_state
 
   @classmethod
-  def restore_from_checkpoint(cls, 
-                              ckpt_path: str, 
-                              model: nn.Module, 
-                              optimizer: torch.optim.Optimizer
-                              ) -> TrainState:
+  def restore_from_checkpoint(
+      cls, 
+      ckpt_path: str, 
+      model: nn.Module, 
+      optimizer: torch.optim.Optimizer,
+      is_compiled: bool,
+      is_parallelized: bool,
+      device: torch.device = None
+    ) -> TrainState:
     
-    checkpoint = torch.load(ckpt_path, weights_only=True)
+    # if model was trained on gpu but is evaluated on the cpu 'map_location' is necessary
+    checkpoint = torch.load(ckpt_path, weights_only=True, map_location=device)
 
     params = checkpoint["params"] if "params" in checkpoint.keys() else checkpoint["model_state_dict"]
     opt_state = checkpoint["opt_state"] if "opt_state" in checkpoint.keys() else checkpoint["optimizer_state_dict"]
 
-    is_compiled = checkpoint['is_compiled'] # check if stored model was compiled
-    if is_compiled:
-        # stored model was compiled, thus the keys are stored with _orig_mod. and needs to be 
-        params = {
-          key.replace('_orig_mod.', ''): value for key, value in params.items()
-        }
+
+    checkpoint_compiled = checkpoint['is_compiled'] # check if stored model was compiled
+    checkpoint_ddp = checkpoint['is_parallelized'] # check if stored model was trained in parallel
+
+    keyword_compiled = '_orig_mod.'
+    keyword_ddp = 'module.'
+
+    if not is_compiled and checkpoint_compiled:
+      # stored model was compiled, current model is not: delete _orig_mod. in every key 
+      params = {
+        key.replace(keyword_compiled, ''): value for key, value in params.items()
+      }
+    
+    if is_compiled and not checkpoint_compiled:
+      # stored model not compiled, current model is compiled: add _orig_mod. at the beginning
+      params = {
+        keyword_compiled + key : value for key, value in params.items()
+      }
+    
+    if not is_parallelized and checkpoint_ddp:
+      # stored model trained in parallel but current model is not
+      params = {
+        key.replace(keyword_ddp, ''): value for key, value in params.items()
+      }
+
+    if is_parallelized and not checkpoint_ddp:
+      # stored model was not trained in parallel but current model is
+      params = {
+        keyword_ddp + key : value for key, value in params.items()
+      }
 
     model.load_state_dict(params)
     optimizer.load_state_dict(opt_state)

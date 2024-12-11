@@ -122,12 +122,16 @@ class TrainStateCheckpoint(Callback):
       base_dir: str,
       folder_prefix: str = "checkpoints",
       train_state_field: str = "default",
-      save_every_n_step: int = 1000
+      save_every_n_step: int = 1000,
+      world_size: int = 1,
+      local_rank: int = -1
   ):
     self.save_dir = os.path.join(base_dir, folder_prefix)
     self.train_state_field = train_state_field
     self.save_every_n_steps = save_every_n_step
     self.last_eval_metric = {}
+    self.world_size = world_size
+    self.local_rank = local_rank
 
     os.makedirs(self.save_dir, exist_ok=True)
 
@@ -138,32 +142,45 @@ class TrainStateCheckpoint(Callback):
     if checkpoint_path:
       checkpoint = torch.load(checkpoint_path, weights_only=True)
       
-      is_compiled = checkpoint['is_compiled'] # check if stored model was compiled
-      if is_compiled:
-        # stored model was compiled, thus the keys are stored with _orig_mod. and needs to be 
+      model_compiled = trainer.is_compiled # check whether current model is compiled
+      model_ddp = trainer.is_parallelized # check whether current model is trained parallelized
+      checkpoint_compiled = checkpoint['is_compiled'] # check if stored model was compiled
+      checkpoint_ddp = checkpoint['is_parallelized'] # check if stored model was trained in parallel
+
+      keyword_compiled = '_orig_mod.'
+      keyword_ddp = 'module.'
+
+      if not model_compiled and checkpoint_compiled:
+        # stored model was compiled, current model is not: delete _orig_mod. in every key 
         checkpoint['model_state_dict'] = {
-          key.replace('_orig_mod.', ''): value for key, value in checkpoint['model_state_dict'].items()
+          key.replace(keyword_compiled, ''): value for key, value in checkpoint['model_state_dict'].items()
+        }
+      
+      if model_compiled and not checkpoint_compiled:
+        # stored model not compiled, current model is compiled: add _orig_mod. at the beginning
+        checkpoint['model_state_dict'] = {
+          keyword_compiled + key : value for key, value in checkpoint['model_state_dict'].items()
+        }
+      
+      if not model_ddp and checkpoint_ddp:
+        # stored model trained in parallel but current model is not
+        checkpoint['model_state_dict'] = {
+          key.replace(keyword_ddp, ''): value for key, value in checkpoint['model_state_dict'].items()
+        }
+
+      if model_ddp and not checkpoint_ddp:
+        # stored model was not trained in parallel but current model is
+        checkpoint['model_state_dict'] = {
+          keyword_ddp + key : value for key, value in checkpoint['model_state_dict'].items()
         }
 
       # Load stored states
       trainer.model.denoiser.load_state_dict(checkpoint['model_state_dict'])
       trainer.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
       trainer.train_state.step = checkpoint['step']
-      print("Continue Training from Checkpoint")
-    
-    # Check if model should be compiled for faster training
-    self.compile_model(trainer)
-  
-  def compile_model(self, trainer: Trainer) -> None:
-    """Model should be compiled!"""
-    if trainer.is_compiled:
-      print(f"Compile Model for Faster Training")
-      # set model first to train to avoid switches between train and eval
-      trainer.model.denoiser.train() 
-      # Compile model to speedup training time
-      compiled_denoiser = torch.compile(trainer.model.denoiser)
-      # replace denoiser in frozen dataclass
-      object.__setattr__(trainer.model, 'denoiser', compiled_denoiser)
+      if (self.world_size > 1 and self.local_rank == 0) or self.world_size == 1:
+        print("Continue Training from Checkpoint")
+
 
   def on_train_batches_end(
       self, trainer: Trainer, train_metrics: ComputedMetrics
@@ -172,7 +189,9 @@ class TrainStateCheckpoint(Callback):
     cur_step = trainer.train_state.step
 
     if cur_step % self.save_every_n_steps == 0:
-      self._save_checkpoint(trainer, cur_step, train_metrics)
+      if (self.world_size > 1 and self.local_rank == 0) or self.world_size == 1:
+        self._save_checkpoint(trainer, cur_step, train_metrics)
+
 
   def on_eval_batches_end(
       self, trainer: Trainer, eval_metrics: ComputedMetrics
@@ -183,7 +202,8 @@ class TrainStateCheckpoint(Callback):
   def on_train_end(self, trainer: Trainer) -> None:
     """Save a final checkpoint at the end of training"""
     cur_step = trainer.train_state.step
-    self._save_checkpoint(trainer, cur_step, self.last_eval_metric, force=True)
+    if (self.world_size > 1 and self.local_rank == 0) or self.world_size == 1:
+      self._save_checkpoint(trainer, cur_step, self.last_eval_metric, force=True)
 
   def _save_checkpoint(self, 
                        trainer: Trainer, 
@@ -197,7 +217,8 @@ class TrainStateCheckpoint(Callback):
       'optimizer_state_dict': trainer.optimizer.state_dict(),
       'step': step,
       'metrics': metrics,
-      'is_compiled': trainer.is_compiled
+      'is_compiled': trainer.is_compiled,
+      'is_parallelized': trainer.is_parallelized
     }
     checkpoint_path = os.path.join(self.save_dir, f"checkpoint_{step}.pth")
     torch.save(checkpoint, checkpoint_path)
@@ -220,6 +241,8 @@ class TqdmProgressBar(Callback):
       total_train_steps: int | None,
       train_monitors: Sequence[str],
       eval_monitors: Sequence[str] = (),
+      world_size: int = 1,
+      local_rank: int = -1
   ):
     """ProgressBar constructor.
 
@@ -237,21 +260,25 @@ class TqdmProgressBar(Callback):
     self.current_step = 0
     self.eval_postfix = {}  # keeps record of the most recent eval monitor
     self.bar = None
+    self.world_size = world_size
+    self.local_rank = local_rank
 
   def on_train_begin(self, trainer: Trainer) -> None:
     del trainer
-    self.bar = tqdm.tqdm(total=self.total_train_steps, unit="step")
+    if (self.world_size > 1 and self.local_rank == 0) or self.world_size == 1:
+      self.bar = tqdm.tqdm(total=self.total_train_steps, unit="step")
 
   def on_train_batches_end(
       self, trainer: Trainer, train_metrics: ComputedMetrics
   ) -> None:
-    assert self.bar is not None
-    self.bar.update(trainer.train_state.step - self.current_step)
-    self.current_step = trainer.train_state.step
-    postfix = {
-        monitor: train_metrics[monitor] for monitor in self.train_monitors
-    }
-    self.bar.set_postfix(**postfix, **self.eval_postfix)
+    if (self.world_size > 1 and self.local_rank == 0) or self.world_size == 1:
+      assert self.bar is not None
+      self.bar.update(trainer.train_state.step - self.current_step)
+      self.current_step = trainer.train_state.step
+      postfix = {
+          monitor: train_metrics[monitor] for monitor in self.train_monitors
+      }
+      self.bar.set_postfix(**postfix, **self.eval_postfix)
 
   def on_eval_batches_end(
       self, trainer: Trainer, eval_metrics: ComputedMetrics
@@ -263,5 +290,6 @@ class TqdmProgressBar(Callback):
 
   def on_train_end(self, trainer: Trainer) -> None:
     del trainer
-    assert self.bar is not None
-    self.bar.close()
+    if (self.world_size > 1 and self.local_rank == 0) or self.world_size == 1:
+      assert self.bar is not None
+      self.bar.close()

@@ -12,14 +12,19 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+"""Utilities for train_gencfd and evaluate_gencfd"""
+
 from argparse import ArgumentParser
 from typing import Tuple, Sequence, Dict, Callable
 import torch
 import os
 import re
 import json
+import torch.distributed as dist
 from torch import nn
 from torch.utils.data import DataLoader, random_split
+from torch.utils.data.distributed import DistributedSampler
+from torch.nn.parallel import DistributedDataParallel as DDP
 
 from model.building_blocks.unets.unets import UNet, PreconditionedDenoiser
 from model.building_blocks.unets.unets3d import UNet3D, PreconditionedDenoiser3D
@@ -37,9 +42,11 @@ from diffusion.diffusion import (
     NoiseLossWeighting
 )
 from dataloader.dataset import (
+    train_test_split,
     TrainingSetBase,
     DataIC_Vel,
     DataIC_Cloud_Shock_2D,
+    RichtmyerMeshkov2D,
     DataIC_3D_Time,
     DataIC_3D_Time_TG,
     ConditionalDataIC_Vel,
@@ -47,6 +54,7 @@ from dataloader.dataset import (
     ConditionalDataIC_3D_TG,
     ConditionalDataIC_Cloud_Shock_2D
 )
+from dataloader.metadata import METADATA_CLASSES
 from utils.callbacks import Callback ,TqdmProgressBar, TrainStateCheckpoint
 from diffusion.samplers import SdeSampler, Sampler
 from solvers.sde import EulerMaruyama
@@ -69,36 +77,42 @@ def get_dataset(
     provided.
     """
 
+    metadata = METADATA_CLASSES[name]
+
     if name == 'DataIC_Vel':
-        dataset = DataIC_Vel()
+        dataset = DataIC_Vel(metadata=metadata)
         time_cond = False
     
     elif name == 'DataIC_Cloud_Shock_2D':
-        dataset = DataIC_Cloud_Shock_2D()
+        dataset = DataIC_Cloud_Shock_2D(metadata=metadata)
+        time_cond = False
+    
+    elif name == 'RichtmyerMeshkov2D':
+        dataset = RichtmyerMeshkov2D(metadata=metadata)
         time_cond = False
     
     elif name == 'DataIC_3D_Time':
-        dataset = DataIC_3D_Time()
+        dataset = DataIC_3D_Time(metadata = metadata)
         time_cond = True
 
     elif name == 'DataIC_3D_Time_TG':
-        dataset = DataIC_3D_Time_TG()
+        dataset = DataIC_3D_Time_TG(metadata=metadata)
         time_cond = True
     
     elif name == 'ConditionalDataIC_Vel':
-        dataset = ConditionalDataIC_Vel()
+        dataset = ConditionalDataIC_Vel(metadata=metadata)
         time_cond = False
 
     elif name == 'ConditionalDataIC_Cloud_Shock_2D':
-        dataset = ConditionalDataIC_Cloud_Shock_2D()
+        dataset = ConditionalDataIC_Cloud_Shock_2D(metadata=metadata)
         time_cond = False
     
     elif name == 'ConditionalDataIC_3D':
-        dataset = ConditionalDataIC_3D()
+        dataset = ConditionalDataIC_3D(metadata=metadata)
         time_cond = True
     
     elif name == 'ConditionalDataIC_3D_TG':
-        dataset = ConditionalDataIC_3D_TG()
+        dataset = ConditionalDataIC_3D_TG(metadata=metadata)
         time_cond = True
     
     else:
@@ -106,11 +120,31 @@ def get_dataset(
     
     if is_time_dependent:
         return dataset, time_cond
+    
     else:
         return dataset
 
 
+def get_distributed_sampler(
+        args: ArgumentParser, 
+        dataset: TrainingSetBase
+    ) -> DistributedSampler:
+    """
+    For DDP a Distributed Sampler is requited where 
+    each process gets a unique subset of data in a way that 
+    there is no overlap between subsets
+    """
+    dist_sampler = DistributedSampler(
+        dataset,
+        rank=args.local_rank,
+        num_replicas=dist.get_world_size(),
+        shuffle=True
+    )
+    return dist_sampler
+
+
 def get_dataset_loader(
+        args: ArgumentParser,
         name: str, 
         batch_size: int = 5,
         num_worker: int = 0,
@@ -120,39 +154,55 @@ def get_dataset_loader(
     ) -> Tuple[DataLoader, DataLoader] | DataLoader:
     """Return a training and evaluation dataloader or a single dataloader"""
 
+    # is_time_dependent passes the bool time_cond and tells if the problem is time 
+    # dependent or not
     dataset, time_cond = get_dataset(name=name, is_time_dependent=True)
 
     if split:
-        train_size = int(split_ratio * len(dataset))
-        eval_size = len(dataset) - train_size
-        train_dataset, eval_dataset = random_split(dataset, [train_size, eval_size])
+        # split the dataset into train and eval
+        train_dataset, eval_dataset = train_test_split(
+            dataset, split_ratio=split_ratio
+        )
+
+        if args.world_size > 1:
+            train_sampler = get_distributed_sampler(args, train_dataset)
+            eval_sampler = get_distributed_sampler(args, eval_dataset)
+
         train_dataloader = DataLoader(
             dataset=train_dataset, 
             batch_size=batch_size, 
-            shuffle=True, 
+            shuffle=True if args.world_size == 1 else False, 
             pin_memory=True,
             num_workers=num_worker,
-            prefetch_factor=prefetch_factor
+            prefetch_factor=prefetch_factor,
+            sampler=train_sampler if args.world_size > 1 else None
         )
         eval_dataloader = DataLoader(
             dataset=eval_dataset, 
             batch_size=batch_size, 
-            shuffle=True,
+            shuffle=True if args.world_size == 1 else False,
             pin_memory=True,
             num_workers=num_worker,
-            prefetch_factor=prefetch_factor
+            prefetch_factor=prefetch_factor,
+            sampler=eval_sampler if args.world_size > 1 else None
         )
         return (train_dataloader, eval_dataloader, dataset, time_cond)
+
     else:
+        if args.world_size > 1:
+            sampler = get_distributed_sampler(args, dataset)
+
         dataloader = DataLoader(
             dataset=dataset, 
             batch_size=batch_size, 
-            shuffle=True, 
+            shuffle=True if args.world_size == 1 else False, 
             pin_memory=True,
             num_workers=num_worker,
-            prefetch_factor=prefetch_factor
+            prefetch_factor=prefetch_factor,
+            sampler=sampler if args.world_size > 1 else None
         )
         return (dataloader, dataset, time_cond)
+
 
 def get_buffer_dict(
     dataset: TrainingSetBase, 
@@ -180,6 +230,33 @@ def get_buffer_dict(
     }
 
     return buffer_dict
+
+
+def adjust_keys(
+        dictionary: dict, 
+        is_compiled: bool, 
+        is_parallelized: bool,
+        use_ddp_wrapper: bool
+    ) -> dict:
+    """Function returns a dictionary and deletes the key prefixes
+    which comes from compiling or evaluating the model in parallel"""
+
+    keyword_compiled = '_orig_mod.'
+    keyword_ddp = 'module.'
+
+    if is_compiled:
+        # Delete the compilation keyword
+        dictionary = {
+            key.replace(keyword_compiled, ''): value for key, value in dictionary.items()
+        }
+    
+    if is_parallelized and use_ddp_wrapper:
+        # Delete the keyword when the model is parallelized
+        dictionary = {
+            key.replace(keyword_ddp, ''): value for key, value in dictionary.items()
+        }
+    
+    return dictionary
     
 # ***************************
 # Load Denoiser
@@ -253,7 +330,6 @@ def get_denoising_model(
     return DenoisingModel(**denoiser_args)
 
 
-
 def create_denoiser(
         args: ArgumentParser,
         input_channels: int,
@@ -262,7 +338,8 @@ def create_denoiser(
         time_cond: bool,
         device: torch.device = None,
         dtype: torch.dtype = torch.float32,
-        buffer_dict: dict = None
+        buffer_dict: dict = None,
+        use_ddp_wrapper: bool = False
     ):
     """Get the denoiser and sampler if required"""
 
@@ -276,6 +353,16 @@ def create_denoiser(
         buffer_dict=buffer_dict,
         dtype=dtype
     )
+
+    if args.compile:
+        model = torch.compile(model)
+        
+    if args.world_size > 1 and use_ddp_wrapper:
+        model = DDP(model, device_ids=[args.local_rank])
+
+    if args.local_rank == 0 or args.local_rank == -1:
+        print(" ")
+        print(f"Compilation mode: {args.compile}, World Size: {args.world_size}")
 
     noise_sampling = get_noise_sampling(args, device)
     noise_weighting = get_noise_weighting(args, device)
@@ -310,13 +397,17 @@ def create_callbacks(args: ArgumentParser, save_dir: str) -> Sequence[Callback]:
         TqdmProgressBar(
             total_train_steps=args.num_train_steps,
             train_monitors=train_monitors,
+            world_size=args.world_size,
+            local_rank=args.local_rank
         )
     ]
 
     if args.checkpoints:
         checkpoint_callback = TrainStateCheckpoint(
             base_dir= save_dir,
-            save_every_n_step=args.save_every_n_steps
+            save_every_n_step=args.save_every_n_steps,
+            world_size=args.world_size,
+            local_rank=args.local_rank
         )
         callbacks.insert(0, checkpoint_callback)
     
@@ -334,6 +425,9 @@ def get_latest_checkpoint(folder_path: str):
     checkpoint_models = [
         f for f in os.listdir(folder_path)
     ]
+
+    if not checkpoint_models:
+        return None
 
     latest_checkpoint = max(
         checkpoint_models,
@@ -359,6 +453,7 @@ def save_json_file(
     config = {
         # general arguments
         "save_dir": args.save_dir,
+        "world_size": args.world_size,
         # dataset arguments
         "dataset": args.dataset,
         "batch_size": args.batch_size,
@@ -377,7 +472,7 @@ def save_json_file(
         "use_mixed_precision": args.use_mixed_precision,
         "num_train_steps": args.num_train_steps,
         "task": args.task,
-        "device": str(device) if device is not None else None,
+        "device": device.type if device is not None else None,
         "seed": seed,
     }
 
@@ -387,6 +482,7 @@ def save_json_file(
     with open(config_path, "w") as f:
         json.dump(config, f, indent=4)
     
+    print(" ")
     print(f"Training configuration saved to {config_path}")
 
 
@@ -407,7 +503,7 @@ def replace_args(args: ArgumentParser, train_args: dict):
     """Replace parser arguments with used arguments during training.
     There is a skip list to avoid that every argument gets replaced."""
 
-    skip_list = ["dataset", "save_dir", "batch_size", "compile"]
+    skip_list = ["dataset", "save_dir", "batch_size", "compile", "world_size",]
 
     for key, value in train_args.items():
         if key in skip_list:

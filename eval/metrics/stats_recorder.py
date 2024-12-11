@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import torch
+import torch.distributed as dist
 from typing import Sequence
 
 Tensor = torch.Tensor
@@ -28,9 +29,12 @@ class StatsRecorder:
                  data_shape: Sequence[int],
                  monte_carlo_samples: int,
                  num_samples: int = 1000,
-                 device: torch.device = None
+                 device: torch.device = None,
+                 world_size: int = 1
         ):
+
         self.device = device
+        self.world_size = world_size
 
         # information about the dataset
         self.batch_size = batch_size
@@ -53,6 +57,13 @@ class StatsRecorder:
         self.mean_gen = torch.zeros(data_shape, device=device)
         self.std_gt = torch.zeros(data_shape, device=device)
         self.std_gen = torch.zeros(data_shape, device=device)
+
+        # global results over all threads / processes
+        self.global_mean_gt = torch.zeros(data_shape, device=device) if world_size > 1 else None
+        self.global_mean_gen = torch.zeros(data_shape, device=device) if world_size > 1 else None
+        self.global_std_gt = torch.zeros(data_shape, device=device) if world_size > 1 else None
+        self.global_std_gen = torch.zeros(data_shape, device=device) if world_size > 1 else None
+        self.global_observation = 0 if world_size > 1 else None
 
         # track the number of observation
         self.observation = 0
@@ -178,3 +189,75 @@ class StatsRecorder:
         # update the mean values
         self.mean_gt = m / (m + n) * self.mean_gt + n / (m + n) * mean_gt_data
         self.mean_gen = m / (m + n) * self.mean_gen + n / (m + n) * mean_gen_data
+
+
+    def aggregate_all_processes(self) -> None:
+        """Aggregates the results across all processes.
+        
+        Take all local results from each rank and produces global solutions for 
+        the mean and standard deviation as well as the number of observations."""
+
+        # Each thread has a local variance value
+        local_var_gt = self.std_gt ** 2
+        local_var_gen = self.std_gen ** 2
+
+        # number of observation for each thread
+        local_obs = self.observation
+
+        # mean values local for each thread
+        local_mean_gt = self.mean_gt
+        local_mean_gen = self.mean_gen
+
+        # First step is to compute the global mean over all threads
+        global_obs = torch.tensor(local_obs, dtype=torch.int, device=self.device)
+        dist.all_reduce(global_obs, op=dist.ReduceOp.SUM)
+        global_obs = global_obs.item()
+
+        # Global mean estimate with sum(local_obs * local_mean)/global_obs
+        global_mean_gt = local_obs * local_mean_gt
+        global_mean_gen = local_obs * local_mean_gen
+        # sum over all threads
+        dist.all_reduce(global_mean_gt, op=dist.ReduceOp.SUM)
+        dist.all_reduce(global_mean_gen, op=dist.ReduceOp.SUM)
+        global_mean_gt /= global_obs
+        global_mean_gen /= global_obs
+
+        # Global var estimate with 
+        # sum(local_obs * (local_var + (local_mean - global_mean) ** 2)) / n_global
+        global_var_gt = local_obs * (local_var_gt + (local_mean_gt - global_mean_gt) ** 2)
+        global_var_gen = local_obs * (local_var_gen + (local_mean_gen - global_mean_gen) ** 2)
+        # sum over all threads
+        dist.all_reduce(global_var_gt, op=dist.ReduceOp.SUM)
+        dist.all_reduce(global_var_gen, op=dist.ReduceOp.SUM)
+        global_var_gt /= global_obs
+        global_var_gen /= global_obs
+
+        # Store the results
+        self.global_std_gt =  torch.sqrt(global_var_gt)
+        self.global_std_gen = torch.sqrt(global_var_gen)
+        self.global_mean_gt = global_mean_gt
+        self.global_mean_gen = global_mean_gen
+        self.global_observation = global_obs
+
+
+    def gather_all_samples(self) -> None:
+        """Gather all taken monte carlo samples from each process and store them."""
+
+        tot_gen_samples = torch.zeros(
+            (self.monte_carlo_samples*self.world_size, self.num_samples, self.channels),
+            device=self.device
+        )
+        tot_gt_samples = torch.zeros(
+            (self.monte_carlo_samples*self.world_size, self.num_samples, self.channels),
+            device=self.device
+        )
+
+        local_gen_samples = self.gen_samples
+        local_gt_samples = self.gt_samples
+
+        # Gather the results and place them into the tensor tot_gt_samples
+        dist.all_gather_into_tensor(tot_gen_samples, local_gen_samples)
+        dist.all_gather_into_tensor(tot_gt_samples, local_gt_samples)
+
+        self.gen_samples = tot_gen_samples
+        self.gt_samples = tot_gt_samples

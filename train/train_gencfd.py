@@ -19,6 +19,8 @@ import os
 # Set the cache size and debugging for torch.compile before importing torch
 # os.environ["TORCH_LOGS"] = "all"  # or any of the valid log settings
 import torch
+import torch.distributed as dist
+from torch.distributed import is_initialized
 from torch import optim
 from torch.utils.tensorboard import SummaryWriter
 
@@ -42,46 +44,73 @@ torch.manual_seed(SEED)  # For CPU operations
 torch.cuda.manual_seed(SEED)  # For GPU operations
 torch.cuda.manual_seed_all(SEED)  # Ensure all GPUs (if multi-GPU) are set
 
-if __name__ == "__main__":
+
+def init_distributed_mode(args):
+    """Initialize a Distributed Data Parallel Environment"""    
+
+    args.local_rank = int(os.getenv("LOCAL_RANK", -1))  # Get from environment variable
+
+    if args.local_rank == -1:
+        raise ValueError("--local_rank was not set. Ensure torchrun is used to launch the script.")
+
+    torch.cuda.set_device(args.local_rank)
+    dist.init_process_group(backend="nccl", rank=args.local_rank, world_size=args.world_size)
+
+    device = torch.device(f"cuda:{args.local_rank}")
+
     print(" ")
-    print(f'Used device {device}')
+    print(f"DDP initialized with rank {args.local_rank} and device {device}.")
+
+    return args, device
+
+
+if __name__ == "__main__":
 
     # get arguments for training
     args = train_args()
+
+    # Initialize distributed mode (if multi-GPU)
+    if args.world_size > 1:
+        args, device = init_distributed_mode(args)
+    else:
+        print(" ")
+        print(f'Used device: {device}')
 
     cwd = os.getcwd()
     if args.save_dir is None:
         raise ValueError("Save directory not specified in arguments!")
     savedir = os.path.join(cwd, args.save_dir)
     if not os.path.exists(savedir):
-        os.makedirs(savedir)
-        print(f"Created a directory to store metrics and models: {savedir}")
+        if (args.world_size > 1 and args.local_rank == 0) or args.world_size == 1:
+            os.makedirs(savedir)
+            print(f"Created a directory to store metrics and models: {savedir}")
 
-    split_ratio = 0.8
     train_dataloader, eval_dataloader, dataset, time_cond = get_dataset_loader(
+        args=args,
         name=args.dataset, 
         batch_size=args.batch_size, 
         num_worker=args.worker, 
         prefetch_factor=2, # Default DataLoader value
         split=True,
-        split_ratio=split_ratio
+        split_ratio=0.9
     )
 
     # Create a buffer dictionary to store normalization parameters in the NN
     buffer_dict = get_buffer_dict(dataset=dataset, device=device)
 
-    # Save parameters in a JSON File
-    save_json_file(
-        args=args, 
-        time_cond=time_cond, 
-        split_ratio=split_ratio,
-        out_shape=dataset.output_shape, # output shape of the prediction 
-        input_channel=dataset.input_channel,
-        output_channel=dataset.output_channel,
-        spatial_resolution=dataset.spatial_resolution,
-        device=device, 
-        seed=SEED
-    )
+    if (args.world_size > 1 and args.local_rank == 0) or args.world_size == 1:
+        # Save parameters in a JSON File
+        save_json_file(
+            args=args, 
+            time_cond=time_cond, 
+            split_ratio=0.9,
+            out_shape=dataset.output_shape, # output shape of the prediction 
+            input_channel=dataset.input_channel,
+            output_channel=dataset.output_channel,
+            spatial_resolution=dataset.spatial_resolution,
+            device=device, 
+            seed=SEED
+        )
 
     denoising_model = create_denoiser(
         args=args,
@@ -91,18 +120,16 @@ if __name__ == "__main__":
         time_cond=time_cond,
         device=device,
         dtype=args.dtype,
-        buffer_dict=buffer_dict
+        buffer_dict=buffer_dict,
+        use_ddp_wrapper=True
     )
-    
-    with torch.no_grad():
-        # Warmup round to check if model is running as intended
-        denoising_model.initialize(batch_size=args.batch_size, time_cond=time_cond)
 
-    # Print number of Parameters:
-    model_params = sum(p.numel() for p in denoising_model.denoiser.parameters() if p.requires_grad)
-    print(" ")
-    print(f"Total number of model parameters: {model_params}")
-    print(" ")
+    if (args.world_size > 1 and args.local_rank == 0) or args.world_size == 1:
+        # Print number of Parameters:
+        model_params = sum(p.numel() for p in denoising_model.denoiser.parameters() if p.requires_grad)
+        print(" ")
+        print(f"Total number of model parameters: {model_params}")
+        print(" ")
 
     trainer = training_loop.trainers.DenoisingTrainer(
         model=denoising_model,
@@ -115,26 +142,40 @@ if __name__ == "__main__":
         store_ema=False, # Changed manually
         track_memory=args.track_memory,
         use_mixed_precision=args.use_mixed_precision,
-        is_compiled=args.compile
+        is_compiled=args.compile,
+        world_size=args.world_size,
+        local_rank=args.local_rank
     )
 
     start_train = time.time()
+
+    # Initialize the metric writer
+    metric_writer = SummaryWriter(log_dir=savedir) if args.local_rank in {0, -1} else None
 
     training_loop.run(
         train_dataloader=train_dataloader,
         trainer=trainer,
         workdir=savedir,
+        # DDP configs
+        world_size=args.world_size,
+        local_rank=args.local_rank,
+        # Training configs
         total_train_steps=args.num_train_steps,
-        metric_writer=SummaryWriter(log_dir=savedir),
+        metric_writer=metric_writer,
         metric_aggregation_steps=args.metric_aggregation_steps,
+        # Evaluation configs:
         # Only do evaluation while training if the model is not compiled
         eval_dataloader=eval_dataloader if not args.compile else None, 
         eval_every_steps=args.eval_every_steps,
+        # Other configs
         num_batches_per_eval=args.num_batches_per_eval,
         callbacks=create_callbacks(args, savedir),
-        compile_model=args.compile
     )
 
     end_train = time.time()
     elapsed_train = end_train - start_train
-    print(f"Done training. Elapsed time {elapsed_train / 3600} h")
+    if (args.world_size > 1 and args.local_rank == 0) or args.world_size == 1:
+        print(f"Done training. Elapsed time {elapsed_train / 3600} h")
+
+    if args.world_size > 1:
+        dist.destroy_process_group()

@@ -47,6 +47,23 @@ python3 -m train.train_gencfd \
 
 After training, a JSON file with model settings is saved in the output directory for use during inference.
 
+For a fast training, use a compiled model in parallel:
+
+```shell
+torchrun --nproc_per_node=<INT> \
+-m train.train_gencfd \
+--world_size <INT> \
+--dataset <DATASET_NAME> \
+--model_type <MODEL_NAME> \
+--save_dir <DIRECTORY_PATH> \
+--num_train_steps <INT>
+--compile
+```
+
+The flag `--world_size` determines the size of the group associated with a communicator and it has to correspond to the number of processes 
+or trainers used for parallelization. The relevant flag to set this is `--nproc_per_node`. Another advice for fast training is to chooce a 
+proper number of workers which can be specified through the flag `--worker`.
+
 ## 🧪 Inference and Evaluation
 
 Run inference with:
@@ -59,13 +76,34 @@ python3 -m eval.evaluate_gencfd \
 --compute_metrics \
 --monte_carlo_samples <INT> \
 --visualize \
+--save_gen_samples\
 --save_dir <DIRECTORY_PATH>
 ```
+
+Run inference in parallel:
+
+```shell
+torchrun --nproc_per_node=<INT> \
+-m eval.evaluate_gencfd \
+--world_size <INT> \
+--dataset <DATASET_NAME> \
+--model_type <MODEL_NAME> \
+--model_dir <DIRECTORY_PATH> \
+--compute_metrics \
+--monte_carlo_samples <INT> \
+--visualize \
+save_gen_samples \
+--save_dir <DIRECTORY_PATH>
+```
+
+Also here the number of models spawned should be the same for both flags `--world_size` and `--nproc_per_node`.
+It's also possible to compile the model when run in a parallel or a sequential setup.
 
 ### Options:
 
 * `--compute_metrics`: Computes evaluation metrics (e.g., mean and standard deviation) using Monte Carlo simulations.
 * `--visualize`: Generates a single inference sample for visualization.
+* `--save_gen_samples`: Saves randomly selected samples drawn from a uniform distribution
 
 The number of sampling steps (`--sampling_steps`) for the Euler-Maruyama method should be preferably >30 for convergence.
 
@@ -89,7 +127,9 @@ If there are some compiler warnings, you can always surpress them.
 
 | Argument                 | Type   | Default                  | Scope     | Description                                                                                                                                                    |
 |--------------------------|--------|--------------------------|-----------|----------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `--compile`              | action | False  | Train         | Model can be compiled for faster training            |
+| `--nproc_per_node`              | int | 1 | Both         | Training or evaluation done with Distributed Data Parallel (DDP) across multiple machines.           |
+| `--world_size`              | int | 1  | Both         | To enable training for DDP and a parallelized evaluation use the same integer value as for `--nproc_per_node` |
+| `--compile`              | action | False  | Both         | Model can be compiled for faster training            |
 | `--dataset`              | string | `<DATASET_NAME>`  | Both          | Dataset to use for training or evaluation. A list of available datasets is in the Dataset section.                                              |
 | `--save_dir`             | string | `<DIRECTORY_PATH>`                | Both      | Directory to save models and metrics. If it doesn’t exist, it will be created automatically. Path is relative to the root directory.                                               |
 | `--model_type`           | string | `PreconditionedDenoiser` | Both      | Model type to use. For 2D, options include `PreconditionedDenoiser`. For 3D, `PreconditionedDenoiser3D` is recommended.                            |
@@ -105,6 +145,7 @@ If there are some compiler warnings, you can always surpress them.
 | `--visualize`            | action   | `False`                  | Eval      | If set to `True`, generates a single visualized inference sample from the dataset for quick inspection of model output. The sample is drawn from a uniform distribution.                                      |
 | `--sampling_steps`       | int    | 100                       | Eval      | Number of steps for the Euler-Maruyama method to solve the SDE during inference. Higher values generally improve convergence.                         |
 | `--monte_carlo_samples`  | int    | 100                      | Eval      | Number of Monte Carlo samples to run for metric computation. Increase for more precise statistical results.                                                    |
+|`--save_gen_samples` | action | `False` |  Eval | If set to `True`, stores the generated and ground truth results for randomly selected samples drawn from a uniform distribution. |
 
 ## 📊 Datasets
 

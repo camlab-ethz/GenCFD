@@ -54,6 +54,15 @@ def add_base_options(parser: ArgumentParser):
                        help="Set the precision for PyTorch tensors by defining the dtype")
     group.add_argument("--use_mixed_precision", default=True, type=str_to_bool,
                        help="For memory efficiency activate mixed precision calculations")
+
+def add_parallelization_options(parser: ArgumentParser):
+    """Arguments for Distributed Training"""
+    
+    group = parser.add_argument_group('distributed')
+    group.add_argument('--local_rank', type=int, default=-1, 
+                       help='Local rank for distributed training')
+    group.add_argument('--world_size', type=int, default=1,
+                       help='Total number of processes for DDP')
     
 
 def add_data_options(parser: ArgumentParser):
@@ -64,6 +73,7 @@ def add_data_options(parser: ArgumentParser):
                        choices=[
                             # Datasets for Training
                             'DataIC_Vel', 'DataIC_Cloud_Shock_2D',
+                            'RichtmyerMeshkov2D',
                             'DataIC_3D_Time', 'DataIC_3D_Time_TG',
                             # Conditional (Perturbed) Datasets for Evaluation
                             'ConditionalDataIC_Vel', 'ConditionalDataIC_Cloud_Shock_2D',
@@ -248,6 +258,7 @@ def train_args():
     
     parser = ArgumentParser()
     add_base_options(parser)
+    add_parallelization_options(parser)
     add_data_options(parser)
     add_model_options(parser)
     add_denoiser_options(parser)
@@ -261,6 +272,7 @@ def inference_args():
 
     parser = ArgumentParser()
     add_base_options(parser)
+    add_parallelization_options(parser)
     add_data_options(parser)
     add_model_options(parser)
     add_denoiser_options(parser)
