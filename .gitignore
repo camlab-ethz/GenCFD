@@ -5,6 +5,8 @@
 demo.py
 # ignore data file for the MNIST data used in the demo
 /datasets
+# ignore metadata since this is private lab specific information
+/dataloader/metadata.py
 # ignore outputs where the model is stored
 /outputs
 # ignore visualization where the visualization results and further analysis is stored
