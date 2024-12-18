@@ -57,7 +57,6 @@ def init_distributed_mode(args):
     dist.init_process_group(backend="nccl", rank=args.local_rank, world_size=args.world_size)
 
     device = torch.device(f"cuda:{args.local_rank}")
-
     print(" ")
     print(f"DDP initialized with rank {args.local_rank} and device {device}.")
 
@@ -92,7 +91,7 @@ if __name__ == "__main__":
         num_worker=args.worker, 
         prefetch_factor=2, # Default DataLoader value
         split=True,
-        split_ratio=0.9
+        split_ratio=0.99
     )
 
     # Create a buffer dictionary to store normalization parameters in the NN
@@ -103,7 +102,7 @@ if __name__ == "__main__":
         save_json_file(
             args=args, 
             time_cond=time_cond, 
-            split_ratio=0.9,
+            split_ratio=0.99,
             out_shape=dataset.output_shape, # output shape of the prediction 
             input_channel=dataset.input_channel,
             output_channel=dataset.output_channel,
@@ -139,7 +138,7 @@ if __name__ == "__main__":
             weight_decay=args.weight_decay),    
         device=device,
         ema_decay=args.ema_decay,
-        store_ema=False, # Changed manually
+        store_ema=True, # Store ema model as well
         track_memory=args.track_memory,
         use_mixed_precision=args.use_mixed_precision,
         is_compiled=args.compile,
@@ -165,7 +164,7 @@ if __name__ == "__main__":
         metric_aggregation_steps=args.metric_aggregation_steps,
         # Evaluation configs:
         # Only do evaluation while training if the model is not compiled
-        eval_dataloader=eval_dataloader if not args.compile else None, 
+        eval_dataloader=eval_dataloader,
         eval_every_steps=args.eval_every_steps,
         # Other configs
         num_batches_per_eval=args.num_batches_per_eval,

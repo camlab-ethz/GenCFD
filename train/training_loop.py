@@ -91,8 +91,9 @@ def run(
           f"must be an integer multiple of "
           f"`metric_aggregation_steps` ({metric_aggregation_steps})"
       )
+      
     eval_iter = iter(eval_dataloader)
-    if run_sanity_eval_batch:
+    if run_sanity_eval_batch and not trainer.is_compiled:
       trainer.eval(eval_iter, num_steps=1)
 
   if metric_writer is None and local_rank in {0, -1}:

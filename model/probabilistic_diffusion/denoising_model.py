@@ -148,20 +148,26 @@ class DenoisingModel(BaseModel):
   device: Any | None = None
   dtype: torch.dtype = torch.float32
   
-  input_channel: int = 1
   task: str = 'solver'
   time_cond: bool = False
 
-  # tspan_method: str = 'exponential_noise_decay'
-  # compute_crps: bool = False
 
-
-  def initialize(self, batch_size: int, time_cond: bool = False):
+  def initialize(
+      self, 
+      batch_size: int, 
+      time_cond: bool = False,
+      input_channels: int = 1,
+      output_channels: int = 1
+    ):
     """Method necessary for a dummy initialization!"""
+
     x = torch.ones(
-      (batch_size,) + (self.input_channel,) + self.spatial_resolution, dtype=self.dtype, device=self.device
+      (batch_size,) + (output_channels,) + self.spatial_resolution, dtype=self.dtype, device=self.device
     ) # Target condition
-    y = x.clone() # Initial condition
+
+    y = torch.ones(
+      (batch_size,) + (input_channels,) + self.spatial_resolution, dtype=self.dtype, device=self.device
+    ) # Initial condition
 
     if time_cond:
       time = torch.ones((batch_size,), dtype=self.dtype, device=self.device)
@@ -174,6 +180,7 @@ class DenoisingModel(BaseModel):
       sigma=torch.ones((batch_size,), dtype=self.dtype, device=self.device), 
       time=time,
     )
+
 
   def loss_fn(
       self,
@@ -197,9 +204,6 @@ class DenoisingModel(BaseModel):
     y = batch['initial_cond']
     x = batch['target_cond']
     time = batch['lead_time'] if self.time_cond else None
-
-    # x = data[:, self.input_channel:, ...] # (target)
-    # y = data[:, :self.input_channel, ...] # (initial condition)
 
     batch_size = len(x)
 
@@ -365,59 +369,3 @@ class DenoisingModel(BaseModel):
       raise ValueError("model can either be used as a 'superresolver' or a 'solver'")
   
     return _denoise
-
-
-  # def inference_loop(
-  #     self,
-  #     batch: dict,
-  #     eval_losses: dict
-  # ) -> dict:
-  #   """Compute further generated samples and do an inference run for further evaluation
-
-  #   Further Args compared to eval_fn:
-  #     eval_losses: Dictionary with relevant metrics to collect
-
-  #   Returns:
-  #     A dictionary with the complete evaluation metrics loop
-  #   """
-  #   denoise_fn = self.inference_fn(self.denoiser)
-
-  #   x_gen = batch[:, self.input_channel:, ...]
-  #   y_gen = batch[:, :self.input_channel, ...]
-
-  #   batch_size = len(batch)
-
-  #   output_channels = self.input_shape[0] - self.input_channel # input shape is given without the batch size
-  #   spatial_shape = self.input_shape[1:]
-  #   spatial_axis = [i for i in range(1, len(spatial_shape) + 1)]
-
-  #   shape = (batch_size,) + output_channels + spatial_shape
-  #   tspan = getattr(samplers, self.tspan_method)(scheme=self.diffusion_scheme, num_steps=128, end_sigma=1e-4)
-  #   sampler = dfn_lib.SdeSampler(
-  #     input_shape=shape[1:],
-  #     integrator=EulerMaruyama(self.rng),
-  #     scheme=self.diffusion_scheme,
-  #     denoise_fn=denoise_fn,
-  #     tspan=tspan,
-  #     apply_denoise_at_end=True,
-  #     return_full_paths=False,
-  #     rng=self.rng,
-  #     device=self.dtype
-  #   )
-
-  #   cond_samples = 4
-  #   x_cond = torch.zeros((cond_samples,) + shape, device=self.device, dtype=self.dtype)
-  #   for i in range(cond_samples):
-  #     x_cond[i] = sampler.generate(num_samples=batch_size, y=y_gen) 
-
-  #   conditional_mean = torch.mean(x_cond, dim=0)
-  #   conditional_std = torch.std(x_cond, dim=0)
-
-  #   relative_norm_crps_score = 0
-  #   relative_validation_error = 0
-
-  #   for l in range(output_channels):
-  #     crps_score_l = None # TODO!!!!
-  #     norm_crps_score_l = None # TODO!!!
-    
-  #   # TODO: Implement crps!

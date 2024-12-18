@@ -21,7 +21,6 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from eval.metrics.stats_recorder import StatsRecorder
-from dataloader.dataset import TrainingSetBase
 from utils.dataloader_utils import normalize, denormalize
 from utils.model_utils import reshape_jax_torch
 from utils.eval_utils import summarize_metric_results
@@ -37,7 +36,6 @@ def run(
     stats_recorder: StatsRecorder,
     # Dataset configs
     dataloader: DataLoader,
-    dataset: TrainingSetBase,
     dataset_module: str,
     time_cond: bool,
     # Eval configs
@@ -123,7 +121,6 @@ def run(
                 lead_time = [None] * batch_size
 
             # normalize inputs (initial conditions) and outputs (solutions)
-            # u0_norm = reshape_jax_torch(dataset.normalize_input(reshape_jax_torch(u0)))
             u0_norm = reshape_jax_torch(
                 normalize(
                     reshape_jax_torch(u0),
@@ -142,7 +139,6 @@ def run(
 
                 gen_batch[batch] = gen_sample.squeeze(0)
             # update relevant metrics and denormalize the generated results
-            # u_gen = reshape_jax_torch(dataset.denormalize_output(reshape_jax_torch(gen_batch)))
             u_gen = reshape_jax_torch(
                 denormalize(
                     reshape_jax_torch(gen_batch),
@@ -199,7 +195,6 @@ def run(
 
             gen_batch[batch] = gen_sample.squeeze(0)
         # update relevant metrics and denormalize the generated results
-        # u_gen = reshape_jax_torch(dataset.denormalize_output(reshape_jax_torch(gen_batch)))
         u_gen = reshape_jax_torch(
             denormalize(
                 reshape_jax_torch(gen_batch),

@@ -49,6 +49,7 @@ from dataloader.dataset import (
     RichtmyerMeshkov2D,
     DataIC_3D_Time,
     DataIC_3D_Time_TG,
+    DataIC_3D_Time_Nozzle,
     ConditionalDataIC_Vel,
     ConditionalDataIC_3D,
     ConditionalDataIC_3D_TG,
@@ -98,6 +99,10 @@ def get_dataset(
     elif name == 'DataIC_3D_Time_TG':
         dataset = DataIC_3D_Time_TG(metadata=metadata)
         time_cond = True
+
+    elif name == 'DataIC_3D_Time_Nozzle':
+        dataset = DataIC_3D_Time_Nozzle(metadata=metadata)
+        time_cond = True
     
     elif name == 'ConditionalDataIC_Vel':
         dataset = ConditionalDataIC_Vel(metadata=metadata)
@@ -120,7 +125,6 @@ def get_dataset(
     
     if is_time_dependent:
         return dataset, time_cond
-    
     else:
         return dataset
 
@@ -150,7 +154,7 @@ def get_dataset_loader(
         num_worker: int = 0,
         prefetch_factor: int = 2, # default DataLoader value
         split: bool = True, 
-        split_ratio: float = 0.8,
+        split_ratio: float = 0.9,
     ) -> Tuple[DataLoader, DataLoader] | DataLoader:
     """Return a training and evaluation dataloader or a single dataloader"""
 
@@ -317,7 +321,6 @@ def get_denoising_model(
 
     denoiser_args = get_denoiser_args(
         args=args,
-        input_channels=input_channels,
         spatial_resolution=spatial_resolution,
         time_cond=time_cond,
         denoiser=denoiser,
@@ -345,7 +348,8 @@ def create_denoiser(
 
     model = get_model(
         args=args, 
-        in_channels=input_channels*2,
+        # For the UNet model input channels and output channels are concatenated
+        in_channels=input_channels + out_channels,
         out_channels=out_channels,
         spatial_resolution=spatial_resolution,
         time_cond=time_cond,

@@ -98,6 +98,10 @@ class AxialSelfAttentionBlock(nn.Module):
         self.device = device
         self.kernel_dim = len(spatial_resolution)
 
+        # permute spatial resolution since the following transformation in the 3D case is being done:
+        # (bs, c, w, h, d) -> (bs, d, h, w, c) thus the resolution changes (w, h, d) -> (d, h, w)
+        spatial_resolution = spatial_resolution[::-1]
+
         if isinstance(attention_axes, int):
             attention_axes = (attention_axes,)
         self.attention_axes = attention_axes

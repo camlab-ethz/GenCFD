@@ -21,6 +21,7 @@ incompressible flows.
     2D Cloud Shock:           DataIC_Cloud_Shock_2D   ConditionalDataIC_Cloud_Shock_2D
     3D Shear Layer:           DataIC_3D_Time          ConditionalDataIC_3D
     3D Taylor Green Vortex:   DataIC_3D_Time_TG       ConditionalDataIC_3D_TG
+    3D Nozzle:                DataIC_3D_Time_Nozzle   ConditionalDataIC_3D_Nozzle
 """
 
 import os
@@ -29,8 +30,8 @@ import numpy as np
 import torch
 import torch.distributed as dist
 import shutil
-from typing import Union, Any
-from torch.distributed import is_initialized
+from typing import Union, Tuple, Any
+from torch.distributed import broadcast_object_list, is_initialized
 from torch.utils.data import Subset
 
 DIR_PATH_LOADER = '/cluster/work/math/camlab-data/data/diffusion_project'
@@ -39,7 +40,7 @@ array = np.ndarray
 Tensor = torch.Tensor
 
 
-def train_test_split(dataset, split_ratio=0.8, seed=42):
+def train_test_split(dataset, split_ratio=0.999, seed=42):
     """
     Split a dataset into training and testing subsets.
 
@@ -112,7 +113,7 @@ class TrainingSetBase:
 
     def _move_to_local_scratch(self, file_system: dict, scratch_dir: str) -> str:
         """Copy the specified file to the local scratch directory if needed."""
-        
+
         # Construct the source file path
         data_dir = os.path.join(file_system['origin'], file_system['file_name'])
         file = file_system['file_name'].split("/")[-1]
@@ -603,6 +604,7 @@ class DataIC_3D_Time_TG(TrainingSetBase):
         output_channel = 3
 
         self.metadata = metadata
+
         file_system = create_file_system(metadata)
 
         if move_to_local_scratch:
@@ -683,6 +685,113 @@ class DataIC_3D_Time_TG(TrainingSetBase):
             'target_cond': target_cond
         }
 
+#################### 3D Nozzle Dataset ####################
+
+class DataIC_3D_Time_Nozzle(TrainingSetBase):
+    # FILE_PATH = "/cluster/work/math/camlab-data/data/nozzle3d.nc"
+    # FILE_PATH = "$SCRATCH/nozzle3d.nc"
+
+    def __init__(
+        self,
+        metadata: Any,
+        start: int = 0,
+        file: str = None,
+        min_time: int = 0,
+        max_time: int = 14,
+        move_to_local_scratch: bool = False
+    ):
+
+    
+        input_channel = 1
+        output_channel = 3
+
+        self.metadata = metadata
+
+        file_system = create_file_system(metadata)
+
+        # Here Local scratch data needs to be handled differently!
+        file_path = self.file_on_local_scratch(file_system['file_name'], file_system['origin'])
+
+        self.file = netCDF4.Dataset(file_path, 'r')
+
+        super().__init__(
+            training_samples=self.file.variables['u'].shape[0],
+            file_system=file_system,
+            input_channel=input_channel,
+            output_channel=output_channel,
+            start=start,
+        )
+
+        self.spatial_resolution = (64, 64, 192)
+        self.input_shape = (4, 64, 64, 192)
+        self.output_shape = (3, 64, 64, 192)
+
+        self.min_time = min_time
+        self.max_time = max_time
+
+        # Precompute all possible (t_initial, t_final) pairs within the specified range.
+        self.time_pairs = [(0, j) for j in range(1, self.max_time)]
+        self.total_pairs = len(self.time_pairs)
+
+        np.random.seed(42)
+        self.shuffle_ids = np.arange(0, 10000)
+        np.random.shuffle(self.shuffle_ids)
+        
+        self.mean_training_input = np.array([0.0, 0.0, 0.0])
+        self.std_training_input = np.array([1.0, 1.0, 1.0])
+        
+        self.mean_training_output = np.array([0.00858, 0.0, 0.0])
+        self.std_training_output = np.array([0.0727, 0.0266, 0.0252])
+
+    
+    def __getitem__(self, index):
+        # Determine the data point and the (t_initial, t_final) pair
+        
+        index += self.start
+        data_index = index // self.total_pairs
+        data_index = self.shuffle_ids[data_index]
+        
+        pair_index = index % self.total_pairs
+        t_init, t_final = self.time_pairs[pair_index]
+
+        # lead_time describes the temporal difference
+        lead_time = t_final - t_init
+        standardized_lead_time = 0.1 * lead_time
+        
+        u_data = self.file.variables['u'][data_index,t_final] 
+        v_data = self.file.variables['v'][data_index,t_final]
+        w_data = self.file.variables['w'][data_index,t_final]
+        
+        # Stack along the new last dimension (axis=-1)
+        initial_condition = float(self.file.variables['injection_velocity'][data_index])*np.ones((192, 64, 64, 1))
+        final_condition = self.normalize_output(np.stack((u_data, v_data, w_data), axis=-1))
+
+        initial_cond = (
+            torch.from_numpy(initial_condition)
+            .type(torch.float32)
+            .permute(3, 2, 1, 0)
+        )
+
+        target_cond = (
+            torch.from_numpy(final_condition)
+            .type(torch.float32)
+            .permute(3, 2, 1, 0)
+        )
+
+        return {
+            'lead_time': torch.tensor(standardized_lead_time, dtype=torch.float32), 
+            'initial_cond': initial_cond,
+            'target_cond': target_cond
+        }
+
+    def collate_tf(self, time, data):
+        return {"lead_time": time, "data": data}
+
+    def get_proc_data(self, data):
+        return data["data"]
+
+    def get_proc_data_time(self, data):
+        return data["lead_time"]
 
 #################### CONDITIONAL DATASETS FOR EVALUATON ####################
 """
@@ -842,10 +951,7 @@ class ConditionalDataIC_Vel(ConditionalBase):
         # Store indices for the CDF computation
         return {
             'initial_cond': initial_cond,
-            'target_cond': target_cond,
-            # 'sample_idx': index,
-            # 'macro_idx': macro_idx,
-            # 'micro_idx': micro_idx
+            'target_cond': target_cond
         }
 
 
@@ -912,10 +1018,7 @@ class ConditionalDataIC_Cloud_Shock_2D(ConditionalBase):
         # Store indices for the CDF computation
         return {
             'initial_cond': initial_cond,
-            'target_cond': target_cond,
-            # 'sample_idx': index,
-            # 'macro_idx': macro_idx,
-            # 'micro_idx': micro_idx
+            'target_cond': target_cond
         }
 
 
@@ -999,10 +1102,7 @@ class ConditionalDataIC_3D(ConditionalBase):
             # lead_time needs to be changed depending on your start index
             'lead_time': torch.tensor(1., dtype=torch.float32),
             'initial_cond': initial_cond,
-            'target_cond': target_cond,
-            # 'sample_idx': index,
-            # 'macro_idx': macro_idx,
-            # 'micro_idx': micro_idx
+            'target_cond': target_cond
         }
 
 
@@ -1028,12 +1128,8 @@ class ConditionalDataIC_3D_TG(ConditionalBase):
         self.metadata = metadata
         file_system = create_file_system(metadata)
         
-        if move_to_local_scratch:
-            # Copy file to local scratch
-            file_path = self._move_to_local_scratch(file_system=file_system, scratch_dir='TMPDIR')
-        else:
-            # Get the correct file_path and check whether file is on local scratch
-            file_path = self.file_on_local_scratch(file_system['file_name'], file_system['origin'])
+        # file is too big to copy on local scratch!
+        file_path = self.file_on_local_scratch(file_system['file_name'], file_system['origin'])
 
         self.file = netCDF4.Dataset(file_path, mode='r')
 
@@ -1061,6 +1157,7 @@ class ConditionalDataIC_3D_TG(ConditionalBase):
         )
     
     def __getitem__(self, index):
+        
         macro_idx = self.get_macro_index(index + self.start_index)
         micro_idx = self.get_micro_index(index + self.start_index)
 
@@ -1099,8 +1196,5 @@ class ConditionalDataIC_3D_TG(ConditionalBase):
         return {
             'lead_time': torch.tensor(lead_time_normalized, dtype=torch.float32),
             'initial_cond': initial_cond,
-            'target_cond': target_cond,
-            # 'sample_idx': index,
-            # 'macro_idx': macro_idx,
-            # 'micro_idx': micro_idx
+            'target_cond': target_cond
         }

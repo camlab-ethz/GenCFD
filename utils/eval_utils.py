@@ -42,12 +42,6 @@ def summarize_metric_results(
     metrics_dict : dict
         Dictionary containing the summarized metrics.
     """
-    
-    # Gather results and convert them to lists for JSON compatibility
-    mean_gt = stats_recorder.mean_gt.tolist()
-    mean_gen = stats_recorder.mean_gen.tolist()
-    std_gt = stats_recorder.std_gt.tolist()
-    std_gen = stats_recorder.std_gen.tolist()
 
     # Compute relative and absolute L2 norms
     rel_mean = relative_L2_norm(
@@ -80,7 +74,7 @@ def summarize_metric_results(
 
     # Compute average Wasserstein distances
     wasserstein_distance_torch = compute_average_wasserstein(
-        monte_carlo_samples=stats_recorder.monte_carlo_samples,
+        num_particles=stats_recorder.num_samples,
         channels=stats_recorder.channels,
         gen_samples=gen_monte_carlo_samples,
         gt_samples=gt_monte_carlo_samples,

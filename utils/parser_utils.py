@@ -75,6 +75,7 @@ def add_data_options(parser: ArgumentParser):
                             'DataIC_Vel', 'DataIC_Cloud_Shock_2D',
                             'RichtmyerMeshkov2D',
                             'DataIC_3D_Time', 'DataIC_3D_Time_TG',
+                            'DataIC_3D_Time_Nozzle',
                             # Conditional (Perturbed) Datasets for Evaluation
                             'ConditionalDataIC_Vel', 'ConditionalDataIC_Cloud_Shock_2D',
                             'ConditionalDataIC_3D', 'ConditionalDataIC_3D_TG'
@@ -181,9 +182,9 @@ def add_trainer_options(parser: ArgumentParser):
     # EMA ... Exponential Moving Average
     group.add_argument('--ema_decay', default=0.999, type=float, 
                        help='Choose a decay rate for the EMA model parameters')
-    group.add_argument('--peak_lr', default=1e-4, type=float,
+    group.add_argument('--peak_lr', default=1e-4, type=float, # 1e-4
                        help="Choose a learning rate for the Adam optimizer")
-    group.add_argument('--weight_decay', default=0.01, type=float,
+    group.add_argument('--weight_decay', default=0.001, type=float, # 0.01
                        help='Regularization strength for the optimizer')
     group.add_argument('--task', default='solver', type=str, 
                        choices=['solver', 'superresolver'],
@@ -252,6 +253,8 @@ def add_evaluation_options(parser: ArgumentParser):
                        help='Choose a number of monte carlo samples to compute statistical metrics')
     group.add_argument('--visualize', action='store_true', default=False,
                        help="If True an image of a single generated result will be stored")
+    group.add_argument('--save_gen_samples', action='store_true', default=False,
+                       help="If True an npz file with generated and groundtruth samples will be stored")
 
 def train_args():
     """Define the Parser for the training"""

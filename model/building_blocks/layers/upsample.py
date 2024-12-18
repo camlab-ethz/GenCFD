@@ -61,6 +61,11 @@ class ChannelToSpace(nn.Module):
     self.block_shape = block_shape
     self.in_channels = in_channels
     self.kernel_dim = kernel_dim
+
+    # Since also here a transformation happens from (bs, c, w, h, d) -> (bs, d, h, w, c)
+    # Thus for the spatial_resolution: (w, h, d) -> (d, h, w)
+    spatial_resolution = spatial_resolution[::-1]
+
     self.spatial_resolution = spatial_resolution
     self.input_dim = kernel_dim + 2 # batch size and channel dimensions are added
 
@@ -94,7 +99,6 @@ class ChannelToSpace(nn.Module):
 
     # compute permutation axes:
     self.permutation_axes = tuple(range(batch_ndim)) + self.new_axes + (len(self.new_axes) + batch_ndim,)
-
 
 
   def forward(self, inputs: Tensor) -> Tensor:

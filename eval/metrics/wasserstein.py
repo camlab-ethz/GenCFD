@@ -82,7 +82,7 @@ def wasserstein_distance_1d(u_values: Tensor, v_values: Tensor, p: int = 1):
 
 
 def compute_average_wasserstein(
-    monte_carlo_samples: int,
+    num_particles: int,
     channels: int,
     gen_samples: Tensor, 
     gt_samples: Tensor, 
@@ -96,9 +96,9 @@ def compute_average_wasserstein(
     if method == 'custom': 
         for channel in range(channels):
             wass = []
-            for sample in range(monte_carlo_samples):
-                gen_sample = gen_samples[sample,:,channel]
-                gt_sample = gt_samples[sample,:,channel]
+            for sample in range(num_particles):
+                gen_sample = gen_samples[:,sample,channel]
+                gt_sample = gt_samples[:,sample,channel]
                 wass.append(wasserstein_distance_1d(gen_sample, gt_sample))
             # compute the avg wasserstein for channel i
             avg_wass[f'wass_{channel}'] = torch.mean(torch.as_tensor(wass)).item()
@@ -106,9 +106,9 @@ def compute_average_wasserstein(
     elif method == 'scipy':
         for channel in range(channels):
             wass = []
-            for sample in range(monte_carlo_samples):
-                gen_sample = gen_samples[sample,:,channel].cpu().numpy()
-                gt_sample = gt_samples[sample,:,channel].cpu().numpy()
+            for sample in range(num_particles):
+                gen_sample = gen_samples[:,sample,channel].cpu().numpy()
+                gt_sample = gt_samples[:,sample,channel].cpu().numpy()
                 wass.append(wasserstein_distance(gen_sample, gt_sample))
             avg_wass[f'wass_{channel}'] = float(np.mean(wass))
     else:

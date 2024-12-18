@@ -137,15 +137,19 @@ class BasicTrainState(TrainState):
       optimizer: torch.optim.Optimizer,
       is_compiled: bool,
       is_parallelized: bool,
+      use_ema: bool = False,
       device: torch.device = None
     ) -> TrainState:
     
     # if model was trained on gpu but is evaluated on the cpu 'map_location' is necessary
     checkpoint = torch.load(ckpt_path, weights_only=True, map_location=device)
 
-    params = checkpoint["params"] if "params" in checkpoint.keys() else checkpoint["model_state_dict"]
     opt_state = checkpoint["opt_state"] if "opt_state" in checkpoint.keys() else checkpoint["optimizer_state_dict"]
 
+    if use_ema:
+      params = checkpoint["ema_param"] if "ema_param" in checkpoint.keys() else checkpoint["model_state_dict"]
+    else:
+      params = checkpoint["params"] if "params" in checkpoint.keys() else checkpoint["model_state_dict"]
 
     checkpoint_compiled = checkpoint['is_compiled'] # check if stored model was compiled
     checkpoint_ddp = checkpoint['is_parallelized'] # check if stored model was trained in parallel
@@ -251,8 +255,10 @@ class DenoisingModelTrainState(BasicTrainState):
       step: int, 
       params: Dict[str, Any] = None, 
       opt_state: Dict[str, Any] = None,
-      ema: Dict[str, Any] = None):
+      ema: Dict[str, Any] = None
+    ):
       """Replaces state values with updated fields."""
+
       self.step = step
       self.params = params
       self.opt_state = opt_state

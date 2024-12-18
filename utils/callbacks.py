@@ -215,6 +215,7 @@ class TrainStateCheckpoint(Callback):
     checkpoint = {
       'model_state_dict': trainer.model.denoiser.state_dict(),
       'optimizer_state_dict': trainer.optimizer.state_dict(),
+      'ema_param': trainer.train_state.ema if trainer.store_ema else None,
       'step': step,
       'metrics': metrics,
       'is_compiled': trainer.is_compiled,

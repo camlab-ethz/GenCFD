@@ -136,7 +136,6 @@ def get_model_args(
 # General Denoiser arguments
 def get_denoiser_args(
     args: ArgumentParser,
-    input_channels: int,
     spatial_resolution: Sequence[int],
     time_cond: bool,
     denoiser: nn.Module,
@@ -156,7 +155,7 @@ def get_denoiser_args(
     'num_eval_cases_per_lvl': args.num_eval_cases_per_lvl,
     'min_eval_noise_lvl': args.min_eval_noise_lvl, 'max_eval_noise_lvl': args.max_eval_noise_lvl,
     'consistent_weight': args.consistent_weight, 'device': device, 'dtype': dtype,
-    'input_channel': input_channels, 'task': args.task
+    'task': args.task
   }
 
   return denoiser_args

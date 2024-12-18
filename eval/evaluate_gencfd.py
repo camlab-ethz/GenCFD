@@ -145,7 +145,12 @@ if __name__=="__main__":
     )
 
     with torch.no_grad():
-        denoising_model.initialize(batch_size=args.batch_size, time_cond=time_cond)
+        denoising_model.initialize(
+            batch_size=args.batch_size, 
+            time_cond=time_cond, 
+            input_channels=dataset.input_channel, 
+            output_channels=dataset.output_channel
+        )
 
     # Print number of Parameters:
     model_params = sum(p.numel() for p in denoising_model.denoiser.parameters() if p.requires_grad)
@@ -170,12 +175,13 @@ if __name__=="__main__":
         world_size=args.world_size,
         local_rank=args.local_rank
     )
-    
-    if (args.world_size > 1 and args.local_rank == 0) or args.world_size == 1:
-        print("Load Model Parameters")
-        print(" ")
 
     latest_model_path = get_latest_checkpoint(model_dir)
+
+    if (args.world_size > 1 and args.local_rank == 0) or args.world_size == 1:
+        print("Load Model Parameters")
+        print(f"Latest Path used: {latest_model_path}")
+        print(" ")
 
     trained_state = DenoisingModelTrainState.restore_from_checkpoint(
         latest_model_path,
@@ -183,6 +189,7 @@ if __name__=="__main__":
         optimizer=trainer.optimizer,
         is_compiled=trainer.is_compiled,
         is_parallelized=False,
+        use_ema=True, # load ema parameters instead
         device = device,
     )
 
@@ -203,7 +210,7 @@ if __name__=="__main__":
     # Construct the inference function
     denoise_fn = trainer.inference_fn_from_state_dict(
         trained_state, 
-        use_ema=False, # Changed! 
+        use_ema=False, # Already handled in restore_from_checkpoint
         denoiser=denoising_model.denoiser, 
         task=args.task,
         lead_time=time_cond
@@ -245,7 +252,7 @@ if __name__=="__main__":
         channels=dataset.output_channel, 
         data_shape=out_shape,
         monte_carlo_samples=args.monte_carlo_samples if args.world_size <= 1 else effective_samples // args.world_size,
-        num_samples= 1000, # Choose 1000 random pixel values
+        num_samples= 4, # Choose 1000 random pixel values
         device=device,
         world_size=args.world_size
     )
@@ -269,12 +276,12 @@ if __name__=="__main__":
         stats_recorder=stats_recorder,
         # Dataset configs
         dataloader=dataloader,
-        dataset=dataset,
         dataset_module=args.dataset,
         time_cond=time_cond,
         # Eval configs
         compute_metrics=args.compute_metrics,
         visualize=args.visualize,
+        save_gen_samples=args.save_gen_samples,
         device=device,
         save_dir=args.save_dir,
         # DDP configs

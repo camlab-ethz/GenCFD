@@ -314,6 +314,7 @@ class DenoisingTrainer(BasicTrainer[M, SD]):
         """
         return train_states.DenoisingModelTrainState(
             # Further parameters can be added here to track
+            model=self.model.denoiser if self.store_ema else None,
             step=0,
             ema_decay=self.ema_decay,
             store_ema=self.store_ema
@@ -362,7 +363,7 @@ class DenoisingTrainer(BasicTrainer[M, SD]):
         state: SD,
         denoiser: nn.Module,
         *args,
-        use_ema: bool = True,
+        use_ema: bool = False,
         task: str = 'solver',
         lead_time: bool = False,
         **kwargs
