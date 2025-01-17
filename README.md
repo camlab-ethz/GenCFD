@@ -170,3 +170,15 @@ The table below provides a description of each dataset along with the correspond
 We would like to extend our deepest gratitude to the Google Research team for their groundbreaking work and open-source contributions. This project builds upon their foundational models and research, which have been instrumental in advancing the development of GenCFD.
 
 For more details, please refer to their original work: [swirl-dynamics](https://github.com/google-research/swirl-dynamics).
+
+## Citation
+If you use this code or find it helpful in your research, please cite the following paper:
+@misc{molinaro2024generativeaifastaccurate,
+      title={Generative AI for fast and accurate Statistical Computation of Fluids}, 
+      author={Roberto Molinaro and Samuel Lanthaler and Bogdan Raonić and Tobias Rohner and Victor Armegioiu and Zhong Yi Wan and Fei Sha and Siddhartha Mishra and Leonardo Zepeda-Núñez},
+      year={2024},
+      eprint={2409.18359},
+      archivePrefix={arXiv},
+      primaryClass={cs.LG},
+      url={https://arxiv.org/abs/2409.18359}, 
+}
