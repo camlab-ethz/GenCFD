@@ -29,14 +29,13 @@ def parse_tuple(value):
 def str_to_bool(value):
     """Transform a string to a bool."""
 
-    if isinstance(value, bool):  # If it's already a boolean, return as is
-        return value
     if value.lower() in ['true', 't', '1', 'yes', 'y']:
         return True
     elif value.lower() in ['false', 'f', '0', 'no', 'n']:
         return False
-    else:
-        raise ValueError(f"Invalid boolean string value: {value}")
+
+    if isinstance(value, bool):  # If it's already a boolean, return as is
+        return value
 
 
 def add_base_options(parser: ArgumentParser):
@@ -72,13 +71,14 @@ def add_data_options(parser: ArgumentParser):
     group.add_argument("--dataset", default='DataIC_Vel', type=str,
                        choices=[
                             # Datasets for Training
-                            'DataIC_Vel', 'DataIC_Cloud_Shock_2D',
+                            'ShearLayer2D', 'CloudShock2D',
                             'RichtmyerMeshkov2D',
-                            'DataIC_3D_Time', 'DataIC_3D_Time_TG',
-                            'DataIC_3D_Time_Nozzle',
+                            'ShearLayer3D', 'TaylorGreen3D',
+                            'Nozzle3D',
                             # Conditional (Perturbed) Datasets for Evaluation
-                            'ConditionalDataIC_Vel', 'ConditionalDataIC_Cloud_Shock_2D',
-                            'ConditionalDataIC_3D', 'ConditionalDataIC_3D_TG'
+                            'ConditionalShearLayer2D', 'ConditionalCloudShock2D',
+                            'ConditionalShearLayer3D', 'ConditionalTaylorGreen3D',
+                            'ConditionalNozzle3D'
                         ],
                        help="Name of the dataset, available choices")
     group.add_argument("--batch_size", default=5, type=int, help="Choose a batch size")
@@ -117,7 +117,7 @@ def add_model_options(parser: ArgumentParser):
                        help="Use position encoding True or False")
     # General settings
     group.add_argument("--padding_method", default="circular", type=str,
-                       choices=["circular", "constant", "lonlat", "latlon"],
+                       choices=["circular", "constant", "reflect", "lonlat", "latlon", "same", "zeros"],
                        help="Choose a proper padding method from the list of choices")
     group.add_argument("--dropout_rate", default=0.0, type=float,
                        help="Choose a proper dropout rate")
@@ -180,11 +180,11 @@ def add_trainer_options(parser: ArgumentParser):
 
     group = parser.add_argument_group('trainer')
     # EMA ... Exponential Moving Average
-    group.add_argument('--ema_decay', default=0.999, type=float, 
+    group.add_argument('--ema_decay', default=0.999, type=float,
                        help='Choose a decay rate for the EMA model parameters')
-    group.add_argument('--peak_lr', default=1e-4, type=float, # 1e-4
+    group.add_argument('--peak_lr', default=1e-4, type=float,
                        help="Choose a learning rate for the Adam optimizer")
-    group.add_argument('--weight_decay', default=0.001, type=float, # 0.01
+    group.add_argument('--weight_decay', default=0.01, type=float,
                        help='Regularization strength for the optimizer')
     group.add_argument('--task', default='solver', type=str, 
                        choices=['solver', 'superresolver'],
@@ -207,7 +207,7 @@ def add_training_options(parser: ArgumentParser):
                        help='Sanity check to spot early mistakes or runtime issues')
     group.add_argument('--checkpoints', default=True, type=str_to_bool,
                        help="Saves or Loads parameters from a checkpoint")
-    group.add_argument('--save_every_n_steps', default=5000, type=int,
+    group.add_argument('--save_every_n_steps', default=10000, type=int,
                        help="Saves a checkpoint of the model and optimizer after every n steps")
     group.add_argument('--track_memory', action='store_true', default=False,
                        help='If True, memory tracer during training is activated else returns zeros.')

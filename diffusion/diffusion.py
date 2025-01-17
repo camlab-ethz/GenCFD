@@ -25,8 +25,9 @@ Tensor = th.Tensor
 Numeric = Union[bool, int, float, np.ndarray, th.Tensor]
 ScheduleFn = Callable[[Numeric], Numeric]
 
-MIN_DIFFUSION_TIME = 0.0
-MAX_DIFFUSION_TIME = 1.0
+EPS = 1e-4
+MIN_DIFFUSION_TIME = EPS
+MAX_DIFFUSION_TIME = 1.0 - EPS
 
 
 @dataclasses.dataclass(frozen=True)
@@ -131,7 +132,7 @@ class Diffusion:
 
   @classmethod
   def create_variance_exploding(
-      cls, sigma: InvertibleSchedule, data_std: float = 1.0, device: th.device = None
+      cls, sigma: InvertibleSchedule, data_std: float = 1.0, device: th.device | None = None
   ) -> Diffusion:
     """Creates a variance exploding diffusion scheme.
 
@@ -220,7 +221,7 @@ def tangent_noise_schedule(
     raise ValueError("Must have -pi/2 < `start` < `end` < pi/2.")
   
   in_rescale = _linear_rescale(
-      in_min=0.0, 
+      in_min=MIN_DIFFUSION_TIME, 
       in_max=MAX_DIFFUSION_TIME, 
       out_min=start, 
       out_max=end

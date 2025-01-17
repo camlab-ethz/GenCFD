@@ -44,16 +44,15 @@ from diffusion.diffusion import (
 from dataloader.dataset import (
     train_test_split,
     TrainingSetBase,
-    DataIC_Vel,
-    DataIC_Cloud_Shock_2D,
-    RichtmyerMeshkov2D,
-    DataIC_3D_Time,
-    DataIC_3D_Time_TG,
-    DataIC_3D_Time_Nozzle,
-    ConditionalDataIC_Vel,
-    ConditionalDataIC_3D,
-    ConditionalDataIC_3D_TG,
-    ConditionalDataIC_Cloud_Shock_2D
+
+)
+from dataloader.fluid_flows_3d import (
+    ShearLayer3D,
+    TaylorGreen3D,
+    Nozzle3D,
+    ConditionalShearLayer3D,
+    ConditionalTaylorGreen3D,
+    ConditionalNozzle3D
 )
 from dataloader.metadata import METADATA_CLASSES
 from utils.callbacks import Callback ,TqdmProgressBar, TrainStateCheckpoint
@@ -73,51 +72,57 @@ def get_dataset(
         is_time_dependent: bool = False,
         # device: torch.device = None
     ) -> TrainingSetBase:
-    """Returns the correct dataset and if the dataset has a time dependency
-    This is necessary for the evaluation pipeline if there is no json file 
-    provided.
+    """
+    Returns the appropriate dataset and its time dependency status.
+
+    This function selects and initializes the correct dataset based on the provided name. 
+    It also returns whether the dataset is time-dependent, which is crucial for the 
+    evaluation pipeline when no JSON configuration file is provided.
+
+    Note:
+        The `lead_time=True` setting is applied explicitly to all datasets here, even 
+        though for 2D datasets this would typically be `False`. This ensures consistent 
+        behavior across datasets, particularly for 3D cases where time dependency is 
+        always required.
+
+    Args:
+        name (str): The name of the dataset to load. Must be one of the predefined datasets.
+        is_time_dependent (bool, optional): If `True`, the function will return the 
+            dataset along with its time dependency status. Defaults to `False`.
+
+    Returns:
+        TrainingSetBase: The initialized dataset.
+        tuple[TrainingSetBase, bool]: If `is_time_dependent=True`, returns a tuple of 
+            the dataset and a boolean indicating if it is time-dependent.
+
+    Raises:
+        ValueError: If the provided dataset name is not recognized.
     """
 
     metadata = METADATA_CLASSES[name]
-
-    if name == 'DataIC_Vel':
-        dataset = DataIC_Vel(metadata=metadata)
-        time_cond = False
     
-    elif name == 'DataIC_Cloud_Shock_2D':
-        dataset = DataIC_Cloud_Shock_2D(metadata=metadata)
-        time_cond = False
-    
-    elif name == 'RichtmyerMeshkov2D':
-        dataset = RichtmyerMeshkov2D(metadata=metadata)
-        time_cond = False
-    
-    elif name == 'DataIC_3D_Time':
-        dataset = DataIC_3D_Time(metadata = metadata)
+    if name == 'ShearLayer3D':
+        dataset = ShearLayer3D(metadata = metadata)
         time_cond = True
 
-    elif name == 'DataIC_3D_Time_TG':
-        dataset = DataIC_3D_Time_TG(metadata=metadata)
+    elif name == 'TaylorGreen3D':
+        dataset = TaylorGreen3D(metadata=metadata)
         time_cond = True
 
-    elif name == 'DataIC_3D_Time_Nozzle':
-        dataset = DataIC_3D_Time_Nozzle(metadata=metadata)
+    elif name == 'Nozzle3D':
+        dataset = Nozzle3D(metadata=metadata)
         time_cond = True
     
-    elif name == 'ConditionalDataIC_Vel':
-        dataset = ConditionalDataIC_Vel(metadata=metadata)
-        time_cond = False
+    elif name == 'ConditionalShearLayer3D':
+        dataset = ConditionalShearLayer3D(metadata=metadata)
+        time_cond = True
+    
+    elif name == 'ConditionalTaylorGreen3D':
+        dataset = ConditionalTaylorGreen3D(metadata=metadata)
+        time_cond = True
 
-    elif name == 'ConditionalDataIC_Cloud_Shock_2D':
-        dataset = ConditionalDataIC_Cloud_Shock_2D(metadata=metadata)
-        time_cond = False
-    
-    elif name == 'ConditionalDataIC_3D':
-        dataset = ConditionalDataIC_3D(metadata=metadata)
-        time_cond = True
-    
-    elif name == 'ConditionalDataIC_3D_TG':
-        dataset = ConditionalDataIC_3D_TG(metadata=metadata)
+    elif name == 'ConditionalNozzle3D':
+        dataset = ConditionalNozzle3D(metadata=metadata)
         time_cond = True
     
     else:
@@ -161,6 +166,9 @@ def get_dataset_loader(
     # is_time_dependent passes the bool time_cond and tells if the problem is time 
     # dependent or not
     dataset, time_cond = get_dataset(name=name, is_time_dependent=True)
+
+    if args.world_size > 1:
+        dist_sampler = get_distributed_sampler(args, dataset)
 
     if split:
         # split the dataset into train and eval

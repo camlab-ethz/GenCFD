@@ -13,15 +13,12 @@
 # limitations under the License.
 
 """
-File contains all the used datasets. The keyword IC is a characterization of 
-incompressible flows. 
+File contains all the Base Datasets for Training and Evaluation, as well as datasets with 
+macro and micro perturbations for conditional evaluation or fine-tuning. These datasets 
+are used for out-of-distribution predictions, with fine-tuning typically applied with 
+macro perturbations. Additional utility functions for dataset management are included.
 
-    Dataset:
-    2D Shear Layer Problem:   DataIC_Vel              ConditionalDataIC_Vel
-    2D Cloud Shock:           DataIC_Cloud_Shock_2D   ConditionalDataIC_Cloud_Shock_2D
-    3D Shear Layer:           DataIC_3D_Time          ConditionalDataIC_3D
-    3D Taylor Green Vortex:   DataIC_3D_Time_TG       ConditionalDataIC_3D_TG
-    3D Nozzle:                DataIC_3D_Time_Nozzle   ConditionalDataIC_3D_Nozzle
+For more information about the individual datasets, refer to fluid_flows_3d.py.
 """
 
 import os
@@ -30,17 +27,15 @@ import numpy as np
 import torch
 import torch.distributed as dist
 import shutil
-from typing import Union, Tuple, Any
+from typing import Union, Tuple, Any, Dict, List
 from torch.distributed import broadcast_object_list, is_initialized
-from torch.utils.data import Subset
-
-DIR_PATH_LOADER = '/cluster/work/math/camlab-data/data/diffusion_project'
+from torch.utils.data import Subset, Dataset
 
 array = np.ndarray
 Tensor = torch.Tensor
 
 
-def train_test_split(dataset, split_ratio=0.999, seed=42):
+def train_test_split(dataset: Dataset, split_ratio: float=0.999, seed: int=42):
     """
     Split a dataset into training and testing subsets.
 
@@ -70,45 +65,86 @@ def train_test_split(dataset, split_ratio=0.999, seed=42):
     return train_subset, eval_subset
 
 
-def create_file_system(metadata: Any) -> dict:
-    """Creates the filesystem with the metadata provided
-    Some parts are None values and just placeholders."""
-
-    return {
-        'file_name': metadata.file_name,
-        'origin': metadata.origin,
-        'mean_file': metadata.mean_file,
-        'std_file': metadata.std_file,
-        'stats_file': metadata.stats_file,
-        'origin_stats': metadata.origin_stats,
-        'conditional_path': metadata.conditional_path
-    }
-
-
 class TrainingSetBase:
+    """
+    Base class for loading and processing datasets related to incompressible fluid flows.
+    More details for specific datasets can be found in dataloader/fluid_flows_3d.py
+
+    Args:
+        file_system (dict): Contains the file system configuration (paths, etc.). See example in dataloader/fluid_flows_3d.py
+        ndim (int): Dimensionality of the dataset (e.g., 2D or 3D).
+        input_channel (int): The number of input channels.
+        output_channel (int): The number of output channels.
+        spatial_resolution (Tuple): Spatial resolution of the data (e.g., grid size).
+        input_shape (Tuple): Shape of the input data.
+        output_shape (Tuple): Shape of the output data.
+        variable_names (List[str]): Names of the variables in the dataset.
+        start (int): The starting index (default is 0).
+        training_samples (int, optional): Number of training samples (defaults to the total available).
+        move_to_local_scratch (bool, optional): Flag to move data to local scratch for fast access (default is False).
+        retrieve_stats_from_file (bool, optional): Flag to retrieve statistics (mean and std) from files (default is False).
+        mean_training_input (np.ndarray, optional): Pre-calculated mean for input normalization.
+        std_training_input (np.ndarray, optional): Pre-calculated std for input normalization.
+        mean_training_output (np.ndarray, optional): Pre-calculated mean for output normalization.
+        std_training_output (np.ndarray, optional): Pre-calculated std for output normalization.
+        get_values (bool, optional): Flag to directly get values without calculation (default is False).
+    """
     def __init__(
         self,
-        training_samples: int,
         file_system: dict,
+        ndim: int,
         input_channel: int,
         output_channel: int,
+        spatial_resolution: Tuple,
+        input_shape: Tuple,
+        output_shape: Tuple,
+        variable_names: List[str],
         start: int = 0,
+        training_samples: int = None,
+        move_to_local_scratch: bool = False,
+        retrieve_stats_from_file: bool = False,
+        mean_training_input: array = None,
+        std_training_input: array = None,
+        mean_training_output: array = None,
+        std_training_output: array = None,
+        get_values: bool = False
     ) -> None:
 
         self.start = start
-        self.training_samples = training_samples
         self.rand_gen = np.random.RandomState(seed = 4)
 
         self.file_system = file_system
         self.input_channel = input_channel
         self.output_channel =  output_channel
-    
-        self.mean_training_input = None
-        self.std_training_input = None
-        self.mean_training_output = None
-        self.std_training_output = None
 
-    def __len__(self):
+        self.spatial_resolution = spatial_resolution
+        self.input_shape = input_shape
+        self.output_shape = output_shape
+        self.variable_names = variable_names
+
+        if move_to_local_scratch:
+            # Copy file to local scratch
+            file_path = self._move_to_local_scratch(file_system=file_system, scratch_dir='TMPDIR')
+        else:
+            # Get the correct file_path and check whether file is on local scratch
+            file_path = self.file_on_local_scratch(file_system['file_name'], file_system['origin'])
+
+        # Load Dataset
+        self.file = netCDF4.Dataset(file_path, 'r')
+
+        self.training_samples = self.file.dimensions['member'].size if training_samples is None else training_samples
+
+        self.mean_training_input = mean_training_input
+        self.std_training_input = std_training_input
+        self.mean_training_output = mean_training_output
+        self.std_training_output = std_training_output
+
+        if retrieve_stats_from_file:
+            # Fill mean and std values for the input and output
+            self.retrieve_stats_from_file(file_system=file_system, ndim=ndim, get_values=get_values)
+
+
+    def __len__(self) -> int:
         return self.training_samples
 
     def _move_to_local_scratch(self, file_system: dict, scratch_dir: str) -> str:
@@ -211,7 +247,7 @@ class TrainingSetBase:
         std_training_output = std_training_output[..., :self.output_channel]
 
         if get_values:
-            # Exract values directly
+            # Extract values directly
             self.mean_training_input = mean_training_input
             self.std_training_input = std_training_input
             self.mean_training_output = mean_training_output
@@ -289,912 +325,79 @@ class TrainingSetBase:
         return data
 
 
-#################### IC TO HIGH RESOLUTION ####################
-
-class DataIC_Vel(TrainingSetBase):
-    def __init__(
-        self, 
-        metadata: Any,
-        start: int = 0,
-        file: str = None,
-        move_to_local_scratch: bool = True,
-    ):
-        
-        self.class_name = self.__class__.__name__
-
-        input_channel = 2
-        output_channel = 2
-        self.spatial_resolution = (128, 128)
-        self.input_shape = (4, 128, 128)
-        self.output_shape = (2, 128, 128)
-    
-        self.metadata = metadata
-        file_system = create_file_system(metadata)
-
-        if move_to_local_scratch:
-            # Copy file to local scratch
-            file_path = self._move_to_local_scratch(file_system=file_system, scratch_dir='TMPDIR')
-        else:
-            # Get the correct file_path and check whether file is on local scratch
-            file_path = self.file_on_local_scratch(file_system['file_name'], file_system['origin'])
-
-        self.file = netCDF4.Dataset(file_path, 'r')
-
-        super().__init__(
-            start = start, 
-            training_samples=self.file['data'].shape[0], 
-            file_system=file_system,
-            input_channel=input_channel, 
-            output_channel=output_channel,
-        )
-
-        # Set mean and std for training input and output
-        self.retrieve_stats_from_file(file_system=file_system, ndim=2)
-
-
-    def __getitem__(self, index):
-
-        index += self.start        
-        data = self.file['data'][index].data
-
-        data_input = data[0, ..., :self.input_channel]
-        data_output = data[1, ..., :self.output_channel]
-
-        data_input = self.normalize_input(data_input)
-        data_output = self.normalize_output(data_output)
-
-        initial_cond = (
-            torch.from_numpy(data_input)
-            .type(torch.float32)
-            .permute(2, 1, 0)
-            .cpu()
-        )
-
-        target_cond = (
-            torch.from_numpy(data_output)
-            .type(torch.float32)
-            .permute(2, 1, 0)
-            .cpu()
-        )
-
-        return {
-            'initial_cond': initial_cond,
-            'target_cond': target_cond
-        }
-        
-
-#################### 2D CLOUD SHOCK DATASETS ####################
-
-class DataIC_Cloud_Shock_2D(TrainingSetBase):
-    def __init__(
-            self, 
-            metadata: Any,
-            start = 0, 
-            file = None,
-            move_to_local_scratch: bool = True
-        ):
-
-        self.class_name = self.__class__.__name__
-        input_channel = 4
-        output_channel = 4
-        self.spatial_resolution = (128, 128)
-        self.input_shape = (8, 128, 128)
-        self.output_shape = (4, 128, 128)
-
-        self.metadata = metadata
-        file_system = create_file_system(metadata)
-
-        if move_to_local_scratch:
-            # Copy file to local scratch
-            file_path = self._move_to_local_scratch(file_system=file_system, scratch_dir='TMPDIR')
-        else:
-            # Get the correct file_path and check whether file is on local scratch
-            file_path = self.file_on_local_scratch(file_system['file_name'], file_system['origin'])
-
-        self.file = netCDF4.Dataset(file_path, 'r')
-
-        super().__init__(
-            training_samples=self.file['data'].shape[0],
-            file_system=file_system,
-            input_channel=input_channel,
-            output_channel=output_channel,
-            start=start
-        )
-
-        self.retrieve_stats_from_file(file_system=file_system, ndim=2)
-
-    def __getitem__(self, index):
-
-        index += self.start        
-        data = self.file['data'][index].data
-
-        data_input = data[0, ..., :self.input_channel]
-        data_output = data[1, ..., :self.output_channel]
-
-        data_input = self.normalize_input(data_input)
-        data_output = self.normalize_output(data_output)
-
-        initial_cond = (
-            torch.from_numpy(data_input)
-            .type(torch.float32)
-            .permute(2, 1, 0)
-        )
-
-        target_cond = (
-            torch.from_numpy(data_output)
-            .type(torch.float32)
-            .permute(2, 1, 0)
-        )
-
-        return {
-            'initial_cond': initial_cond,
-            'target_cond': target_cond
-        }
-
-#################### 2D RICHTMYER-MESHKOV DATASETS ####################
-
-class RichtmyerMeshkov2D(TrainingSetBase):
-    def __init__(
-            self, 
-            metadata: Any,
-            start = 0, 
-            file = None,
-            move_to_local_scratch: bool = True
-        ):
-
-        self.class_name = self.__class__.__name__
-
-        # Channels: ['rho', 'E', 'mx', 'my']
-        input_channel = 4
-        output_channel = 4
-        self.spatial_resolution = (128, 128)
-        self.input_shape = (8, 128, 128)
-        self.output_shape = (4, 128, 128)
-
-        self.metadata = metadata
-        file_system = create_file_system(metadata)
-
-        if move_to_local_scratch:
-            # Copy file to local scratch
-            file_path = self._move_to_local_scratch(file_system=file_system, scratch_dir='TMPDIR')
-        else:
-            # Get the correct file_path and check whether file is on local scratch
-            file_path = self.file_on_local_scratch(file_system['file_name'], file_system['origin'])
-
-        self.file = netCDF4.Dataset(file_path, 'r')
-
-        super().__init__(
-            training_samples=self.file.dimensions['member'].size,
-            file_system=file_system,
-            input_channel=input_channel,
-            output_channel=output_channel,
-            start=start
-        )
-
-        self.retrieve_stats_from_file(file_system=file_system, ndim=2, get_values=True)
-
-    def __getitem__(self, index):
-
-        index += self.start  
-  
-        # Load the data for the given index
-        rho_data = self.file.variables['rho'][index]  # Shape: (2, 128, 128)
-        E_data = self.file.variables['E'][index]
-        mx_data = self.file.variables['mx'][index]
-        my_data = self.file.variables['my'][index]
-
-        # Stack along the new last dimension (axis=-1)
-        combined_data = np.stack((rho_data, E_data, mx_data, my_data), axis=-1)  # Shape: (2, 128, 128, 4)
-
-        # Extract initial and final conditions
-        initial_condition = self.normalize_input(
-            combined_data[0, ...])  # Shape: (128, 128, 4)
-        target_condition = self.normalize_output(
-            combined_data[1, ...])  # Shape: (128, 128, 4)
-
-        initial_cond = (
-            torch.from_numpy(initial_condition)
-            .type(torch.float32)
-            .permute(2, 1, 0)
-        )
-
-        target_cond = (
-            torch.from_numpy(target_condition)
-            .type(torch.float32)
-            .permute(2, 1, 0)
-        )
-
-        return {
-            'initial_cond': initial_cond,
-            'target_cond': target_cond
-        }
-
-#################### 3D SHEAR LAYER DATASETS ####################
-
-class DataIC_3D_Time(TrainingSetBase):
-    def __init__(
-            self,
-            metadata: Any,
-            start=0,
-            file = None,
-            move_to_local_scratch: bool = True
-        ):
-
-        input_channel = 3
-        output_channel = 3
-        self.spatial_resolution = (64, 64, 64)
-        self.input_shape = (6, 64, 64, 64)
-        self.output_shape = (3, 64, 64, 64)
-
-        self.metadata = metadata
-        file_system = create_file_system(metadata)
-
-        if move_to_local_scratch:
-            # Copy file to local scratch
-            file_path = self._move_to_local_scratch(file_system=file_system, scratch_dir='TMPDIR')
-        else:
-            # Get the correct file_path and check whether file is on local scratch
-            file_path = self.file_on_local_scratch(file_system['file_name'], file_system['origin'])
-
-        self.file = netCDF4.Dataset(file_path, 'r')
-
-        super().__init__( 
-            training_samples=self.file.variables['data'].shape[0],
-            file_system=file_system,
-            input_channel=input_channel,
-            output_channel=output_channel,
-            start=start
-        )
-
-        self.n_all_steps = 10
-        self.start = self.start // self.n_all_steps
-
-        # Hardcoded values for the 3D Shear Flow Vertex Dataset
-        self.mean_training_input = np.array([1.5445266e-08, 1.2003070e-08, -3.2182508e-09])
-        self.mean_training_output = np.array([-8.0223117e-09, -3.3674191e-08, 1.5241447e-08])
-
-        self.std_training_input = np.array([0.20691067, 0.15985465, 0.15808222])
-        self.std_training_output = np.array([0.2706984, 0.24893111, 0.24169469])
-
-
-    def __getitem__(self, index):
-        index += self.start
-        data = self.file.variables['data'][index].data
-        if self.start == 0:
-            lead_time = self.file.variables['lead_time'][index].data
-        else:
-            lead_time = 1.
-
-        data_input = self.normalize_input(data[0])
-        data_output = self.normalize_output(data[1])
-
-        initial_cond = (
-            torch.from_numpy(data_input)
-            .type(torch.float32)
-            .permute(3, 2, 1, 0)
-        )
-        target_cond = (
-            torch.from_numpy(data_output)
-            .type(torch.float32)
-            .permute(3, 2, 1, 0)
-        )
-
-        return {
-            'lead_time': torch.tensor(lead_time, dtype=torch.float32), 
-            'initial_cond': initial_cond,
-            'target_cond': target_cond
-        }
-
-
-#################### 3D TAYLOR GREEN VORTEX DATASET ####################
-
-class DataIC_3D_Time_TG(TrainingSetBase):
-    
-    def __init__(
-            self,
-            metadata: Any,
-            start: int = 0,
-            file: str = None,
-            min_time: int = 0,
-            max_time: int = 5,
-            move_to_local_scratch: bool = True
-    ):
-
-        input_channel = 3
-        output_channel = 3
-
-        self.metadata = metadata
-
-        file_system = create_file_system(metadata)
-
-        if move_to_local_scratch:
-            # Copy file to local scratch
-            file_path = self._move_to_local_scratch(file_system=file_system, scratch_dir='TMPDIR')
-        else:
-            # Get the correct file_path and check whether file is on local scratch
-            file_path = self.file_on_local_scratch(file_system['file_name'], file_system['origin'])
-
-        self.file = netCDF4.Dataset(file_path, 'r')
-
-        super().__init__(
-            training_samples=self.file.variables['u'].shape[0],
-            file_system=file_system,
-            input_channel=input_channel,
-            output_channel=output_channel,
-            start=start,
-        )
-
-        self.retrieve_stats_from_file(file_system=file_system, ndim=3)
-
-        self.spatial_resolution = (64, 64, 64)
-        self.input_shape = (6, 64, 64, 64)
-        self.output_shape = (3, 64, 64, 64)
-
-        self.min_time = min_time
-        self.max_time = max_time
-
-        # Precompute all possible (t_initial, t_final) pairs within the specified range.
-        self.time_pairs = [(i, j) for i in range(self.min_time, self.max_time) for j in range(i + 1, self.max_time + 1)]
-        self.total_pairs = len(self.time_pairs)
-
-        
-    def __len__(self):
-        # Return the total number of data points times the number of pairs.
-        return len(self.file.variables['u']) * self.total_pairs
-
-
-    def __getitem__(self, index):
-        # Determine the data point and the (t_initial, t_final) pair
-        data_index = index // self.total_pairs
-        pair_index = index % self.total_pairs
-        t_initial, t_final = self.time_pairs[pair_index]
-
-        # Load the data for the given index
-        u_data = self.file.variables['u'][data_index]  # Shape: (6, 64, 64, 64)
-        v_data = self.file.variables['v'][data_index]
-        w_data = self.file.variables['w'][data_index]
-
-        # Stack along the new last dimension (axis=-1)
-        combined_data = np.stack((u_data, v_data, w_data), axis=-1)  # Shape: (6, 64, 64, 64, 3)
-
-        # Extract initial and final conditions
-        initial_condition = self.normalize_input(
-            combined_data[t_initial])  # Shape: (64, 64, 64, 3)
-        final_condition = self.normalize_output(
-            combined_data[t_final])  # Shape: (64, 64, 64, 3)
-        
-        # Linearly remap the lead_time in the interval [0.25, 2.0].
-        lead_time = float(t_final - t_initial)
-        lead_time_normalized = 0.25 + 0.4375 * (lead_time - 1)
-
-        initial_cond = (
-            torch.from_numpy(initial_condition)
-            .type(torch.float32)
-            .permute(3, 2, 1, 0)
-        )
-
-        target_cond = (
-            torch.from_numpy(final_condition)
-            .type(torch.float32)
-            .permute(3, 2, 1, 0)
-        )
-
-        return {
-            'lead_time': torch.tensor(lead_time_normalized, dtype=torch.float32), 
-            'initial_cond': initial_cond,
-            'target_cond': target_cond
-        }
-
-#################### 3D Nozzle Dataset ####################
-
-class DataIC_3D_Time_Nozzle(TrainingSetBase):
-    # FILE_PATH = "/cluster/work/math/camlab-data/data/nozzle3d.nc"
-    # FILE_PATH = "$SCRATCH/nozzle3d.nc"
-
-    def __init__(
-        self,
-        metadata: Any,
-        start: int = 0,
-        file: str = None,
-        min_time: int = 0,
-        max_time: int = 14,
-        move_to_local_scratch: bool = False
-    ):
-
-    
-        input_channel = 1
-        output_channel = 3
-
-        self.metadata = metadata
-
-        file_system = create_file_system(metadata)
-
-        # Here Local scratch data needs to be handled differently!
-        file_path = self.file_on_local_scratch(file_system['file_name'], file_system['origin'])
-
-        self.file = netCDF4.Dataset(file_path, 'r')
-
-        super().__init__(
-            training_samples=self.file.variables['u'].shape[0],
-            file_system=file_system,
-            input_channel=input_channel,
-            output_channel=output_channel,
-            start=start,
-        )
-
-        self.spatial_resolution = (64, 64, 192)
-        self.input_shape = (4, 64, 64, 192)
-        self.output_shape = (3, 64, 64, 192)
-
-        self.min_time = min_time
-        self.max_time = max_time
-
-        # Precompute all possible (t_initial, t_final) pairs within the specified range.
-        self.time_pairs = [(0, j) for j in range(1, self.max_time)]
-        self.total_pairs = len(self.time_pairs)
-
-        np.random.seed(42)
-        self.shuffle_ids = np.arange(0, 10000)
-        np.random.shuffle(self.shuffle_ids)
-        
-        self.mean_training_input = np.array([0.0, 0.0, 0.0])
-        self.std_training_input = np.array([1.0, 1.0, 1.0])
-        
-        self.mean_training_output = np.array([0.00858, 0.0, 0.0])
-        self.std_training_output = np.array([0.0727, 0.0266, 0.0252])
-
-    
-    def __getitem__(self, index):
-        # Determine the data point and the (t_initial, t_final) pair
-        
-        index += self.start
-        data_index = index // self.total_pairs
-        data_index = self.shuffle_ids[data_index]
-        
-        pair_index = index % self.total_pairs
-        t_init, t_final = self.time_pairs[pair_index]
-
-        # lead_time describes the temporal difference
-        lead_time = t_final - t_init
-        standardized_lead_time = 0.1 * lead_time
-        
-        u_data = self.file.variables['u'][data_index,t_final] 
-        v_data = self.file.variables['v'][data_index,t_final]
-        w_data = self.file.variables['w'][data_index,t_final]
-        
-        # Stack along the new last dimension (axis=-1)
-        initial_condition = float(self.file.variables['injection_velocity'][data_index])*np.ones((192, 64, 64, 1))
-        final_condition = self.normalize_output(np.stack((u_data, v_data, w_data), axis=-1))
-
-        initial_cond = (
-            torch.from_numpy(initial_condition)
-            .type(torch.float32)
-            .permute(3, 2, 1, 0)
-        )
-
-        target_cond = (
-            torch.from_numpy(final_condition)
-            .type(torch.float32)
-            .permute(3, 2, 1, 0)
-        )
-
-        return {
-            'lead_time': torch.tensor(standardized_lead_time, dtype=torch.float32), 
-            'initial_cond': initial_cond,
-            'target_cond': target_cond
-        }
-
-    def collate_tf(self, time, data):
-        return {"lead_time": time, "data": data}
-
-    def get_proc_data(self, data):
-        return data["data"]
-
-    def get_proc_data_time(self, data):
-        return data["lead_time"]
-
-#################### CONDITIONAL DATASETS FOR EVALUATON ####################
 """
-These datasets have some macro and micro perturbations incorporated. Those
-can be used for evaluation or fine tuning. This allows for a out of distribution
-prediction. Finetuning is typically done only with macro perturbations.
+CONDITIONAL DATASETS FOR EVALUATION
 
-Macro perturbations are bigger shifts in the initial conditions, while micro
-perturbations are in the area of 1 grid cell.
+These datasets incorporate both macro and micro perturbations, making them ideal
+for evaluation or fine-tuning. Macro perturbations refer to larger shifts in 
+the initial conditions, while micro perturbations are small adjustments at the 
+scale of a single grid cell. Fine-tuning is typically performed only with macro 
+perturbations to adapt the model to broader shifts in conditions.
+
+The main use case is to test or improve a model's robustness to out-of-distribution
+inputs by providing data with perturbations that differ from the model's original training conditions.
 """
 
 class ConditionalBase(TrainingSetBase):
+    """
+    A class for loading and handling datasets with macro and micro perturbations
+    for conditional evaluation or fine-tuning purposes.
+
+    Args:
+        training_samples (int): Number of training samples.
+        file_system (dict): Dictionary containing file paths and configuration.
+        ndim (int): Dimensionality of the data (e.g., 2D, 3D).
+        input_channel (int): Number of input channels.
+        output_channel (int): Number of output channels.
+        spatial_resolution (Tuple): Spatial resolution of the data.
+        input_shape (Tuple): Shape of the input data.
+        output_shape (Tuple): Shape of the output data.
+        variable_names (List[str]): Names of variables in the dataset.
+        start (int, optional): Starting index for the dataset (default is 0).
+        micro_perturbations (int, optional): Number of micro perturbations (default is 0).
+        macro_perturbations (int, optional): Number of macro perturbations (default is 0).
+        move_to_local_scratch (bool, optional): Flag to move data to local scratch directory (default is False).
+    """
 
     def __init__(
             self,
             training_samples: int,
             file_system: dict,
+            ndim: int,
             input_channel: int,
             output_channel: int,
+            spatial_resolution: Tuple,
+            input_shape: Tuple,
+            output_shape: Tuple,
+            variable_names: List[str],
             start: int = 0,
-            micro_perturbation: int = 0,
-            macro_perturbation: int = 0,
-            file_path: str = None,
-            stat_folder: str = None,
-            t_final: int = None
+            micro_perturbations: int = 0,
+            macro_perturbations: int = 0,
+            move_to_local_scratch: bool = False
         ) -> None : 
 
         super().__init__(
             training_samples=training_samples, 
             file_system=file_system,
+            ndim=ndim,
             input_channel=input_channel,
             output_channel=output_channel,
-            start=start
+            spatial_resolution=spatial_resolution,
+            input_shape=input_shape,
+            output_shape=output_shape,
+            variable_names=variable_names,
+            start=start,
+            move_to_local_scratch=move_to_local_scratch
         )
 
-        self.micro_perturbation = micro_perturbation
-        self.macro_perturbation = macro_perturbation
-        self.file_path = file_path
-        self.stat_folder = stat_folder
-        self.t_final = t_final
-        self.mean_down, self.std_down, self.kk, self.spectrum, self.energy, self.idx_wass, self.sol_wass = None, None, None, None, None, None, None
-
-    def set_true_stats_for_macro(self, macro_idx: int):
-
-        '''
-            macro_idx : macro index to be tested on
-    
-            There must exist a folder self.stat_folder with files Stats_{macro_idx}.nc in it.
-            Each Stats_{macro_idx}.nc file must have the following variables:
-            
-              - mean_     : target mean of the distribution
-              - std_      : target std of the distribution
-              - spectrum_ : target spectra of each variable
-              - energy_   : target energy of each variable
-              - idx       : locations at which we compute wasserstein distance
-                            -- while computing statistics:
-                            -- ns  = 1000
-                            -- ids = np.random.choice(size ** spatial_dim, min(ns, size ** spatial_dim), replace=False)
-              - sol_      : values of the samples at idx points
-        '''
-        
-        assert self.stat_folder is not None
-        
-        file_name = f"{self.stat_folder}/Stats_{macro_idx}.nc"
-        if not os.path.isfile(file_name):
-            raise FileNotFoundError(f"Statistics file {file_name} not found. Run ComputeTrueStatistics.py")
-        
-        f = netCDF4.Dataset(file_name, 'r')
-        mean = np.array(f.variables['mean_'][:])
-        std = np.array(f.variables['std_'][:])
-        spectrum = np.array(f.variables['spectrum_'][:])
-        energy = np.array(f.variables['energy_'][:])
-        idx_wass = np.array(f.variables['idx'][:])
-        sol_wass = np.array(f.variables['sol_'][:])
-        kk = np.arange(1, spectrum.shape[0] + 1)
-
-        self.mean_down, self.std_down, self.kk, self.spectrum, self.energy, self.idx_wass, self.sol_wass = mean, std, kk, spectrum, energy, idx_wass, sol_wass
-
-    def len(self):
-        return self.micro_perturbation * self.macro_perturbation
+        self.micro_perturbations = micro_perturbations
+        self.macro_perturbations = macro_perturbations
+      
+    def __len__(self) -> int:
+        return self.micro_perturbations * self.macro_perturbations
 
     def get_macro_index(self, index):
-        return index // self.micro_perturbation
+        return index // self.micro_perturbations
 
     def get_micro_index(self, index):
-        return index % self.micro_perturbation
-
-#--------------------------------------
-
-class ConditionalDataIC_Vel(ConditionalBase):
-    def __init__(
-            self, 
-            metadata: Any,
-            move_to_local_scratch: bool = True
-        ):
-        
-        input_channel = 2
-        output_channel = 2
-
-        self.spatial_resolution = (128, 128)
-        self.input_shape = (4, 128, 128)
-        self.output_shape = (2, 128, 128)
-
-        self.metadata = metadata
-        file_system = create_file_system(metadata)
-
-        if move_to_local_scratch:
-            # Copy file to local scratch
-            file_path = self._move_to_local_scratch(file_system=file_system, scratch_dir='TMPDIR')
-        else:
-            # Get the correct file_path and check whether file is on local scratch
-            file_path = self.file_on_local_scratch(file_system['file_name'], file_system['origin'])
-
-        stats_path = self.file_on_local_scratch(file_system['stats_file'], file_system['origin_stats'])
-        self.file = netCDF4.Dataset(file_path, mode='r')
-
-        self.start_index = 0    
-
-        samples_shape = self.file.variables['data'].shape
-        training_samples = samples_shape[0] * samples_shape[1] # macro * micro perturbations
-
-        super().__init__(
-            training_samples=training_samples,
-            file_system=file_system,
-            input_channel=input_channel,
-            output_channel=output_channel,
-            start=self.start_index,
-            micro_perturbation = 1000,
-            macro_perturbation = 10,
-            file_path = file_path,
-            stat_folder = stats_path)  
-         
-        # mean_training_input = np.array([8.0606696e-08, 4.8213877e-11])
-        # std_training_input = np.array([0.19003302, 0.13649726])
-        # mean_training_output = np.array([4.9476512e-09, -1.5097612e-10])
-        # std_training_output = np.array([0.35681796, 0.5053845]) 
-
-
-    def __getitem__(self, index):
-        macro_idx = self.get_macro_index(index + self.start_index)
-        micro_idx = self.get_micro_index(index + self.start_index)
-        datum = self.file.variables['data'][macro_idx, micro_idx].data
-
-        data_input = datum[0, ..., :self.input_channel]
-        data_output = datum[-1, ..., :self.output_channel]
-
-        initial_cond = (
-            torch.from_numpy(data_input)
-            .type(torch.float32)
-            .permute(2, 1, 0)
-        )
-        target_cond = (
-            torch.from_numpy(data_output)
-            .type(torch.float32)
-            .permute(2, 1, 0)
-        )
-        # Store indices for the CDF computation
-        return {
-            'initial_cond': initial_cond,
-            'target_cond': target_cond
-        }
-
-
-class ConditionalDataIC_Cloud_Shock_2D(ConditionalBase):
-    def __init__(
-            self, 
-            metadata: Any,
-            move_to_local_scratch: bool = True
-        ):
-        
-        input_channel = 4
-        output_channel = 4
-
-        self.spatial_resolution = (128, 128)
-        self.input_shape = (8, 128, 128)
-        self.output_shape = (4, 128, 128)
-        
-        self.metadata = metadata
-        file_system = create_file_system(metadata)
-
-        if move_to_local_scratch:
-            # Copy file to local scratch
-            file_path = self._move_to_local_scratch(file_system=file_system, scratch_dir='TMPDIR')
-        else:
-            # Get the correct file_path and check whether file is on local scratch
-            file_path = self.file_on_local_scratch(file_system['file_name'], file_system['origin'])
-
-        self.file = netCDF4.Dataset(file_path, mode='r')
-        self.start_index = 0
-
-        samples_shape = self.file.variables['data'].shape
-        training_samples = samples_shape[0] * samples_shape[1] # macro * micro perturbations
-
-        super().__init__(
-            training_samples=training_samples,
-            file_system=file_system,
-            input_channel=input_channel,
-            output_channel=output_channel,
-            start=self.start_index,
-            micro_perturbation = 1000,
-            macro_perturbation = 10,
-            file_path = file_path)  
-    
-
-    def __getitem__(self, index):
-        macro_idx = self.get_macro_index(index + self.start_index)
-        micro_idx = self.get_micro_index(index + self.start_index)
-        datum = self.file.variables['data'][macro_idx, micro_idx].data
-
-        data_input = datum[0, ..., :self.input_channel]
-        data_output = datum[-1, ..., :self.output_channel]
-
-        initial_cond = (
-            torch.from_numpy(data_input)
-            .type(torch.float32)
-            .permute(2, 1, 0)
-        )
-        target_cond = (
-            torch.from_numpy(data_output)
-            .type(torch.float32)
-            .permute(2, 1, 0)
-        )
-        
-        # Store indices for the CDF computation
-        return {
-            'initial_cond': initial_cond,
-            'target_cond': target_cond
-        }
-
-
-class ConditionalDataIC_3D(ConditionalBase):
-    def __init__(
-            self, 
-            metadata: Any,
-            move_to_local_scratch: bool = True
-        ):
-
-        input_channel = 3
-        output_channel = 3
-
-        self.spatial_resolution = (64, 64, 64)
-        self.input_shape = (6, 64, 64, 64)
-        self.output_shape = (3, 64, 64, 64)
-
-        self.macro_perturbation = 10
-        self.micro_perturbation = 1000
-
-        self.time_step = -1
-
-        self.metadata = metadata
-        file_system = create_file_system(metadata)
-
-        if move_to_local_scratch:
-            # Copy file to local scratch
-            file_path = self._move_to_local_scratch(file_system=file_system, scratch_dir='TMPDIR')
-        else:
-            # Get the correct file_path and check whether file is on local scratch
-            file_path = self.file_on_local_scratch(file_system['file_name'], file_system['origin'])
-
-        self.file = netCDF4.Dataset(file_path, mode='r')
-
-        # shape of the dataset: (macro, micro, time, x, y, z, c)
-        data_shape = self.file['data'].shape
-        training_samples = data_shape[0] * data_shape[1]
-        micro_perturbations = data_shape[1]
-        macro_perturbations = data_shape[0]
-
-        super().__init__(
-            training_samples=training_samples,
-            file_system=file_system,
-            input_channel=input_channel,
-            output_channel=output_channel,
-            micro_perturbation=micro_perturbations,
-            macro_perturbation=macro_perturbations,
-            file_path=file_path,
-        )
-
-        # Set the same mean and std values as for training DataIC_3D_Time
-        # self.mean_training_input = np.array([1.5445266e-08, 1.2003070e-08, -3.2182508e-09])
-        # self.mean_training_output = np.array([-8.0223117e-09, -3.3674191e-08, 1.5241447e-08])
-
-        # self.std_training_input = np.array([0.20691067, 0.15985465, 0.15808222])
-        # self.std_training_output = np.array([0.2706984, 0.24893111, 0.24169469])
-
-
-    def __getitem__(self, index):
-        macro_idx = self.get_macro_index(index)
-        micro_idx = self.get_micro_index(index)
-        datum = self.file.variables['data'][macro_idx, micro_idx, (0, self.time_step)].data
-
-        data_input = datum[0]
-        data_output = datum[-1]
-
-        initial_cond = (
-            torch.from_numpy(data_input)
-            .type(torch.float32)
-            .permute(3, 2, 1, 0)
-        )
-
-        target_cond = (
-            torch.from_numpy(data_output)
-            .type(torch.float32)
-            .permute(3, 2, 1, 0)
-        )
-
-        # Store indices for the CDF computation
-        return {
-            # lead_time needs to be changed depending on your start index
-            'lead_time': torch.tensor(1., dtype=torch.float32),
-            'initial_cond': initial_cond,
-            'target_cond': target_cond
-        }
-
-
-class ConditionalDataIC_3D_TG(ConditionalBase):
-    def __init__(
-            self, 
-            metadata: Any,
-            t_final: int = 5, 
-            move_to_local_scratch: bool = True):
-
-        input_channel = 3
-        output_channel = 3
-
-        self.spatial_resolution = (64, 64, 64)
-        self.input_shape = (6, 64, 64, 64)
-        self.output_shape = (3, 64, 64, 64)
-
-        self.t_final = t_final
-
-        self.start = 0
-        self.start_index = 0
-        
-        self.metadata = metadata
-        file_system = create_file_system(metadata)
-        
-        # file is too big to copy on local scratch!
-        file_path = self.file_on_local_scratch(file_system['file_name'], file_system['origin'])
-
-        self.file = netCDF4.Dataset(file_path, mode='r')
-
-        u_shape = self.file.variables['u'].shape  # Shape: (6, 64, 64, 64)
-        v_shape = self.file.variables['v'].shape
-        w_shape = self.file.variables['w'].shape
-        assert (u_shape == v_shape == w_shape), "Data needs to align in terms of shape!"
-        data_shape = u_shape
-
-        training_samples = data_shape[0] * data_shape[1]
-        micro_perturbations = data_shape[1]
-        macro_perturbations = data_shape[0]
-
-        super().__init__(
-            training_samples=training_samples,
-            file_system=file_system,
-            input_channel=input_channel,
-            output_channel=output_channel,
-            start=self.start,
-            micro_perturbation=micro_perturbations,
-            macro_perturbation=macro_perturbations,
-            file_path=file_path,
-            # stat_folder=stat_folder,
-            t_final=self.t_final
-        )
-    
-    def __getitem__(self, index):
-        
-        macro_idx = self.get_macro_index(index + self.start_index)
-        micro_idx = self.get_micro_index(index + self.start_index)
-
-        # Shape: (64, 64, 64)
-        u_data = self.file.variables['u'][macro_idx, micro_idx, 0]
-        v_data = self.file.variables['v'][macro_idx, micro_idx, 0]
-        w_data = self.file.variables['w'][macro_idx, micro_idx, 0]
-
-        # Stack along the new last dimension (axis=-1), Shape: (64, 64, 64, 3)
-        data_input = np.stack((u_data, v_data, w_data), axis=-1) 
-
-        # Load the data for the given index, Shape: (64, 64, 64)
-        u_data = self.file.variables['u'][macro_idx, micro_idx, self.t_final]
-        v_data = self.file.variables['v'][macro_idx, micro_idx, self.t_final]
-        w_data = self.file.variables['w'][macro_idx, micro_idx, self.t_final]
-        # Shape: (64, 64, 64, 3)
-        data_output = np.stack((u_data, v_data, w_data), axis=-1) 
-
-        initial_cond = (
-            torch.from_numpy(data_input)
-            .type(torch.float32)
-            .permute(3, 2, 1, 0)
-        )
-
-        target_cond = (
-            torch.from_numpy(data_output)
-            .type(torch.float32)
-            .permute(3, 2, 1, 0)
-        )
-
-        lead_time = float(self.t_final - self.start_index)
-        # lead_time goes from 0 to 2
-        lead_time_normalized = 0.25 + 0.4375 * (lead_time - 1)
-        
-        # Store indices for the CDF computation
-        return {
-            'lead_time': torch.tensor(lead_time_normalized, dtype=torch.float32),
-            'initial_cond': initial_cond,
-            'target_cond': target_cond
-        }
+        return index % self.micro_perturbations
