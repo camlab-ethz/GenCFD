@@ -133,7 +133,10 @@ If there are some compiler warnings, you can always surpress them.
 | `--dataset`              | string | `<DATASET_NAME>`  | Both          | Dataset to use for training or evaluation. A list of available datasets is in the Dataset section.                                              |
 | `--save_dir`             | string | `<DIRECTORY_PATH>`                | Both      | Directory to save models and metrics. If it doesn’t exist, it will be created automatically. Path is relative to the root directory.                                               |
 | `--model_type`           | string | `PreconditionedDenoiser` | Both      | Model type to use. For 2D, options include `PreconditionedDenoiser`. For 3D, `PreconditionedDenoiser3D` is recommended.                            |
+| `--normalize_qk`          | bool   | False          | Both       | Should be used for the Nozzle3D dataset to stabilize training and backpropagation. Uses an L2 norm for the key and query matrix in the Axial Self Attention Layer. |
+| `--padding_method`        | str    | `circular`     | Both       | Defines the padding method used for the dataset. Default is `circular`, but can be set to `zeros` for datasets like Nozzle3D where circular padding is not appropriate. |
 | `--batch_size`           | int | 5 | Both      | The number of samples per batch for the dataloader.                          |
+| `--consistent_weight`     | float  | 0.0            | Train       | A flag for a variance loss in the diffusion model that helps regularize the model training by controlling consistency during training. |
 | `--num_train_steps`      | int    | 10_000                   | Train     | Number of training steps. Increase for more training epochs or higher accuracy.   |
 | `--track_memory`      | action    | False                   | Train     | If `True`, monitors memory usage for each training step.                                                                                 |
 | `--use_mixed_precision`  | bool   | `True`                   | Train     | Enables mixed precision computation for faster training, using less memory. Set to `False` for full precision (default `torch.float32`).                                   |
@@ -151,11 +154,19 @@ If there are some compiler warnings, you can always surpress them.
 
 The table below provides a description of each dataset along with the corresponding flag argument for selection during training or evaluation.
 
-| Dataset                    | Type      | Description                                                                | Use Case                        |
-|----------------------------|-----------|----------------------------------------------------------------------------|---------------------------------|
-| `DataIC_Vel`                | Train  | 2D incompressible flow dataset                                | 2D models              |
-| `DataIC_3D_Time`            | Train  | Cylindrical Shear Flow dataset                                         | 3D models              |
-| `DataIC_3D_Time_TG`     | Train  | Taylor-Green Dataset | 3D models         |
-| `ConditionalDataIC_Vel`     | Eval| Perturbed 2D incompressible flow dataset                           | 2D Model         |
-| `ConditionalDataIC_3D`      | Eval| Perturbed Cylindrical Shear Flow dataset                                  | 3D Model     |
-| `ConditionalDataIC_3D_TG` | Eval| Perturbed Taylor-Green dataset           | 3D Model         |
+| Dataset                    | Type      | Description                                                                | Use Case                        | Additional Flags used for Training and Evaluation |
+|----------------------------|-----------|----------------------------------------------------------------------------|---------------------------------|---------------------------------------------------|
+| `ShearLayer3D`             | Train     | Cylindrical Shear Flow dataset                                             | 3D Model                        | `--compile`<br> |
+| `TaylorGreen3D`            | Train     | Taylor-Green Dataset                                                       | 3D Model                        | `--compile`<br> |
+| `Nozzle3D`                 | Train     | 3D Nozzle dataset                                                          | 3D Model                        | `--compile`<br>`--batch_size 4`<br>`--padding_method zeros`<br>`--normalize_qk True`<br>`--consistent_weight 0.5` |
+| `ConditionalShearLayer3D`  | Eval      | Perturbed Cylindrical Shear Flow dataset                                    | 3D Model                        | `--compile`<br>`--compute_metrics`<br>`--save_gen_samples` |
+| `ConditionalTaylorGreen3D` | Eval      | Perturbed Taylor-Green dataset                                             | 3D Model                        | `--compile`<br>`--compute_metrics`<br>`--save_gen_samples` |
+| `ConditionalNozzle3D`      | Eval      | Perturbed Nozzle dataset with only 1 macro perturbation and 4000 micro perturbations | 3D Model                        | `--compile`<br>`--compute_metrics`<br>`--padding_method zeros`<br>`--normalize_qk True`<br>`--save_gen_samples` |
+
+
+
+## 🙏 Special Thanks
+
+We would like to extend our deepest gratitude to the Google Research team for their groundbreaking work and open-source contributions. This project builds upon their foundational models and research, which have been instrumental in advancing the development of GenCFD.
+
+For more details, please refer to their original work: [swirl-dynamics](https://github.com/google-research/swirl-dynamics).
