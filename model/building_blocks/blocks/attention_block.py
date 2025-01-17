@@ -19,25 +19,31 @@ import torch.nn.functional as F
 from typing import Any, Sequence
 
 from model.building_blocks.layers.residual import CombineResidualWithSkip
-from model.building_blocks.layers.multihead_attention import MultiHeadDotProductAttention
-from model.building_blocks.layers.axial_attention import AddAxialPositionEmbedding, AxialSelfAttention
+from model.building_blocks.layers.multihead_attention import (
+    MultiHeadDotProductAttention,
+)
+from model.building_blocks.layers.axial_attention import (
+    AddAxialPositionEmbedding,
+    AxialSelfAttention,
+)
 from utils.model_utils import default_init, reshape_jax_torch
 
 Tensor = torch.Tensor
+
 
 class AttentionBlock(nn.Module):
     """Attention block."""
 
     def __init__(
-            self,
-            in_channels: int,
-            num_heads: int = 1,
-            normalize_qk: bool = False, 
-            dtype: torch.dtype = torch.float32,
-            device: Any | None = None
-        ):
+        self,
+        in_channels: int,
+        num_heads: int = 1,
+        normalize_qk: bool = False,
+        dtype: torch.dtype = torch.float32,
+        device: Any | None = None,
+    ):
         super(AttentionBlock, self).__init__()
-        
+
         self.in_channels = in_channels
         self.num_heads = num_heads
         self.normalize_qk = normalize_qk
@@ -45,55 +51,55 @@ class AttentionBlock(nn.Module):
         self.device = device
 
         self.norm = nn.GroupNorm(
-            min(max(self.in_channels // 4, 1), 32), 
+            min(max(self.in_channels // 4, 1), 32),
             self.in_channels,
             device=self.device,
-            dtype=self.dtype
+            dtype=self.dtype,
         )
-        
+
         self.multihead_attention = MultiHeadDotProductAttention(
-            emb_dim=self.in_channels, 
-            num_heads=self.num_heads, 
+            emb_dim=self.in_channels,
+            num_heads=self.num_heads,
             dropout=0.1,
-            device=self.device, 
-            dtype=self.dtype
+            device=self.device,
+            dtype=self.dtype,
         )
 
         self.res_layer = CombineResidualWithSkip(
             residual_channels=in_channels,
             skip_channels=in_channels,
-            dtype=self.dtype, 
-            device=self.device
+            dtype=self.dtype,
+            device=self.device,
         )
-    
+
     def forward(self, x: Tensor) -> Tensor:
         # Input x -> (bs, widht*height, c)
         h = x.clone()
         # GroupNorm requires x -> (bs, c, widht*height)
         h = self.norm(h.permute(0, 2, 1))
-        h = h.permute(0, 2, 1) # (bs, width*height, c)
-        h = self.multihead_attention(h, h, h) # Selfattention
+        h = h.permute(0, 2, 1)  # (bs, width*height, c)
+        h = self.multihead_attention(h, h, h)  # Selfattention
         h = self.res_layer(residual=h, skip=x)
 
-        return h    
+        return h
 
 
 class AxialSelfAttentionBlock(nn.Module):
     """Block consisting of (potentially multiple) axial attention layers."""
 
     def __init__(
-            self,
-            in_channels: int,
-            spatial_resolution: Sequence[int],
-            attention_axes: int | Sequence[int] = -2,
-            add_position_embedding: bool | Sequence[bool] = True,
-            num_heads: int | Sequence[int] = 1,
-            normalize_qk: bool = False,
-            dtype: torch.dtype = torch.float32,
-            device: torch.device = None
-        ):
+        self,
+        in_channels: int,
+        spatial_resolution: Sequence[int],
+        attention_axes: int | Sequence[int] = -2,
+        add_position_embedding: bool | Sequence[bool] = True,
+        num_heads: int | Sequence[int] = 1,
+        normalize_qk: bool = False,
+        dtype: torch.dtype = torch.float32,
+        device: torch.device = None,
+    ):
         super(AxialSelfAttentionBlock, self).__init__()
-        
+
         self.in_channels = in_channels
         self.dtype = dtype
         self.device = device
@@ -123,27 +129,29 @@ class AxialSelfAttentionBlock(nn.Module):
         self.dense_layers = nn.ModuleList()
         self.pos_emb_layers = nn.ModuleList()
 
-        for level, (axis, add_emb, num_head) in enumerate(zip(self.attention_axes, self.add_position_embedding, self.num_heads)):
+        for level, (axis, add_emb, num_head) in enumerate(
+            zip(self.attention_axes, self.add_position_embedding, self.num_heads)
+        ):
             if add_emb:
                 self.pos_emb_layers.append(
                     AddAxialPositionEmbedding(
-                        position_axis=axis, 
+                        position_axis=axis,
                         spatial_resolution=spatial_resolution,
                         input_channels=self.in_channels,
-                        dtype=self.dtype, 
-                        device=self.device
+                        dtype=self.dtype,
+                        device=self.device,
                     )
                 )
-            
+
             self.norm_layers_1.append(
                 nn.GroupNorm(
                     min(max(self.in_channels // 4, 1), 32),
                     self.in_channels,
-                    device=self.device, 
-                    dtype=self.dtype
+                    device=self.device,
+                    dtype=self.dtype,
                 )
             )
-            
+
             self.attention_layers.append(
                 AxialSelfAttention(
                     emb_dim=self.in_channels,
@@ -152,7 +160,7 @@ class AxialSelfAttentionBlock(nn.Module):
                     dropout=0.1,
                     normalize_qk=self.normalize_qk,
                     dtype=self.dtype,
-                    device=self.device
+                    device=self.device,
                 )
             )
 
@@ -161,7 +169,7 @@ class AxialSelfAttentionBlock(nn.Module):
                     min(max(self.in_channels // 4, 1), 32),
                     self.in_channels,
                     device=self.device,
-                    dtype=self.dtype
+                    dtype=self.dtype,
                 )
             )
 
@@ -170,7 +178,7 @@ class AxialSelfAttentionBlock(nn.Module):
                     in_features=in_channels,
                     out_features=in_channels,
                     device=self.device,
-                    dtype=self.dtype
+                    dtype=self.dtype,
                 )
             )
             default_init(1.0)(self.dense_layers[level].weight)
@@ -182,36 +190,35 @@ class AxialSelfAttentionBlock(nn.Module):
             kernel_dim=self.kernel_dim,
             project_skip=False,
             dtype=self.dtype,
-            device=self.device
+            device=self.device,
         )
 
     def forward(self, x: Tensor) -> Tensor:
 
         # Axial attention ops followed by a projection.
         h = x.clone()
-        for level, (axis, add_emb, num_head) in enumerate(zip(self.attention_axes, self.add_position_embedding, self.num_heads)):
+        for level, (axis, add_emb, num_head) in enumerate(
+            zip(self.attention_axes, self.add_position_embedding, self.num_heads)
+        ):
             if add_emb:
                 # Embedding
                 h = reshape_jax_torch(
-                    self.pos_emb_layers[level](
-                        reshape_jax_torch(h, self.kernel_dim)), 
-                    self.kernel_dim
+                    self.pos_emb_layers[level](reshape_jax_torch(h, self.kernel_dim)),
+                    self.kernel_dim,
                 )
             # Group Normalization
             h = self.norm_layers_1[level](h)
             # Attention Layer
             h = reshape_jax_torch(
-                self.attention_layers[level](
-                    reshape_jax_torch(h, self.kernel_dim)), 
-                self.kernel_dim
-                )
+                self.attention_layers[level](reshape_jax_torch(h, self.kernel_dim)),
+                self.kernel_dim,
+            )
             # Group Normalization
             h = self.norm_layers_2[level](h)
             # Dense Layer
             h = reshape_jax_torch(
-                self.dense_layers[level](
-                    reshape_jax_torch(h, self.kernel_dim)), 
-                self.kernel_dim
+                self.dense_layers[level](reshape_jax_torch(h, self.kernel_dim)),
+                self.kernel_dim,
             )
         # Residual Connection out of the Loop!
         h = self.residual_layer(residual=h, skip=x)

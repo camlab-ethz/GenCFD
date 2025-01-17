@@ -47,24 +47,24 @@ def run(
     save_dir: str = None,
     # DDP configs
     world_size: int = 1,
-    local_rank: int = -1
+    local_rank: int = -1,
 ) -> None:
     """Run benchmark evaluation on the specified dataset.
 
-    This function performs benchmark evaluation in batches using the 
-    provided denoising sampler. It can compute metrics through a Monte Carlo 
+    This function performs benchmark evaluation in batches using the
+    provided denoising sampler. It can compute metrics through a Monte Carlo
     simulation and optionally visualize results.
 
     Args:
         sampler (Sampler): The denoising-based diffusion sampler used for inference.
         buffers (dict): Buffers stored during training, including normalization arrays and tensors.
-        monte_carlo_samples (int): The number of Monte Carlo samples to use for metric computation, 
+        monte_carlo_samples (int): The number of Monte Carlo samples to use for metric computation,
             helping to mitigate computational demand during inference.
         stats_recorder (StatsRecorder): An object for recording evaluation statistics.
         dataloader (DataLoader): Initialized PyTorch DataLoader for batching the dataset.
         dataset (TrainingSetBase): The dataset class containing input and output channels as well as masking tensors
         time_cond (bool): Flag indicating whether the dataset has a time dependency.
-        compute_metrics (bool, optional): If True, performs the Monte Carlo simulation to compute and 
+        compute_metrics (bool, optional): If True, performs the Monte Carlo simulation to compute and
             store metrics in the specified directory. Defaults to False.
         visualize (bool, optional): If True, renders samples for 3D datasets or plots for 2D datasets.
             Defaults to False.
@@ -75,14 +75,16 @@ def run(
         None
     """
     batch_size = dataloader.batch_size
-    
+
     # To store either visualization or metric results a save_dir needs to be specified
     cwd = os.getcwd()
-    save_dir = os.path.join(cwd, 'outputs' if save_dir is None else save_dir)
+    save_dir = os.path.join(cwd, "outputs" if save_dir is None else save_dir)
     if not os.path.exists(save_dir):
         os.makedirs(save_dir)
         if (world_size > 1 and local_rank == 0) or world_size == 1:
-            print(f"Created a directory to store metrics and visualizations: {save_dir}")
+            print(
+                f"Created a directory to store metrics and visualizations: {save_dir}"
+            )
 
     if compute_metrics:
         if (world_size > 1 and local_rank == 0) or world_size == 1:
@@ -91,22 +93,24 @@ def run(
 
         # initialize the dataloader where the samples are drawn from a uniform discrete distribution
         dataloader = iter(dataloader)
-        
+
         # Run a monte carlo simulation with a defined number of samples
         n_iter = (monte_carlo_samples // batch_size) // world_size
-        
+
         if (world_size > 1 and local_rank == 0) or world_size == 1:
-            progress_bar = tqdm(total=monte_carlo_samples, desc="Evaluating Monte Carlo Samples")
-        
+            progress_bar = tqdm(
+                total=monte_carlo_samples, desc="Evaluating Monte Carlo Samples"
+            )
+
         for i in range(n_iter):
             # run n_iter number of iterations
             batch = next(dataloader)
             batch = {k: v.to(device, non_blocking=True) for k, v in batch.items()}
 
-            u0 = batch['initial_cond']
-            u = batch['target_cond']
+            u0 = batch["initial_cond"]
+            u = batch["target_cond"]
             if time_cond:
-                lead_time = batch['lead_time'].reshape(-1,1)
+                lead_time = batch["lead_time"].reshape(-1, 1)
             else:
                 lead_time = [None] * batch_size
 
@@ -114,17 +118,17 @@ def run(
             u0_norm = reshape_jax_torch(
                 normalize(
                     reshape_jax_torch(u0),
-                    mean=buffers['mean_training_input'],
-                    std=buffers['std_training_input']
+                    mean=buffers["mean_training_input"],
+                    std=buffers["std_training_input"],
                 )
             )
-            
+
             gen_batch = torch.empty(u.shape, device=device)
             for batch in range(batch_size):
                 gen_sample = sampler.generate(
-                    num_samples=1, 
-                    y=u0_norm[batch, ...].unsqueeze(0), 
-                    lead_time=lead_time[batch]
+                    num_samples=1,
+                    y=u0_norm[batch, ...].unsqueeze(0),
+                    lead_time=lead_time[batch],
                 ).detach()
 
                 gen_batch[batch] = gen_sample.squeeze(0)
@@ -132,8 +136,8 @@ def run(
             u_gen = reshape_jax_torch(
                 denormalize(
                     reshape_jax_torch(gen_batch),
-                    mean=buffers['mean_training_output'],
-                    std=buffers['std_training_output']
+                    mean=buffers["mean_training_output"],
+                    std=buffers["std_training_output"],
                 )
             )
 
@@ -153,7 +157,7 @@ def run(
             dist.barrier(device_ids=[local_rank])
             stats_recorder.gather_all_samples()
             dist.barrier(device_ids=[local_rank])
-        
+
         if (world_size > 1 and local_rank == 0) or world_size == 1:
             summarize_metric_results(stats_recorder, save_dir)
             np.savez("gen_samples.npz", data=stats_recorder.gen_samples.cpu().numpy())
@@ -161,13 +165,13 @@ def run(
 
     if visualize or save_gen_samples:
         # Run a single run to visualize results without computing metrics
-        batch = next(iter(dataloader)) # uniform random distribution
+        batch = next(iter(dataloader))  # uniform random distribution
         batch = {k: v.to(device, non_blocking=True) for k, v in batch.items()}
-        u0 = batch['initial_cond']
-        u = batch['target_cond']
+        u0 = batch["initial_cond"]
+        u = batch["target_cond"]
 
         if time_cond:
-            lead_time = batch['lead_time'].reshape(-1,1)
+            lead_time = batch["lead_time"].reshape(-1, 1)
         else:
             lead_time = [None] * batch_size
 
@@ -175,17 +179,17 @@ def run(
         u0_norm = reshape_jax_torch(
             normalize(
                 reshape_jax_torch(u0),
-                mean=buffers['mean_training_input'],
-                std=buffers['std_training_input']
+                mean=buffers["mean_training_input"],
+                std=buffers["std_training_input"],
             )
         )
-        
+
         gen_batch = torch.empty(u.shape, device=device)
         for batch in range(batch_size):
             gen_sample = sampler.generate(
-                num_samples=1, 
-                y=u0_norm[batch, ...].unsqueeze(0), 
-                lead_time=lead_time[batch]
+                num_samples=1,
+                y=u0_norm[batch, ...].unsqueeze(0),
+                lead_time=lead_time[batch],
             ).detach()
 
             gen_batch[batch] = gen_sample.squeeze(0)
@@ -193,8 +197,8 @@ def run(
         u_gen = reshape_jax_torch(
             denormalize(
                 reshape_jax_torch(gen_batch),
-                mean=buffers['mean_training_output'],
-                std=buffers['std_training_output']
+                mean=buffers["mean_training_output"],
+                std=buffers["std_training_output"],
             )
         )
 
@@ -203,13 +207,15 @@ def run(
 
         if save_gen_samples and (local_rank == 0 or local_rank == -1):
             # Put results on CPU first before storing them
-            u_gen_np = u_gen.cpu().numpy() 
-            u_np = u.cpu().numpy()  
+            u_gen_np = u_gen.cpu().numpy()
+            u_np = u.cpu().numpy()
 
             # Save the arrays to an .npz file
             save_path = os.path.join(save_dir, "generated_samples.npz")
             np.savez(save_path, gen_sample=u_gen_np, gt_sample=u_np)
-            print(f"Samples drawn from a uniform distribution are stored as {save_path}")
+            print(
+                f"Samples drawn from a uniform distribution are stored as {save_path}"
+            )
 
         elif visualize and (local_rank == 0 or local_rank == -1):
             # Visualize the results instead!
@@ -217,12 +223,18 @@ def run(
             if ndim == 4:
                 # plot 2D results
                 plot_2d_sample(
-                    gen_sample=u_gen[0], gt_sample=u[0], 
-                    axis=0, save=True, save_dir=save_dir
+                    gen_sample=u_gen[0],
+                    gt_sample=u[0],
+                    axis=0,
+                    save=True,
+                    save_dir=save_dir,
                 )
             elif ndim == 5:
                 # plot 3D results
                 gen_gt_plotter_3d(
-                    gt_sample=u[0], gen_sample=u_gen[0], axis=0, 
-                    save=True, save_dir=save_dir
+                    gt_sample=u[0],
+                    gen_sample=u_gen[0],
+                    axis=0,
+                    save=True,
+                    save_dir=save_dir,
                 )

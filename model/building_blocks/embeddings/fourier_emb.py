@@ -19,18 +19,20 @@ from typing import Callable, Any
 
 Tensor = torch.Tensor
 
+
 class FourierEmbedding(nn.Module):
     """Fourier embedding."""
 
-    def __init__(self, 
-                 dims: int=64, 
-                 max_freq: float=2e4,
-                 projection: bool=True, 
-                 act_fun: Callable[[Tensor], Tensor]=F.silu,
-                 dtype: torch.dtype=torch.float32,
-                 device: Any | None = None,
-                 max_val: float = 1e6 # for numerical stability
-        ):
+    def __init__(
+        self,
+        dims: int = 64,
+        max_freq: float = 2e4,
+        projection: bool = True,
+        act_fun: Callable[[Tensor], Tensor] = F.silu,
+        dtype: torch.dtype = torch.float32,
+        device: Any | None = None,
+        max_val: float = 1e6,  # for numerical stability
+    ):
         super(FourierEmbedding, self).__init__()
 
         self.dims = dims
@@ -41,9 +43,14 @@ class FourierEmbedding(nn.Module):
         self.device = device
         self.max_val = max_val
 
-        logfreqs = torch.linspace(0, torch.log(
-            torch.tensor(self.max_freq, dtype=self.dtype, device=self.device)), 
-            self.dims // 2, dtype=self.dtype, device=self.device
+        logfreqs = torch.linspace(
+            0,
+            torch.log(
+                torch.tensor(self.max_freq, dtype=self.dtype, device=self.device)
+            ),
+            self.dims // 2,
+            dtype=self.dtype,
+            device=self.device,
         )
 
         # freqs are constant and scaled with pi!
@@ -57,12 +64,12 @@ class FourierEmbedding(nn.Module):
                 self.dims, 2 * self.dims, dtype=self.dtype, device=self.device
             )
             self.lin_layer2 = nn.Linear(
-                2* self.dims, self.dims, dtype=self.dtype, device=self.device
+                2 * self.dims, self.dims, dtype=self.dtype, device=self.device
             )
-    
+
     def forward(self, x: Tensor) -> Tensor:
         assert len(x.shape) == 1, "Input tensor must be 1D"
-        
+
         # Use the registered buffer const_freqs
         x_proj = self.const_freqs * x[:, None]
         # x_proj is now a 2D tensor

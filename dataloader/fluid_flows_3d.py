@@ -53,7 +53,7 @@ class LeadTimeNormalizer:
     """
     Handles dataset-specific lead time normalization for 3D diffusion models.
 
-    The model is conditioned on the lead time using an All2All training strategy. 
+    The model is conditioned on the lead time using an All2All training strategy.
     Different datasets require different normalization strategies to optimize performance.
 
     Attributes:
@@ -75,13 +75,13 @@ class LeadTimeNormalizer:
             float: The normalized lead time.
         """
 
-        if self.dataset_name in ['Nozzle3D', 'ConditionalNozzle3D']:
+        if self.dataset_name in ["Nozzle3D", "ConditionalNozzle3D"]:
             return self.nozzle3d_normalization(t_init, t_final)
 
-        elif self.dataset_name in ['ShearLayer3D', 'ConditionalShearLayer3D']:
+        elif self.dataset_name in ["ShearLayer3D", "ConditionalShearLayer3D"]:
             return self.shearlayer3d_normalization(t_init, t_final)
 
-        elif self.dataset_name in ['TaylorGreen3D, ConditionalTaylorGreen3D']: 
+        elif self.dataset_name in ["TaylorGreen3D, ConditionalTaylorGreen3D"]:
             return self.taylorgreen_normalization(t_init, t_final)
 
         else:
@@ -97,7 +97,7 @@ class LeadTimeNormalizer:
         lead_time = float(t_final - t_init)
         return 0.25 * lead_time
 
-    def taylorgreen_normalization(self, t_init: int, t_final: int): 
+    def taylorgreen_normalization(self, t_init: int, t_final: int):
         """Normalize lead time to be in between 0.6875 and 2"""
         lead_time = float(t_final - t_init)
         return 0.25 + 0.4375 * (lead_time - 1)
@@ -114,7 +114,7 @@ class IncompressibleFlows3D(TrainingSetBase):
 
     This class handles the loading, normalization, and preprocessing of 3D incompressible flow datasets
     for model training. It supports flexible data handling, including moving files to local scratch storage,
-    custom normalization, and generating all possible (t_initial, t_final) time pairs for All-to-All (A2A) 
+    custom normalization, and generating all possible (t_initial, t_final) time pairs for All-to-All (A2A)
     training strategies.
 
     Attributes:
@@ -153,7 +153,7 @@ class IncompressibleFlows3D(TrainingSetBase):
         ```python
         dataset = IncompressibleFlows3D(
             file_system = {
-                "dataset_name": "TaylorGreen3D", 
+                "dataset_name": "TaylorGreen3D",
                 'file_name': 'taylor_green.nc',
                 'origin': '/cluster/data/taylor_green/'
                 # Additional not relevant file_system settings in case the mean and std were accumulated
@@ -170,31 +170,31 @@ class IncompressibleFlows3D(TrainingSetBase):
     """
 
     def __init__(
-            self,
-            file_system: dict,
-            input_channel: int,
-            output_channel: int,
-            spatial_resolution: Tuple,
-            input_shape: Tuple,
-            output_shape: Tuple,
-            variable_names: List[str],
-            min_time: int,
-            max_time: int,
-            ndim: int = 3,
-            start: int = 0,
-            training_samples: int = None,
-            move_to_local_scratch: bool = False,
-            retrieve_stats_from_file: bool = False,
-            mean_training_input: array = None,
-            std_training_input: array = None,
-            mean_training_output: array = None,
-            std_training_output: array = None,
-            get_values: bool = False
-        ) -> None: 
+        self,
+        file_system: dict,
+        input_channel: int,
+        output_channel: int,
+        spatial_resolution: Tuple,
+        input_shape: Tuple,
+        output_shape: Tuple,
+        variable_names: List[str],
+        min_time: int,
+        max_time: int,
+        ndim: int = 3,
+        start: int = 0,
+        training_samples: int = None,
+        move_to_local_scratch: bool = False,
+        retrieve_stats_from_file: bool = False,
+        mean_training_input: array = None,
+        std_training_input: array = None,
+        mean_training_output: array = None,
+        std_training_output: array = None,
+        get_values: bool = False,
+    ) -> None:
 
         super().__init__(
             file_system=file_system,
-            ndim=ndim, # Always 3D dataset
+            ndim=ndim,  # Always 3D dataset
             input_channel=input_channel,
             output_channel=output_channel,
             spatial_resolution=spatial_resolution,
@@ -209,29 +209,32 @@ class IncompressibleFlows3D(TrainingSetBase):
             std_training_input=std_training_input,
             mean_training_output=mean_training_output,
             std_training_output=std_training_output,
-            get_values=get_values
+            get_values=get_values,
         )
 
         self.min_time = min_time
         self.max_time = max_time
 
         # Precompute all possible (t_initial, t_final) pairs within the specified range.
-        self.time_pairs = [(i, j) for i in range(self.min_time, self.max_time) for j in range(i + 1, self.max_time + 1)]
+        self.time_pairs = [
+            (i, j)
+            for i in range(self.min_time, self.max_time)
+            for j in range(i + 1, self.max_time + 1)
+        ]
         self.total_pairs = len(self.time_pairs)
 
         # get the correct normalization method for the lead time
-        self.lead_time_normalizer = LeadTimeNormalizer(dataset_name=self.file_system['dataset_name'])
-    
+        self.lead_time_normalizer = LeadTimeNormalizer(
+            dataset_name=self.file_system["dataset_name"]
+        )
 
     def normalize_lead_time(self, t_init: int, t_final: int) -> Union[int, float]:
         """Uses the correct normalization scheme for both the Conditional and Training Dataset"""
         return self.lead_time_normalizer.normalize_lead_time(t_init, t_final)
 
-
     def __len__(self):
         # Return the total number of data points times the number of pairs.
         return self.training_samples * self.total_pairs
-    
 
     def __getitem__(self, index):
         # Determine the data point and the (t_initial, t_final) pair
@@ -240,67 +243,69 @@ class IncompressibleFlows3D(TrainingSetBase):
         t_init, t_final = self.time_pairs[pair_index]
 
         # List with all variables relevant for the given dataset will be stacked later
-        data_list = [self.file.variables[var][data_index] for var in self.variable_names]
-        if self.file_system['dataset_name'] == 'Nozzle3D':
+        data_list = [
+            self.file.variables[var][data_index] for var in self.variable_names
+        ]
+        if self.file_system["dataset_name"] == "Nozzle3D":
             # Add an additional conditioning tensor is required for the Nozzle dataset
-            vel_inject = float(self.file.variables['injection_velocity'][data_index])*np.ones((192, 64, 64))
+            vel_inject = float(
+                self.file.variables["injection_velocity"][data_index]
+            ) * np.ones((192, 64, 64))
             data_list = [np.broadcast_to(vel_inject, (14, 192, 64, 64))] + data_list
-        
+
         combined_data = np.stack(data_list, axis=-1)
 
         # Extract initial and final conditions
-        initial_condition = self.normalize_input(
-            combined_data[t_init]) 
+        initial_condition = self.normalize_input(combined_data[t_init])
 
-        if self.file_system['dataset_name'] == 'Nozzle3D':
-            combined_data = combined_data[..., 1:] # get rid of the conditioning
-        
-        final_condition = self.normalize_output(
-            combined_data[t_final])
-        
+        if self.file_system["dataset_name"] == "Nozzle3D":
+            combined_data = combined_data[..., 1:]  # get rid of the conditioning
+
+        final_condition = self.normalize_output(combined_data[t_final])
+
         lead_time_normalized = self.normalize_lead_time(t_init=t_init, t_final=t_final)
 
         initial_cond = (
-            torch.from_numpy(initial_condition)
-            .type(torch.float32)
-            .permute(3, 2, 1, 0)
+            torch.from_numpy(initial_condition).type(torch.float32).permute(3, 2, 1, 0)
         )
 
         target_cond = (
-            torch.from_numpy(final_condition)
-            .type(torch.float32)
-            .permute(3, 2, 1, 0)
+            torch.from_numpy(final_condition).type(torch.float32).permute(3, 2, 1, 0)
         )
 
         return {
-            'lead_time': torch.tensor(lead_time_normalized, dtype=torch.float32), 
-            'initial_cond': initial_cond,
-            'target_cond': target_cond
+            "lead_time": torch.tensor(lead_time_normalized, dtype=torch.float32),
+            "initial_cond": initial_cond,
+            "target_cond": target_cond,
         }
-        
+
 
 class ShearLayer3D(IncompressibleFlows3D):
     def __init__(
-            self,
-            metadata: Dict[str, Any],
-            start=0,
-            move_to_local_scratch: bool = True, 
-            retrieve_stats_from_file: bool = False,
-            input_channel: int = 3,
-            output_channel: int = 3,
-            spatial_resolution: Tuple[int, ...] = (64, 64, 64),
-            input_shape: Tuple[int, ...] = (6, 64, 64, 64),
-            output_shape: Tuple[int, ...] = (3, 64, 64, 64),
-            variable_names: List[str] = ['u', 'v', 'w'],
-            min_time: int = 0,
-            max_time: int = 4,
-            mean_training_input: array = np.array([1.5445266e-08, 1.2003070e-08, -3.2182508e-09]),
-            mean_training_output: array = np.array([-8.0223117e-09, -3.3674191e-08, 1.5241447e-08]),
-            std_training_input: array = np.array([0.20691067, 0.15985465, 0.15808222]),
-            std_training_output: array = np.array([0.2706984, 0.24893111, 0.24169469])
-        ):
+        self,
+        metadata: Dict[str, Any],
+        start=0,
+        move_to_local_scratch: bool = True,
+        retrieve_stats_from_file: bool = False,
+        input_channel: int = 3,
+        output_channel: int = 3,
+        spatial_resolution: Tuple[int, ...] = (64, 64, 64),
+        input_shape: Tuple[int, ...] = (6, 64, 64, 64),
+        output_shape: Tuple[int, ...] = (3, 64, 64, 64),
+        variable_names: List[str] = ["u", "v", "w"],
+        min_time: int = 0,
+        max_time: int = 4,
+        mean_training_input: array = np.array(
+            [1.5445266e-08, 1.2003070e-08, -3.2182508e-09]
+        ),
+        mean_training_output: array = np.array(
+            [-8.0223117e-09, -3.3674191e-08, 1.5241447e-08]
+        ),
+        std_training_input: array = np.array([0.20691067, 0.15985465, 0.15808222]),
+        std_training_output: array = np.array([0.2706984, 0.24893111, 0.24169469]),
+    ):
 
-        super().__init__( 
+        super().__init__(
             file_system=metadata,
             input_channel=input_channel,
             output_channel=output_channel,
@@ -316,7 +321,7 @@ class ShearLayer3D(IncompressibleFlows3D):
             mean_training_input=mean_training_input,
             std_training_input=std_training_input,
             mean_training_output=mean_training_output,
-            std_training_output=std_training_output
+            std_training_output=std_training_output,
         )
 
     def normalize_lead_time(self, t_init: int, t_final: int) -> Union[int, float]:
@@ -326,21 +331,21 @@ class ShearLayer3D(IncompressibleFlows3D):
 
 
 class TaylorGreen3D(IncompressibleFlows3D):
-    
+
     def __init__(
-            self,
-            metadata: Dict[str, Any],
-            start: int = 0,
-            min_time: int = 0,
-            max_time: int = 5,
-            move_to_local_scratch: bool = True, 
-            retrieve_stats_from_file: bool = True,
-            input_channel: int = 3,
-            output_channel: int = 3,
-            spatial_resolution: Tuple[int, ...] = (64, 64, 64),
-            input_shape: Tuple[int, ...] = (6, 64, 64, 64),
-            output_shape: Tuple[int, ...] = (3, 64, 64, 64),
-            variable_names: List[str] = ['u', 'v', 'w']
+        self,
+        metadata: Dict[str, Any],
+        start: int = 0,
+        min_time: int = 0,
+        max_time: int = 5,
+        move_to_local_scratch: bool = True,
+        retrieve_stats_from_file: bool = True,
+        input_channel: int = 3,
+        output_channel: int = 3,
+        spatial_resolution: Tuple[int, ...] = (64, 64, 64),
+        input_shape: Tuple[int, ...] = (6, 64, 64, 64),
+        output_shape: Tuple[int, ...] = (3, 64, 64, 64),
+        variable_names: List[str] = ["u", "v", "w"],
     ):
 
         super().__init__(
@@ -355,7 +360,7 @@ class TaylorGreen3D(IncompressibleFlows3D):
             max_time=max_time,
             start=start,
             move_to_local_scratch=move_to_local_scratch,
-            retrieve_stats_from_file=retrieve_stats_from_file
+            retrieve_stats_from_file=retrieve_stats_from_file,
         )
 
 
@@ -375,11 +380,11 @@ class Nozzle3D(IncompressibleFlows3D):
         spatial_resolution: Tuple[int, ...] = (64, 64, 192),
         input_shape: Tuple[int, ...] = (4, 64, 64, 192),
         output_shape: Tuple[int, ...] = (3, 64, 64, 192),
-        variable_names: List[str] = ['u', 'v', 'w'],
+        variable_names: List[str] = ["u", "v", "w"],
         mean_training_input: array = np.array([0.0, 0.00858, 0.0, 0.0]),
         std_training_input: array = np.array([1.0, 0.0727, 0.0266, 0.0252]),
         mean_training_output: array = np.array([0.00858, 0.0, 0.0]),
-        std_training_output: array = np.array([0.0727, 0.0266, 0.0252])
+        std_training_output: array = np.array([0.0727, 0.0266, 0.0252]),
     ):
 
         super().__init__(
@@ -398,11 +403,15 @@ class Nozzle3D(IncompressibleFlows3D):
             mean_training_input=mean_training_input,
             std_training_input=std_training_input,
             mean_training_output=mean_training_output,
-            std_training_output=std_training_output
+            std_training_output=std_training_output,
         )
 
         # Overwrite pairs since here every second step should be taken
-        self.time_pairs = [(2*i, 2*j) for i in range(0, self.max_time//2 - 1) for j in range(i + 1, self.max_time//2)]
+        self.time_pairs = [
+            (2 * i, 2 * j)
+            for i in range(0, self.max_time // 2 - 1)
+            for j in range(i + 1, self.max_time // 2)
+        ]
         self.total_pairs = len(self.time_pairs)
 
 
@@ -410,8 +419,8 @@ class ConditionalIncompressibleFlows3D(ConditionalBase):
     """
     Conditional dataset class for 3D incompressible fluid flow simulations with perturbations.
 
-    This class extends the functionality of `IncompressibleFlows3D` by introducing micro and macro 
-    perturbations for evaluating the robustness of diffusion models. It is designed for testing how 
+    This class extends the functionality of `IncompressibleFlows3D` by introducing micro and macro
+    perturbations for evaluating the robustness of diffusion models. It is designed for testing how
     the model handles perturbed initial conditions over a specified lead time.
 
     For general dataset handling and attributes, refer to `IncompressibleFlows3D`.
@@ -433,27 +442,27 @@ class ConditionalIncompressibleFlows3D(ConditionalBase):
     """
 
     def __init__(
-            self,
-            file_system: dict,
-            input_channel: int,
-            output_channel: int,
-            spatial_resolution: Tuple,
-            input_shape: Tuple,
-            output_shape: Tuple,
-            variable_names: List[str],
-            micro_perturbations: int,
-            macro_perturbations: int,
-            t_start: int,
-            t_final: int,
-            start: int = 0,
-            ndim: int = 3,
-            training_samples: int = None,
-            move_to_local_scratch: bool = False,
-        ) -> None: 
+        self,
+        file_system: dict,
+        input_channel: int,
+        output_channel: int,
+        spatial_resolution: Tuple,
+        input_shape: Tuple,
+        output_shape: Tuple,
+        variable_names: List[str],
+        micro_perturbations: int,
+        macro_perturbations: int,
+        t_start: int,
+        t_final: int,
+        start: int = 0,
+        ndim: int = 3,
+        training_samples: int = None,
+        move_to_local_scratch: bool = False,
+    ) -> None:
 
         super().__init__(
             file_system=file_system,
-            ndim=ndim, # Always 3D dataset
+            ndim=ndim,  # Always 3D dataset
             input_channel=input_channel,
             output_channel=output_channel,
             spatial_resolution=spatial_resolution,
@@ -464,80 +473,88 @@ class ConditionalIncompressibleFlows3D(ConditionalBase):
             training_samples=training_samples,
             move_to_local_scratch=move_to_local_scratch,
             micro_perturbations=micro_perturbations,
-            macro_perturbations=macro_perturbations
+            macro_perturbations=macro_perturbations,
         )
 
         self.t_start = t_start
         self.t_final = t_final
 
         # get the correct normalization method for the lead time
-        self.lead_time_normalizer = LeadTimeNormalizer(dataset_name=self.file_system['dataset_name'])
+        self.lead_time_normalizer = LeadTimeNormalizer(
+            dataset_name=self.file_system["dataset_name"]
+        )
 
     def normalize_lead_time(self, t_init: int, t_final: int) -> Union[int, float]:
         """Uses the correct normalization scheme for both the Conditional and Training Dataset"""
         return self.lead_time_normalizer.normalize_lead_time(t_init, t_final)
-    
 
     def __getitem__(self, index):
-        
+
         macro_idx = self.get_macro_index(index + self.start)
         micro_idx = self.get_micro_index(index + self.start)
 
         # Preload selector since some datasets have only 1 macro perturbation included
-        idx_selector = (macro_idx, micro_idx) if self.macro_perturbations > 1 else (micro_idx,)
+        idx_selector = (
+            (macro_idx, micro_idx) if self.macro_perturbations > 1 else (micro_idx,)
+        )
 
         # Stack along the new last dimension (axis=-1) and dynamically load the data
-        data_initial = [self.file.variables[var][*idx_selector, self.t_start] for var in self.variable_names]
-        data_target = [self.file.variables[var][*idx_selector, self.t_final] for var in self.variable_names]
+        data_initial = [
+            self.file.variables[var][*idx_selector, self.t_start]
+            for var in self.variable_names
+        ]
+        data_target = [
+            self.file.variables[var][*idx_selector, self.t_final]
+            for var in self.variable_names
+        ]
 
-        if self.file_system['dataset_name'] == 'ConditionalNozzle3D':
+        if self.file_system["dataset_name"] == "ConditionalNozzle3D":
             # Additional Conditioning for the Nozzle Dataset
-            vel_inject = float(self.file.variables['injection_velocity'][micro_idx])*np.ones((192, 64, 64))
+            vel_inject = float(
+                self.file.variables["injection_velocity"][micro_idx]
+            ) * np.ones((192, 64, 64))
             data_initial.insert(0, vel_inject)
 
         data_input = np.stack(data_initial, axis=-1)
         data_output = np.stack(data_target, axis=-1)
 
-
         initial_cond = (
-            torch.from_numpy(data_input)
-            .type(torch.float32)
-            .permute(3, 2, 1, 0)
+            torch.from_numpy(data_input).type(torch.float32).permute(3, 2, 1, 0)
         )
 
         target_cond = (
-            torch.from_numpy(data_output)
-            .type(torch.float32)
-            .permute(3, 2, 1, 0)
+            torch.from_numpy(data_output).type(torch.float32).permute(3, 2, 1, 0)
         )
 
-        lead_time_normalized = self.normalize_lead_time(t_init=self.t_start, t_final=self.t_final)
-        
+        lead_time_normalized = self.normalize_lead_time(
+            t_init=self.t_start, t_final=self.t_final
+        )
+
         # Store indices for the CDF computation
         return {
-            'lead_time': torch.tensor(lead_time_normalized, dtype=torch.float32),
-            'initial_cond': initial_cond,
-            'target_cond': target_cond
+            "lead_time": torch.tensor(lead_time_normalized, dtype=torch.float32),
+            "initial_cond": initial_cond,
+            "target_cond": target_cond,
         }
-        
+
 
 class ConditionalShearLayer3D(ConditionalIncompressibleFlows3D):
     def __init__(
-            self, 
-            metadata: Dict[str, Any],
-            move_to_local_scratch: bool = True, 
-            input_channel: int = 3,
-            output_channel: int = 3,
-            spatial_resolution: Tuple[int, ...] = (64, 64, 64),
-            input_shape: Tuple[int, ...] = (6, 64, 64, 64),
-            output_shape: Tuple[int, ...] = (3, 64, 64, 64),
-            variable_names: List[str] = ['u', 'v', 'w'],
-            macro_perturbations: int = 10,
-            micro_perturbations: int = 1000,
-            t_start: int = 0,
-            t_final: int = 4,
-            start: int = 0,
-        ):
+        self,
+        metadata: Dict[str, Any],
+        move_to_local_scratch: bool = True,
+        input_channel: int = 3,
+        output_channel: int = 3,
+        spatial_resolution: Tuple[int, ...] = (64, 64, 64),
+        input_shape: Tuple[int, ...] = (6, 64, 64, 64),
+        output_shape: Tuple[int, ...] = (3, 64, 64, 64),
+        variable_names: List[str] = ["u", "v", "w"],
+        macro_perturbations: int = 10,
+        micro_perturbations: int = 1000,
+        t_start: int = 0,
+        t_final: int = 4,
+        start: int = 0,
+    ):
 
         super().__init__(
             file_system=metadata,
@@ -553,27 +570,27 @@ class ConditionalShearLayer3D(ConditionalIncompressibleFlows3D):
             micro_perturbations=micro_perturbations,
             macro_perturbations=macro_perturbations,
             t_start=t_start,
-            t_final=t_final
+            t_final=t_final,
         )
 
 
 class ConditionalTaylorGreen3D(ConditionalIncompressibleFlows3D):
     def __init__(
-            self, 
-            metadata: Dict[str, Any],
-            move_to_local_scratch: bool = False,
-            input_channel: int = 3,
-            output_channel: int = 3,
-            spatial_resolution: Tuple[int, ...] = (64, 64, 64),
-            input_shape: Tuple[int, ...] = (6, 64, 64, 64),
-            output_shape: Tuple[int, ...] = (3, 64, 64, 64),
-            variable_names: List[str] = ['u', 'v', 'w'],
-            macro_perturbations: int = 10,
-            micro_perturbations: int = 1000,
-            t_start: int = 0,
-            t_final: int = 5,
-            start: int = 0
-        ):
+        self,
+        metadata: Dict[str, Any],
+        move_to_local_scratch: bool = False,
+        input_channel: int = 3,
+        output_channel: int = 3,
+        spatial_resolution: Tuple[int, ...] = (64, 64, 64),
+        input_shape: Tuple[int, ...] = (6, 64, 64, 64),
+        output_shape: Tuple[int, ...] = (3, 64, 64, 64),
+        variable_names: List[str] = ["u", "v", "w"],
+        macro_perturbations: int = 10,
+        micro_perturbations: int = 1000,
+        t_start: int = 0,
+        t_final: int = 5,
+        start: int = 0,
+    ):
 
         super().__init__(
             training_samples=micro_perturbations * macro_perturbations,
@@ -589,27 +606,27 @@ class ConditionalTaylorGreen3D(ConditionalIncompressibleFlows3D):
             macro_perturbations=macro_perturbations,
             t_start=t_start,
             t_final=t_final,
-            start=start
+            start=start,
         )
 
 
 class ConditionalNozzle3D(ConditionalIncompressibleFlows3D):
     def __init__(
-            self, 
-            metadata: Dict[str, Any], 
-            move_to_local_scratch: bool = False,
-            input_channel: int = 4,
-            output_channel: int = 3,
-            spatial_resolution: Tuple[int, ...] = (64, 64, 192),
-            input_shape: Tuple[int, ...] = (4, 64, 64, 192),
-            output_shape: Tuple[int, ...] = (3, 64, 64, 192),
-            variable_names: List[str] = ['u', 'v', 'w'],
-            macro_perturbations: int = 1,
-            micro_perturbations: int = 4000,
-            t_start: int = 0,
-            t_final: int = 10,
-            start: int = 0
-        ):
+        self,
+        metadata: Dict[str, Any],
+        move_to_local_scratch: bool = False,
+        input_channel: int = 4,
+        output_channel: int = 3,
+        spatial_resolution: Tuple[int, ...] = (64, 64, 192),
+        input_shape: Tuple[int, ...] = (4, 64, 64, 192),
+        output_shape: Tuple[int, ...] = (3, 64, 64, 192),
+        variable_names: List[str] = ["u", "v", "w"],
+        macro_perturbations: int = 1,
+        micro_perturbations: int = 4000,
+        t_start: int = 0,
+        t_final: int = 10,
+        start: int = 0,
+    ):
 
         super().__init__(
             training_samples=micro_perturbations * macro_perturbations,
@@ -625,14 +642,10 @@ class ConditionalNozzle3D(ConditionalIncompressibleFlows3D):
             macro_perturbations=macro_perturbations,
             t_start=t_start,
             t_final=t_final,
-            start=start
+            start=start,
         )
-    
+
     def get_mask(self):
         """Used to mask the output"""
-        mask = self.file.variables['mask'][:]
-        return (
-            torch.from_numpy(mask)
-            .type(torch.float32)
-            .permute(2, 1, 0)
-        )
+        mask = self.file.variables["mask"][:]
+        return torch.from_numpy(mask).type(torch.float32).permute(2, 1, 0)

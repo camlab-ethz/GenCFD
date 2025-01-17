@@ -23,7 +23,7 @@ from eval.metrics.wasserstein import compute_average_wasserstein
 def summarize_metric_results(
     stats_recorder: StatsRecorder,
     save_dir: str,
-    output_file: str = 'metrics_results.json'
+    output_file: str = "metrics_results.json",
 ) -> dict:
     """
     Summarizes the evaluation metrics and stores them in a JSON file.
@@ -45,27 +45,27 @@ def summarize_metric_results(
 
     # Compute relative and absolute L2 norms
     rel_mean = relative_L2_norm(
-        gen_tensor=stats_recorder.mean_gen, 
-        gt_tensor=stats_recorder.mean_gt, 
-        axis=stats_recorder.axis
+        gen_tensor=stats_recorder.mean_gen,
+        gt_tensor=stats_recorder.mean_gt,
+        axis=stats_recorder.axis,
     ).tolist()
 
     rel_std = relative_L2_norm(
-        gen_tensor=stats_recorder.std_gen, 
-        gt_tensor=stats_recorder.std_gt, 
-        axis=stats_recorder.axis
+        gen_tensor=stats_recorder.std_gen,
+        gt_tensor=stats_recorder.std_gt,
+        axis=stats_recorder.axis,
     ).tolist()
 
     abs_mean = absolute_L2_norm(
-        gen_tensor=stats_recorder.mean_gen, 
-        gt_tensor=stats_recorder.mean_gt, 
-        axis=stats_recorder.axis
+        gen_tensor=stats_recorder.mean_gen,
+        gt_tensor=stats_recorder.mean_gt,
+        axis=stats_recorder.axis,
     ).tolist()
 
     abs_std = absolute_L2_norm(
-        gen_tensor=stats_recorder.std_gen, 
-        gt_tensor=stats_recorder.std_gt, 
-        axis=stats_recorder.axis
+        gen_tensor=stats_recorder.std_gen,
+        gt_tensor=stats_recorder.std_gt,
+        axis=stats_recorder.axis,
     ).tolist()
 
     # Monte Carlo sampled metrics
@@ -79,7 +79,7 @@ def summarize_metric_results(
         gen_samples=gen_monte_carlo_samples,
         gt_samples=gt_monte_carlo_samples,
         p=1,
-        method='custom'
+        method="custom",
     )
 
     # Construct the metrics dictionary
@@ -103,10 +103,10 @@ def summarize_metric_results(
     save_file = os.path.join(save_dir, output_file)
     try:
         os.makedirs(save_dir, exist_ok=True)  # Ensure directory exists
-        with open(save_file, 'w') as f:
+        with open(save_file, "w") as f:
             json.dump(metrics_dict, f, indent=4)
-        print(f'Metrics successfully saved to {save_file}')
-        
+        print(f"Metrics successfully saved to {save_file}")
+
     except Exception as e:
         print(f"Failed to save metrics to {save_file}: {e}")
 

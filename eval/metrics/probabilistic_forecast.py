@@ -18,15 +18,21 @@ import torch
 
 Tensor = torch.Tensor
 
-def relative_L2_norm(gen_tensor: Tensor, gt_tensor: Tensor, axis: tuple | int) -> Tensor:
+
+def relative_L2_norm(
+    gen_tensor: Tensor, gt_tensor: Tensor, axis: tuple | int
+) -> Tensor:
     """Compute the relative L2 norm channel wise"""
-    
-    squared_mean_error = torch.mean((gt_tensor - gen_tensor) ** 2, dim = axis)
-    squared_mean_gt = torch.mean(gt_tensor ** 2, dim = axis)
+
+    squared_mean_error = torch.mean((gt_tensor - gen_tensor) ** 2, dim=axis)
+    squared_mean_gt = torch.mean(gt_tensor**2, dim=axis)
     return torch.sqrt(squared_mean_error / (squared_mean_gt + 1e-8))
 
-def absolute_L2_norm(gen_tensor: Tensor, gt_tensor: Tensor, axis: tuple | int) -> Tensor:
+
+def absolute_L2_norm(
+    gen_tensor: Tensor, gt_tensor: Tensor, axis: tuple | int
+) -> Tensor:
     """Compute the relative L2 norm channel wise"""
-    
+
     squared_mean_error = torch.mean((gt_tensor - gen_tensor) ** 2, axis)
     return torch.sqrt(squared_mean_error)

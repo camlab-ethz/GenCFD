@@ -18,7 +18,11 @@
 from typing import Any, Sequence
 import torch
 import torch.nn as nn
-from model.building_blocks.layers.upsample import ChannelToSpace, LearnablePixelShuffle3D, TransposeConv3D
+from model.building_blocks.layers.upsample import (
+    ChannelToSpace,
+    LearnablePixelShuffle3D,
+    TransposeConv3D,
+)
 from model.building_blocks.layers.residual import CombineResidualWithSkip
 from model.building_blocks.layers.convolutions import ConvLayer
 from model.building_blocks.blocks.convolution_blocks import ConvBlock
@@ -26,6 +30,7 @@ from model.building_blocks.blocks.attention_block import AxialSelfAttentionBlock
 from utils.model_utils import default_init
 
 Tensor = torch.Tensor
+
 
 class UStack(nn.Module):
     """Upsampling Stack.
@@ -46,25 +51,26 @@ class UStack(nn.Module):
         channels_per_head: Number of channels per head.
         dtype: Data type.
     """
+
     def __init__(
-            self, 
-            spatial_resolution: Sequence[int],
-            emb_channels: int,
-            num_channels: tuple[int, ...], 
-            num_res_blocks: tuple[int, ...],
-            upsample_ratio: tuple[int, ...],
-            use_spatial_attention: Sequence[bool],
-            num_input_proj_channels: int = 128,
-            num_output_proj_channels: int = 128,
-            padding_method: str = 'circular', 
-            dropout_rate: float = 0.0, 
-            num_heads: int = 8, 
-            channels_per_head: int = -1, 
-            normalize_qk: bool = False,
-            use_position_encoding: bool = False,
-            dtype: torch.dtype=torch.float32,
-            device: Any | None = None
-        ):
+        self,
+        spatial_resolution: Sequence[int],
+        emb_channels: int,
+        num_channels: tuple[int, ...],
+        num_res_blocks: tuple[int, ...],
+        upsample_ratio: tuple[int, ...],
+        use_spatial_attention: Sequence[bool],
+        num_input_proj_channels: int = 128,
+        num_output_proj_channels: int = 128,
+        padding_method: str = "circular",
+        dropout_rate: float = 0.0,
+        num_heads: int = 8,
+        channels_per_head: int = -1,
+        normalize_qk: bool = False,
+        use_position_encoding: bool = False,
+        dtype: torch.dtype = torch.float32,
+        device: Any | None = None,
+    ):
         super(UStack, self).__init__()
 
         self.kernel_dim = len(spatial_resolution)
@@ -90,20 +96,25 @@ class UStack(nn.Module):
         # calculate list of upsample resolutions
         list_upsample_resolutions = [spatial_resolution]
         for level, channel in enumerate(self.num_channels):
-            downsampled_resolution = tuple([int(res / self.upsample_ratio[level]) for res in list_upsample_resolutions[-1]])
+            downsampled_resolution = tuple(
+                [
+                    int(res / self.upsample_ratio[level])
+                    for res in list_upsample_resolutions[-1]
+                ]
+            )
             list_upsample_resolutions.append(downsampled_resolution)
         list_upsample_resolutions = list_upsample_resolutions[::-1]
         list_upsample_resolutions.pop()
 
         self.residual_blocks = nn.ModuleList()
-        self.conv_blocks = nn.ModuleList() # ConvBlock
-        self.attention_blocks = nn.ModuleList() # AxialSelfAttentionBlock
+        self.conv_blocks = nn.ModuleList()  # ConvBlock
+        self.attention_blocks = nn.ModuleList()  # AxialSelfAttentionBlock
         self.conv_layers = nn.ModuleList()
-        self.upsample_layers = nn.ModuleList() # ChannelToSpace 
+        self.upsample_layers = nn.ModuleList()  # ChannelToSpace
 
         for level, channel in enumerate(self.num_channels):
             self.conv_blocks.append(nn.ModuleList())
-            self.attention_blocks.append(nn.ModuleList()) 
+            self.attention_blocks.append(nn.ModuleList())
             self.residual_blocks.append(nn.ModuleList())
 
             for block_id in range(self.num_res_blocks[level]):
@@ -111,26 +122,26 @@ class UStack(nn.Module):
                     in_channels.append(self.num_channels[level - 1])
                 else:
                     in_channels.append(channel)
-                    
+
                 # Residual Block
                 self.residual_blocks[level].append(
                     CombineResidualWithSkip(
                         residual_channels=in_channels[-1],
                         skip_channels=channel,
-                        kernel_dim=self.kernel_dim, 
+                        kernel_dim=self.kernel_dim,
                         project_skip=in_channels[-1] != channel,
                         dtype=self.dtype,
-                        device=self.device
+                        device=self.device,
                     )
                 )
                 # Convolution Block
-                self.conv_blocks[level].append( 
+                self.conv_blocks[level].append(
                     ConvBlock(
                         in_channels=in_channels[-1],
                         out_channels=channel,
                         emb_channels=self.emb_channels,
                         kernel_size=self.kernel_dim * (3,),
-                        padding_mode= self.padding_method,
+                        padding_mode=self.padding_method,
                         padding=1,
                         case=self.kernel_dim,
                         dtype=self.dtype,
@@ -140,18 +151,18 @@ class UStack(nn.Module):
                 # Attention Block
                 if self.use_spatial_attention[level]:
                     # attention requires input shape: (bs, x, y, z, c)
-                    attn_axes = [1, 2, 3] # attention along all spatial dimensions
+                    attn_axes = [1, 2, 3]  # attention along all spatial dimensions
 
                     self.attention_blocks[level].append(
                         AxialSelfAttentionBlock(
                             in_channels=channel,
-                            spatial_resolution=list_upsample_resolutions[level], 
+                            spatial_resolution=list_upsample_resolutions[level],
                             attention_axes=attn_axes,
                             add_position_embedding=self.use_position_encoding,
                             num_heads=self.num_heads,
                             normalize_qk=self.normalize_qk,
                             dtype=self.dtype,
-                            device=self.device
+                            device=self.device,
                         )
                     )
 
@@ -167,7 +178,7 @@ class UStack(nn.Module):
                     case=self.kernel_dim,
                     kernel_init=default_init(1.0),
                     dtype=self.dtype,
-                    device=self.device
+                    device=self.device,
                 )
             )
 
@@ -176,10 +187,10 @@ class UStack(nn.Module):
                     block_shape=self.kernel_dim * (up_ratio,),
                     in_channels=up_ratio**self.kernel_dim * channel,
                     kernel_dim=self.kernel_dim,
-                    spatial_resolution=list_upsample_resolutions[level]
+                    spatial_resolution=list_upsample_resolutions[level],
                 )
             )
-        
+
         # DStack Input - UStack Output Residual Connection
         self.res_skip_layer = CombineResidualWithSkip(
             residual_channels=self.num_channels[-1],
@@ -187,7 +198,7 @@ class UStack(nn.Module):
             kernel_dim=self.kernel_dim,
             project_skip=(self.num_channels[-1] != self.num_input_proj_channels),
             dtype=self.dtype,
-            device=self.device
+            device=self.device,
         )
 
         # Add Output Layer

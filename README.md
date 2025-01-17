@@ -171,15 +171,17 @@ We would like to extend our deepest gratitude to the Google Research team for th
 
 For more details, please refer to their original work: [swirl-dynamics](https://github.com/google-research/swirl-dynamics).
 
-## Citation
-If you use this code or find it helpful in your research, please cite the following paper:<br>
-@misc{molinaro2024generativeaifastaccurate,<br>
-      &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;title={Generative AI for fast and accurate Statistical Computation of Fluids},<br>
-      &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;author={Roberto Molinaro and Samuel Lanthaler and Bogdan Raonić and Tobias Rohner and Victor Armegioiu <br>
-      &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;and Zhong Yi Wan and Fei Sha and Siddhartha Mishra and &Leonardo Zepeda-Núñez},<br>
-      &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;year={2024},<br>
-      &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;eprint={2409.18359},<br>
-      &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;archivePrefix={arXiv},<br>
-      &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;primaryClass={cs.LG},<br>
-      &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;url={https://arxiv.org/abs/2409.18359},<br>
+## 📚 Citation
+If you use this code or find it helpful in your research, please cite the following paper:
+
+```bibtex
+@misc{molinaro2024generativeaifastaccurate,
+      title={Generative AI for fast and accurate Statistical Computation of Fluids},
+      author={Roberto Molinaro and Samuel Lanthaler and Bogdan Raonić and Tobias Rohner and Victor Armegioiu and Zhong Yi Wan and Fei Sha and Siddhartha Mishra and &Leonardo Zepeda-Núñez},
+      year={2024},
+      eprint={2409.18359},
+      archivePrefix={arXiv},
+      primaryClass={cs.LG},
+      url={https://arxiv.org/abs/2409.18359},
 }
+```

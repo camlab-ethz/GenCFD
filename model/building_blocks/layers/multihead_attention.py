@@ -19,16 +19,19 @@ from typing import Any
 
 Tensor = torch.Tensor
 
+
 class MultiHeadDotProductAttention(nn.Module):
     """Mulit Head Dot Product Attention with querry and key normalization"""
-    
-    def __init__(self, 
-                 emb_dim: int, 
-                 num_heads: int, 
-                 normalize_qk: bool=False, 
-                 dropout: float=0.0,
-                 device: Any | None = None,
-                 dtype: torch.dtype=torch.float32):
+
+    def __init__(
+        self,
+        emb_dim: int,
+        num_heads: int,
+        normalize_qk: bool = False,
+        dropout: float = 0.0,
+        device: Any | None = None,
+        dtype: torch.dtype = torch.float32,
+    ):
         super(MultiHeadDotProductAttention, self).__init__()
         self.emb_dim = emb_dim
         self.num_heads = num_heads
@@ -40,33 +43,29 @@ class MultiHeadDotProductAttention(nn.Module):
         if emb_dim % num_heads != 0:
             raise ValueError(
                 "Embedding Dimension must be divisible through the number of heads"
-                )
+            )
         self.multihead_attention = nn.MultiheadAttention(
-            embed_dim=self.emb_dim, 
-            num_heads=self.num_heads, 
-            dropout=dropout, 
+            embed_dim=self.emb_dim,
+            num_heads=self.num_heads,
+            dropout=dropout,
             batch_first=True,
-            device=self.device, 
-            dtype=self.dtype
+            device=self.device,
+            dtype=self.dtype,
         )
-        
+
         self._init_weights()
 
     def _init_weights(self):
-        nn.init.xavier_uniform_(
-            self.multihead_attention.in_proj_weight
-        )
-        nn.init.xavier_uniform_(
-            self.multihead_attention.out_proj.weight
-        )
+        nn.init.xavier_uniform_(self.multihead_attention.in_proj_weight)
+        nn.init.xavier_uniform_(self.multihead_attention.out_proj.weight)
 
     def forward(
-            self, query: Tensor, key: Tensor = None, value: Tensor = None
-        ) -> Tensor:
-        """Required shape for multihead attention is: 
-        
+        self, query: Tensor, key: Tensor = None, value: Tensor = None
+    ) -> Tensor:
+        """Required shape for multihead attention is:
+
         2D case: (bs, width*height, emb_dim)
-        3D case: (bs, length, emb_dim) 
+        3D case: (bs, length, emb_dim)
         where the length is just the height, width or depth. Used for axial self attention
         """
 
@@ -77,7 +76,7 @@ class MultiHeadDotProductAttention(nn.Module):
             if value is not None:
                 raise ValueError("value can not be not None if key is None")
             key = query
-        
+
         if value is None:
             value = key
 

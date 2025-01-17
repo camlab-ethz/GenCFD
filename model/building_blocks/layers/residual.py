@@ -25,55 +25,55 @@ from utils.model_utils import reshape_jax_torch
 
 Tensor = torch.Tensor
 
+
 class CombineResidualWithSkip(nn.Module):
-  """Combine residual and skip connections.
+    """Combine residual and skip connections.
 
-  Attributes:
-    project_skip: Whether to add a linear projection layer to the skip
-      connections. Mandatory if the number of channels are different between
-      skip and residual values.
-  """
-  def __init__(self, 
-               residual_channels: int,
-               skip_channels: int,
-               kernel_dim: int = None,
-               project_skip: bool=False, 
-               dtype: torch.dtype=torch.float32,
-               device: Any | None = None):
-    super(CombineResidualWithSkip, self).__init__()
+    Attributes:
+      project_skip: Whether to add a linear projection layer to the skip
+        connections. Mandatory if the number of channels are different between
+        skip and residual values.
+    """
 
-    self.residual_channels=residual_channels
-    self.skip_channels=skip_channels
-    self.kernel_dim = kernel_dim
-    self.project_skip=project_skip
-    self.dtype=dtype
-    self.device=device
+    def __init__(
+        self,
+        residual_channels: int,
+        skip_channels: int,
+        kernel_dim: int = None,
+        project_skip: bool = False,
+        dtype: torch.dtype = torch.float32,
+        device: Any | None = None,
+    ):
+        super(CombineResidualWithSkip, self).__init__()
 
-    if residual_channels != skip_channels and not project_skip:
-      raise ValueError(
-        f"Residual tensor has {residual_channels}, Skip tensor has {skip_channels}. "
-        f"Set project_skip to True to resolve this mismatch."
-      )
-    
-    if self.residual_channels and self.skip_channels and self.project_skip:
-      self.skip_projection = nn.Linear(
-        skip_channels, 
-        residual_channels,
-        device=self.device,
-        dtype=self.dtype
-      )
-      torch.nn.init.kaiming_uniform_(self.skip_projection.weight, a=np.sqrt(5))
-      torch.nn.init.zeros_(self.skip_projection.bias)
-    else:
-      self.skip_projection = None
+        self.residual_channels = residual_channels
+        self.skip_channels = skip_channels
+        self.kernel_dim = kernel_dim
+        self.project_skip = project_skip
+        self.dtype = dtype
+        self.device = device
 
-  def forward(self, residual: Tensor, skip: Tensor) -> Tensor:
-    # residual, skip (bs, c, w, h, d)
-    if self.project_skip:
-      skip = reshape_jax_torch(
-        self.skip_projection(
-          reshape_jax_torch(skip, self.kernel_dim)), 
-        self.kernel_dim
-      )
+        if residual_channels != skip_channels and not project_skip:
+            raise ValueError(
+                f"Residual tensor has {residual_channels}, Skip tensor has {skip_channels}. "
+                f"Set project_skip to True to resolve this mismatch."
+            )
 
-    return (skip + residual) / math.sqrt(2)
+        if self.residual_channels and self.skip_channels and self.project_skip:
+            self.skip_projection = nn.Linear(
+                skip_channels, residual_channels, device=self.device, dtype=self.dtype
+            )
+            torch.nn.init.kaiming_uniform_(self.skip_projection.weight, a=np.sqrt(5))
+            torch.nn.init.zeros_(self.skip_projection.bias)
+        else:
+            self.skip_projection = None
+
+    def forward(self, residual: Tensor, skip: Tensor) -> Tensor:
+        # residual, skip (bs, c, w, h, d)
+        if self.project_skip:
+            skip = reshape_jax_torch(
+                self.skip_projection(reshape_jax_torch(skip, self.kernel_dim)),
+                self.kernel_dim,
+            )
+
+        return (skip + residual) / math.sqrt(2)

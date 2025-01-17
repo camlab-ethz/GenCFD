@@ -36,13 +36,13 @@ from utils.gencfd_utils import (
     load_json_file,
     replace_args,
     get_buffer_dict,
-    adjust_keys
+    adjust_keys,
 )
 from eval.metrics.stats_recorder import StatsRecorder
 from eval import evaluation_loop
 
 
-torch.set_float32_matmul_precision('high') # Better performance on newer GPUs!
+torch.set_float32_matmul_precision("high")  # Better performance on newer GPUs!
 torch.backends.cudnn.benchmark = True
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 SEED = 0
@@ -54,29 +54,35 @@ torch.cuda.manual_seed_all(SEED)  # Ensure all GPUs (if multi-GPU) are set
 
 
 def init_distributed_mode(args):
-    """Initialize a Distributed Data Parallel Environment"""    
+    """Initialize a Distributed Data Parallel Environment"""
 
     args.local_rank = int(os.getenv("LOCAL_RANK", -1))  # Get from environment variable
 
     if args.local_rank == -1:
-        raise ValueError("--local_rank was not set. Ensure torchrun is used to launch the script.")
+        raise ValueError(
+            "--local_rank was not set. Ensure torchrun is used to launch the script."
+        )
 
     if torch.cuda.is_available():
         torch.cuda.set_device(args.local_rank)
-        dist.init_process_group(backend="nccl", rank=args.local_rank, world_size=args.world_size)
+        dist.init_process_group(
+            backend="nccl", rank=args.local_rank, world_size=args.world_size
+        )
         device = torch.device(f"cuda:{args.local_rank}")
     else:
-        dist.init_process_group(backend="gloo", rank=args.local_rank, world_size=args.world_size)
+        dist.init_process_group(
+            backend="gloo", rank=args.local_rank, world_size=args.world_size
+        )
         device = torch.device("cpu")
         print(" ")
-        
+
     print(f"DDP initialized with rank {args.local_rank} and device {device}.")
 
     return args, device
 
 
-if __name__=="__main__":
-    
+if __name__ == "__main__":
+
     # get arguments for inference
     args = inference_args()
 
@@ -85,8 +91,7 @@ if __name__=="__main__":
         args, device = init_distributed_mode(args)
     else:
         print(" ")
-        print(f'Used device: {device}')
-
+        print(f"Used device: {device}")
 
     cwd = os.getcwd()
     if args.model_dir is None:
@@ -95,7 +100,7 @@ if __name__=="__main__":
     if not os.path.exists(model_dir):
         if (args.world_size > 1 and args.local_rank == 0) or args.world_size == 1:
             raise ValueError(f"Wrong Path, {args.model_dir} doesn't exist!")
-    
+
     # read configurations which were used to train the model
     train_args = load_json_file(
         os.path.join(cwd, args.model_dir, "training_config.json")
@@ -103,12 +108,12 @@ if __name__=="__main__":
 
     dataloader, dataset, time_cond = get_dataset_loader(
         args=args,
-        name=args.dataset, 
-        batch_size=args.batch_size, 
+        name=args.dataset,
+        batch_size=args.batch_size,
         num_worker=args.worker,
-        # Default prefetch factor is 2 
+        # Default prefetch factor is 2
         prefetch_factor=2 if args.worker > 1 else None,
-        split=False
+        split=False,
     )
 
     out_shape = dataset.output_shape
@@ -116,16 +121,18 @@ if __name__=="__main__":
 
     if train_args:
         # replace every argument from train_args besides the dataset name!
-        replace_args(args, train_args) 
+        replace_args(args, train_args)
 
         if (args.world_size > 1 and args.local_rank == 0) or args.world_size == 1:
-        # Check if the arguments used for training are the same as the evaluation dataset
-            assert spatial_resolution == tuple(train_args['spatial_resolution']), \
-                f"spatial_resolution should be {tuple(train_args['spatial_resolution'])} " \
+            # Check if the arguments used for training are the same as the evaluation dataset
+            assert spatial_resolution == tuple(train_args["spatial_resolution"]), (
+                f"spatial_resolution should be {tuple(train_args['spatial_resolution'])} "
                 f"and not {spatial_resolution}"
-            assert out_shape == tuple(train_args['out_shape']), \
-                f"out_shape should be {tuple(train_args['out_shape'])} and not {out_shape}"
-    
+            )
+            assert out_shape == tuple(
+                train_args["out_shape"]
+            ), f"out_shape should be {tuple(train_args['out_shape'])} and not {out_shape}"
+
     # Dummy buffer values, for initialization! Necessary to load the model parameters
     buffer_dict = get_buffer_dict(dataset=dataset, create_dummy=True)
 
@@ -139,19 +146,21 @@ if __name__=="__main__":
         device=device,
         dtype=args.dtype,
         buffer_dict=buffer_dict,
-        use_ddp_wrapper=False
+        use_ddp_wrapper=False,
     )
 
     with torch.no_grad():
         denoising_model.initialize(
-            batch_size=args.batch_size, 
-            time_cond=time_cond, 
-            input_channels=dataset.input_channel, 
-            output_channels=dataset.output_channel
+            batch_size=args.batch_size,
+            time_cond=time_cond,
+            input_channels=dataset.input_channel,
+            output_channels=dataset.output_channel,
         )
 
     # Print number of Parameters:
-    model_params = sum(p.numel() for p in denoising_model.denoiser.parameters() if p.requires_grad)
+    model_params = sum(
+        p.numel() for p in denoising_model.denoiser.parameters() if p.requires_grad
+    )
     if (args.world_size > 1 and args.local_rank == 0) or args.world_size == 1:
         print(" ")
         print(f"Total number of model parameters: {model_params}")
@@ -161,17 +170,18 @@ if __name__=="__main__":
     trainer = DenoisingTrainer(
         model=denoising_model,
         optimizer=optim.AdamW(
-            denoising_model.denoiser.parameters(), 
+            denoising_model.denoiser.parameters(),
             lr=args.peak_lr,
-            weight_decay=args.weight_decay),
+            weight_decay=args.weight_decay,
+        ),
         device=device,
         ema_decay=args.ema_decay,
-        store_ema=False, 
+        store_ema=False,
         track_memory=False,
         use_mixed_precision=args.use_mixed_precision,
         is_compiled=args.compile,
         world_size=args.world_size,
-        local_rank=args.local_rank
+        local_rank=args.local_rank,
     )
 
     latest_model_path = get_latest_checkpoint(model_dir)
@@ -183,12 +193,12 @@ if __name__=="__main__":
 
     trained_state = DenoisingModelTrainState.restore_from_checkpoint(
         latest_model_path,
-        model=denoising_model.denoiser, 
+        model=denoising_model.denoiser,
         optimizer=trainer.optimizer,
         is_compiled=trainer.is_compiled,
         is_parallelized=False,
-        use_ema=True, # load ema parameters instead
-        device = device,
+        use_ema=True,  # load ema parameters instead
+        device=device,
     )
 
     # Retrieve the normalization buffer (mean and std tensors)
@@ -199,36 +209,36 @@ if __name__=="__main__":
 
     # If model is compiled or evaluated in parallel adjust the keyword name
     buffers = adjust_keys(
-        buffers, 
-        is_compiled=args.compile, 
+        buffers,
+        is_compiled=args.compile,
         is_parallelized=True if args.world_size > 1 else False,
-        use_ddp_wrapper=False
+        use_ddp_wrapper=False,
     )
 
     # Construct the inference function
     denoise_fn = trainer.inference_fn_from_state_dict(
-        trained_state, 
-        denoiser=denoising_model.denoiser, 
+        trained_state,
+        denoiser=denoising_model.denoiser,
         task=args.task,
-        lead_time=time_cond
+        lead_time=time_cond,
     )
 
     # Create Sampler
     sampler = create_sampler(
-        args=args,
-        input_shape=out_shape, 
-        denoise_fn=denoise_fn,
-        device=device
+        args=args, input_shape=out_shape, denoise_fn=denoise_fn, device=device
     )
 
     # compute the effective number of monte carlo samples if world_size is greater than 1
     if args.world_size > 1:
         if args.monte_carlo_samples % args.world_size != 0:
             if args.local_rank == 0:
-                print("Number of monte carlo samples should be divisible through the number of processes used!")
+                print(
+                    "Number of monte carlo samples should be divisible through the number of processes used!"
+                )
 
-        effective_samples = (args.monte_carlo_samples // (args.world_size * args.batch_size)) * \
-            (args.world_size * args.batch_size) 
+        effective_samples = (
+            args.monte_carlo_samples // (args.world_size * args.batch_size)
+        ) * (args.world_size * args.batch_size)
 
         if effective_samples <= 0:
             error_msg = (
@@ -244,23 +254,31 @@ if __name__=="__main__":
 
     # Initialize stats_recorder to keep track of metrics
     stats_recorder = StatsRecorder(
-        batch_size=args.batch_size, 
-        ndim=len(out_shape)-1, 
-        channels=dataset.output_channel, 
+        batch_size=args.batch_size,
+        ndim=len(out_shape) - 1,
+        channels=dataset.output_channel,
         data_shape=out_shape,
-        monte_carlo_samples=args.monte_carlo_samples if args.world_size <= 1 else effective_samples // args.world_size,
-        num_samples= 1000,
+        monte_carlo_samples=(
+            args.monte_carlo_samples
+            if args.world_size <= 1
+            else effective_samples // args.world_size
+        ),
+        num_samples=1000,
         device=device,
-        world_size=args.world_size
+        world_size=args.world_size,
     )
 
     if (args.world_size > 1 and args.local_rank == 0) or args.world_size == 1:
         if args.compute_metrics:
-            tot_samples = args.monte_carlo_samples if args.world_size <= 1 else effective_samples
-            print(f"Run Evaluation Loop with {tot_samples} Monte Carlo Samples and Batch Size {args.batch_size}")
+            tot_samples = (
+                args.monte_carlo_samples if args.world_size <= 1 else effective_samples
+            )
+            print(
+                f"Run Evaluation Loop with {tot_samples} Monte Carlo Samples and Batch Size {args.batch_size}"
+            )
         if args.visualize:
             print(f"Run Visualization Loop")
-        
+
     start_train = time.time()
 
     if args.world_size > 1:
@@ -269,7 +287,9 @@ if __name__=="__main__":
     evaluation_loop.run(
         sampler=sampler,
         buffers=buffers,
-        monte_carlo_samples=args.monte_carlo_samples if args.world_size <= 1 else effective_samples,
+        monte_carlo_samples=(
+            args.monte_carlo_samples if args.world_size <= 1 else effective_samples
+        ),
         stats_recorder=stats_recorder,
         # Dataset configs
         dataloader=dataloader,
@@ -283,7 +303,7 @@ if __name__=="__main__":
         save_dir=args.save_dir,
         # DDP configs
         world_size=args.world_size,
-        local_rank=args.local_rank
+        local_rank=args.local_rank,
     )
 
     end_train = time.time()

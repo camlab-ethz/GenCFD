@@ -20,9 +20,10 @@ from typing import Union
 
 Tensor = torch.Tensor
 
+
 def wasserstein_distance_1d(u_values: Tensor, v_values: Tensor, p: int = 1):
     """
-    Compute the 1D Wasserstein distance (or general p-Wasserstein distance) 
+    Compute the 1D Wasserstein distance (or general p-Wasserstein distance)
     between two distributions.
 
     p is a positive parameter; p = 1 gives the Wasserstein distance, p = 2
@@ -77,40 +78,40 @@ def wasserstein_distance_1d(u_values: Tensor, v_values: Tensor, p: int = 1):
     if p == 1:
         return torch.sum(cdf_diff * deltas)
     if p == 2:
-        return torch.sqrt(torch.sum((cdf_diff ** 2) * deltas)).item()
-    return torch.pow(torch.sum((cdf_diff ** p) * deltas), 1 / p).item()
+        return torch.sqrt(torch.sum((cdf_diff**2) * deltas)).item()
+    return torch.pow(torch.sum((cdf_diff**p) * deltas), 1 / p).item()
 
 
 def compute_average_wasserstein(
     num_particles: int,
     channels: int,
-    gen_samples: Tensor, 
-    gt_samples: Tensor, 
-    p: int = 1, 
-    method: str = 'custom'
+    gen_samples: Tensor,
+    gt_samples: Tensor,
+    p: int = 1,
+    method: str = "custom",
 ) -> dict:
     """Computes the average wasserstein distance for every channel dimension"""
 
-    avg_wass = {} # Save the average wasserstein distance for every channel
+    avg_wass = {}  # Save the average wasserstein distance for every channel
 
-    if method == 'custom': 
+    if method == "custom":
         for channel in range(channels):
             wass = []
             for sample in range(num_particles):
-                gen_sample = gen_samples[:,sample,channel]
-                gt_sample = gt_samples[:,sample,channel]
+                gen_sample = gen_samples[:, sample, channel]
+                gt_sample = gt_samples[:, sample, channel]
                 wass.append(wasserstein_distance_1d(gen_sample, gt_sample))
             # compute the avg wasserstein for channel i
-            avg_wass[f'wass_{channel}'] = torch.mean(torch.as_tensor(wass)).item()
+            avg_wass[f"wass_{channel}"] = torch.mean(torch.as_tensor(wass)).item()
 
-    elif method == 'scipy':
+    elif method == "scipy":
         for channel in range(channels):
             wass = []
             for sample in range(num_particles):
-                gen_sample = gen_samples[:,sample,channel].cpu().numpy()
-                gt_sample = gt_samples[:,sample,channel].cpu().numpy()
+                gen_sample = gen_samples[:, sample, channel].cpu().numpy()
+                gt_sample = gt_samples[:, sample, channel].cpu().numpy()
                 wass.append(wasserstein_distance(gen_sample, gt_sample))
-            avg_wass[f'wass_{channel}'] = float(np.mean(wass))
+            avg_wass[f"wass_{channel}"] = float(np.mean(wass))
     else:
         raise ValueError(f"Wrong method, {method} does not exist.")
 

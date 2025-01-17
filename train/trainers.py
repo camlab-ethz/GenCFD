@@ -30,7 +30,7 @@ from utils.train_utils import StdMetric, compute_memory
 from train import train_states
 import diffusion as dfn_lib
 
-Tensor = torch.Tensor 
+Tensor = torch.Tensor
 BatchType = Mapping[str, Tensor]
 Metrics = MetricCollection
 
@@ -44,13 +44,13 @@ class BaseTrainer(Generic[M, S], metaclass=abc.ABCMeta):
     """Abstract base trainer for gradient descent mini-batch training."""
 
     def __init__(
-            self, 
-            model: M,
-            device: torch.device = None,
-            track_memory: bool = False,
-            world_size: int = 1,
-            local_rank: int = -1
-        ):
+        self,
+        model: M,
+        device: torch.device = None,
+        track_memory: bool = False,
+        world_size: int = 1,
+        local_rank: int = -1,
+    ):
         self.model = model
         self.device = device
         self.train_state = self.initialize_train_state()
@@ -58,13 +58,11 @@ class BaseTrainer(Generic[M, S], metaclass=abc.ABCMeta):
         self.world_size = world_size
         self.local_rank = local_rank
 
-
     @property
     @abc.abstractmethod
     def train_step(self) -> Metrics:
         """Returns the train step function."""
         raise NotImplementedError
-
 
     @property
     @abc.abstractmethod
@@ -72,20 +70,18 @@ class BaseTrainer(Generic[M, S], metaclass=abc.ABCMeta):
         """Returns the evaluation step function."""
         raise NotImplementedError
 
-
     @abc.abstractmethod
     def initialize_train_state(self) -> S:
         """Instantiate the initial train state."""
         raise NotImplementedError
 
-
     def train(self, batch_iter: Iterator[BatchType], num_steps: int) -> Metrics:
         """Runs training for a specified number of steps."""
 
         train_metrics = self.TrainMetrics(
-            device=self.device, 
+            device=self.device,
             track_memory=self.track_memory,
-            world_size=self.world_size
+            world_size=self.world_size,
         )
         self.model.denoiser.train()
 
@@ -99,7 +95,7 @@ class BaseTrainer(Generic[M, S], metaclass=abc.ABCMeta):
 
             if self.track_memory and "mem" in metrics_update:
                 train_metrics["mem"].update(metrics_update["mem"])
-        
+
         if self.track_memory and self.device.type != "cuda":
             print(f"Warning: Memory tracking is skipped. CUDA device is not available.")
 
@@ -109,21 +105,22 @@ class BaseTrainer(Generic[M, S], metaclass=abc.ABCMeta):
 
         return train_metrics
 
-
     def eval(self, batch_iter: Iterator[BatchType], num_steps: int) -> Metrics:
         """Runs evaluation for a specified number of steps."""
         eval_metrics = self.EvalMetrics(
-            self.device, 
-            self.model.num_eval_noise_levels, 
-            self.world_size
+            self.device, self.model.num_eval_noise_levels, self.world_size
         )
         self.model.denoiser.eval()
 
         with torch.no_grad():
             for _ in range(num_steps):
                 batch = next(batch_iter)
-                batch = {k: v.to(self.device, non_blocking=True) for k, v in batch.items()}
-                update_metrics = self.eval_step(batch) # self.train_state as first entry
+                batch = {
+                    k: v.to(self.device, non_blocking=True) for k, v in batch.items()
+                }
+                update_metrics = self.eval_step(
+                    batch
+                )  # self.train_state as first entry
                 for key, value in update_metrics.items():
                     eval_metrics[key].update(value)
 
@@ -132,13 +129,14 @@ class BaseTrainer(Generic[M, S], metaclass=abc.ABCMeta):
             dist.barrier(device_ids=[self.local_rank])
 
         return eval_metrics
-  
+
 
 class BasicTrainer(BaseTrainer[M, S]):
     """Basic Trainer implementing the training/evaluation steps."""
 
     class TrainMetrics(Metrics):
         """Training metrics based on the model outputs."""
+
         # Example usage:
         # train_loss = MeanMetric()
         # train_acc = torchmetrics.Accuracy()
@@ -150,35 +148,33 @@ class BasicTrainer(BaseTrainer[M, S]):
             }
             super().__init__(metrics)
 
-
     class EvalMetrics(Metrics):
         """Evaluation metrics based on model outputs."""
+
         # Example usage:
         # eval_loss = torchmetrics.MeanSquaredError()
         # eval_acc = torchmetrics.Accuracy()
 
-
     def __init__(
-            self, 
-            model: nn.Module, 
-            optimizer: optim.Optimizer, 
-            device: torch.device = None,
-            track_memory: bool = False, 
-            world_size: int = 1,
-            local_rank: int = -1
-        ):
+        self,
+        model: nn.Module,
+        optimizer: optim.Optimizer,
+        device: torch.device = None,
+        track_memory: bool = False,
+        world_size: int = 1,
+        local_rank: int = -1,
+    ):
         super().__init__(
-            model=model, 
-            device=device, 
+            model=model,
+            device=device,
             track_memory=track_memory,
             world_size=world_size,
-            local_rank=local_rank
+            local_rank=local_rank,
         )
         self.optimizer = optimizer
 
-
     def train_step(self, batch: BatchType) -> Metrics:
-        
+
         self.model.train()
         output = self.model(batch)
         loss, metrics = self.model.loss_fn(output, batch)
@@ -194,21 +190,17 @@ class BasicTrainer(BaseTrainer[M, S]):
 
         return train_metrics
 
-
     def eval_step(self, batch: BatchType) -> Callable[[S, BatchType], Metrics]:
         with torch.no_grad():
             metrics = self.model.eval_fn(batch)
 
         eval_metrics = self.EvalMetrics(
-            self.device, 
-            self.model.num_eval_noise_levels, 
-            self.world_size
+            self.device, self.model.num_eval_noise_levels, self.world_size
         )
         for key, value in metrics.items():
             eval_metrics[key](value)
 
         return eval_metrics.compute()
-
 
     def initialize_train_state(self) -> S:
         """Initializes the training state, including optimizer and parameters."""
@@ -216,9 +208,9 @@ class BasicTrainer(BaseTrainer[M, S]):
             model=self.model,
             optimizer=self.optimizer,
             params=self.model.state_dict(),
-            opt_state=self.optimizer.state_dict()
+            opt_state=self.optimizer.state_dict(),
         )
-    
+
     def update_train_state(self) -> S:
         """Update the training state, including optimizer and parameters."""
         next_step = self.train_state.step + 1
@@ -228,14 +220,16 @@ class BasicTrainer(BaseTrainer[M, S]):
         return self.train_state.replace(
             step=next_step,
             opt_state=self.optimizer.state_dict(),
-            params=self.model.state_dict()
+            params=self.model.state_dict(),
         )
 
 
 class BasicDistributedTrainer(BasicTrainer[M, S]):
     """Distributed Trainer for DDP (DistributedDataParallel) training."""
 
-    def __init__(self, model: nn.Module, optimizer: optim.Optimizer, device: torch.device):
+    def __init__(
+        self, model: nn.Module, optimizer: optim.Optimizer, device: torch.device
+    ):
         super().__init__(model, optimizer, device)
         self.model = DDP(self.model, device_ids=[device])
 
@@ -248,21 +242,21 @@ class BasicDistributedTrainer(BasicTrainer[M, S]):
 
 class DenoisingTrainer(BasicTrainer[M, SD]):
     def __init__(
-            self, 
-            model: nn.Module, 
-            optimizer: optim.Optimizer,
-            device: torch.device,
-            ema_decay: float = 0.999,
-            store_ema: bool = False,
-            track_memory: bool = False,
-            use_mixed_precision: bool = False,
-            is_compiled: bool = False,
-            world_size: int = 1,
-            local_rank: int = -1
-        ):
-      
+        self,
+        model: nn.Module,
+        optimizer: optim.Optimizer,
+        device: torch.device,
+        ema_decay: float = 0.999,
+        store_ema: bool = False,
+        track_memory: bool = False,
+        use_mixed_precision: bool = False,
+        is_compiled: bool = False,
+        world_size: int = 1,
+        local_rank: int = -1,
+    ):
+
         self.optimizer = optimizer
-        self.ema_decay = ema_decay 
+        self.ema_decay = ema_decay
         self.store_ema = store_ema
         self.track_memory = track_memory
         # Mixed precision training with Grad scaler to avoid overflow and underflow during backprop.
@@ -274,42 +268,49 @@ class DenoisingTrainer(BasicTrainer[M, SD]):
         self.is_parallelized = True if world_size > 1 else False
 
         super().__init__(
-            model=model, 
-            optimizer=optimizer, 
-            device=device, 
+            model=model,
+            optimizer=optimizer,
+            device=device,
             track_memory=track_memory,
             world_size=world_size,
-            local_rank=local_rank
+            local_rank=local_rank,
         )
 
     class TrainMetrics(Metrics):
-        """Train metrics including mean and std of loss and if required 
+        """Train metrics including mean and std of loss and if required
         computes the mean of the memory profiler."""
 
         def __init__(self, device, track_memory: bool = False, world_size: int = 1):
             train_metrics = {
-                "loss": MeanMetric(sync_on_compute=True if world_size > 1 else False).to(device),
-                "loss_std": StdMetric().to(device) # uses already reduction clauses thus no sync
+                "loss": MeanMetric(
+                    sync_on_compute=True if world_size > 1 else False
+                ).to(device),
+                "loss_std": StdMetric().to(
+                    device
+                ),  # uses already reduction clauses thus no sync
             }
             if track_memory:
-                train_metrics['mem'] = MeanMetric(sync_on_compute=True if world_size > 1 else False).to(device)
-            
+                train_metrics["mem"] = MeanMetric(
+                    sync_on_compute=True if world_size > 1 else False
+                ).to(device)
+
             super().__init__(metrics=train_metrics)
-    
 
     class EvalMetrics(Metrics):
         """Evaluation metrics based on the model output, using noise level"""
+
         def __init__(self, device, num_eval_noise_levels: int, world_size: int = 1):
             eval_metrics = {
-                f"denoise_lvl{i}": MeanMetric(sync_on_compute=True if world_size > 1 else False).to(device) 
-                for i in range(num_eval_noise_levels) 
+                f"denoise_lvl{i}": MeanMetric(
+                    sync_on_compute=True if world_size > 1 else False
+                ).to(device)
+                for i in range(num_eval_noise_levels)
             }
             super().__init__(metrics=eval_metrics)
-    
 
     def initialize_train_state(self) -> SD:
         """Initializes the train state with EMA and model params
-        
+
         Those states are tracked at every iteration step
         """
         return train_states.DenoisingModelTrainState(
@@ -317,9 +318,9 @@ class DenoisingTrainer(BasicTrainer[M, SD]):
             model=self.model.denoiser if self.store_ema else None,
             step=0,
             ema_decay=self.ema_decay,
-            store_ema=self.store_ema
+            store_ema=self.store_ema,
         )
-    
+
     @compute_memory
     def train_step(self, batch: BatchType) -> Metrics:
 
@@ -337,9 +338,8 @@ class DenoisingTrainer(BasicTrainer[M, SD]):
             self.optimizer.step()
 
         self.update_train_state()
-        
+
         return metrics
-    
 
     def update_train_state(self) -> SD:
         """Update the training state, including optimizer and parameters."""
@@ -354,19 +354,18 @@ class DenoisingTrainer(BasicTrainer[M, SD]):
 
         # Further states can be replaced at every training step
         return self.train_state.replace(
-            step=next_step,
-            ema=ema_params if self.store_ema else None
+            step=next_step, ema=ema_params if self.store_ema else None
         )
-    
+
     @staticmethod
     def inference_fn_from_state_dict(
         state: SD,
         denoiser: nn.Module,
         *args,
         use_ema: bool = False,
-        task: str = 'solver',
+        task: str = "solver",
         lead_time: bool = False,
-        **kwargs
+        **kwargs,
     ):
         denoiser.eval()
         if use_ema:
@@ -376,4 +375,6 @@ class DenoisingTrainer(BasicTrainer[M, SD]):
             else:
                 raise ValueError("EMA model is None or not initialized")
 
-        return dfn_lib.DenoisingModel.inference_fn(denoiser, task, lead_time, *args, **kwargs)
+        return dfn_lib.DenoisingModel.inference_fn(
+            denoiser, task, lead_time, *args, **kwargs
+        )

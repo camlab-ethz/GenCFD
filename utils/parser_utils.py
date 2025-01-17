@@ -54,6 +54,7 @@ def add_base_options(parser: ArgumentParser):
     group.add_argument("--use_mixed_precision", default=True, type=str_to_bool,
                        help="For memory efficiency activate mixed precision calculations")
 
+
 def add_parallelization_options(parser: ArgumentParser):
     """Arguments for Distributed Training"""
     
@@ -68,19 +69,27 @@ def add_data_options(parser: ArgumentParser):
     """Relevant parser arguments for the dataloader"""
 
     group = parser.add_argument_group('dataset')
-    group.add_argument("--dataset", default='DataIC_Vel', type=str,
-                       choices=[
-                            # Datasets for Training
-                            'ShearLayer2D', 'CloudShock2D',
-                            'RichtmyerMeshkov2D',
-                            'ShearLayer3D', 'TaylorGreen3D',
-                            'Nozzle3D',
-                            # Conditional (Perturbed) Datasets for Evaluation
-                            'ConditionalShearLayer2D', 'ConditionalCloudShock2D',
-                            'ConditionalShearLayer3D', 'ConditionalTaylorGreen3D',
-                            'ConditionalNozzle3D'
-                        ],
-                       help="Name of the dataset, available choices")
+    group.add_argument(
+        "--dataset",
+        default="ShearLayer2D",
+        type=str,
+        choices=[
+            # Datasets for Training
+            "ShearLayer2D",
+            "CloudShock2D",
+            "RichtmyerMeshkov2D",
+            "ShearLayer3D",
+            "TaylorGreen3D",
+            "Nozzle3D",
+            # Conditional (Perturbed) Datasets for Evaluation
+            "ConditionalShearLayer2D",
+            "ConditionalCloudShock2D",
+            "ConditionalShearLayer3D",
+            "ConditionalTaylorGreen3D",
+            "ConditionalNozzle3D",
+        ],
+        help="Name of the dataset, available choices",
+    )
     group.add_argument("--batch_size", default=5, type=int, help="Choose a batch size")
     group.add_argument("--worker", default=0, type=int,
                        help="Choose the number of worker for parallel processing")
@@ -211,7 +220,8 @@ def add_training_options(parser: ArgumentParser):
                        help="Saves a checkpoint of the model and optimizer after every n steps")
     group.add_argument('--track_memory', action='store_true', default=False,
                        help='If True, memory tracer during training is activated else returns zeros.')
-    
+
+
 def add_sampler_options(parser: ArgumentParser):
     """Parser arguments for the sampler"""
 
@@ -243,7 +253,8 @@ def add_sde_options(parser: ArgumentParser):
                        help='Defines the index where the time axis should be placed')
     group.add_argument('--terminal_only', default=True, type=str_to_bool,
                        help='If set to False returns the full path otherwise only the terminal state')
-    
+
+
 def add_evaluation_options(parser: ArgumentParser):
     """Parser arguments to compute Metrics for the inference pipeline"""
     group = parser.add_argument_group('evaluation')
@@ -255,6 +266,7 @@ def add_evaluation_options(parser: ArgumentParser):
                        help="If True an image of a single generated result will be stored")
     group.add_argument('--save_gen_samples', action='store_true', default=False,
                        help="If True an npz file with generated and groundtruth samples will be stored")
+
 
 def train_args():
     """Define the Parser for the training"""

@@ -23,6 +23,7 @@ from torch import nn
 Tensor = torch.Tensor
 SdeParams = Mapping[str, Any]
 
+
 class SdeCoefficientFn(Protocol):
     """A callable type for the drift or diffusion coefficients of an SDE."""
 
@@ -30,40 +31,41 @@ class SdeCoefficientFn(Protocol):
         """Evaluates the drift or diffusion coefficients."""
         ...
 
+
 class SdeDynamics(NamedTuple):
     """The drift and diffusion functions that represents the SDE dynamics."""
 
     drift: SdeCoefficientFn
     diffusion: SdeCoefficientFn
 
+
 def _check_sde_params_fields(params: SdeParams) -> None:
     if not ("drift" in params.keys() and "diffusion" in params.keys()):
-        raise ValueError(
-            "'params' must contain both 'drift' and 'diffusion' fields."
-        )
-    
+        raise ValueError("'params' must contain both 'drift' and 'diffusion' fields.")
+
+
 def output_drift(
-        drift: SdeCoefficientFn, 
-        x: Tensor, 
-        t: Tensor, 
-        params: SdeParams, 
-        y: Tensor = None, 
-        lead_time: Tensor = None
-    ) -> Tensor:
-    """Evaluate if y or the lead time is required and output the corresponding 
+    drift: SdeCoefficientFn,
+    x: Tensor,
+    t: Tensor,
+    params: SdeParams,
+    y: Tensor = None,
+    lead_time: Tensor = None,
+) -> Tensor:
+    """Evaluate if y or the lead time is required and output the corresponding
     result
     """
     if y is None and lead_time is None:
         return drift(x=x, t=t, params=params)
     elif y is not None and lead_time is None:
-        return drift(x=x, t=t,params=params, y=y)
+        return drift(x=x, t=t, params=params, y=y)
     elif y is not None and lead_time is not None:
-        return drift(x=x, t=t,params=params, y=y, lead_time=lead_time)
+        return drift(x=x, t=t, params=params, y=y, lead_time=lead_time)
 
-  
+
 class SdeSolver(nn.Module):
     """A callable type implementation a SDE solver.
-    
+
     Attributes:
       terminal_only: If 'True' the solver only returns the terminal state,
         i.e., corresponding to the last time stamp in 'tspan'. If 'False',
@@ -75,13 +77,13 @@ class SdeSolver(nn.Module):
         self.terminal_only = terminal_only
 
     def forward(
-            self,
-            dynamics: SdeDynamics,
-            x0: Tensor,
-            tspan: Tensor,
-            y: Tensor = None,
-            lead_time: Tensor = None
-      ) -> Tensor:
+        self,
+        dynamics: SdeDynamics,
+        x0: Tensor,
+        tspan: Tensor,
+        y: Tensor = None,
+        lead_time: Tensor = None,
+    ) -> Tensor:
         """Solves an SDE at given time stamps.
 
         Args:
@@ -95,49 +97,45 @@ class SdeSolver(nn.Module):
           Integrated SDE trajectory (initial condition included at time position 0).
         """
         raise NotImplementedError
-    
+
 
 class IterativeSdeSolver(nn.Module):
     """A SDE solver based on an iterative step function using PyTorch
-    
+
     Attributes:
       time_axis_pos: The index where the time axis should be placed. Defaults
       to the lead axis (index 0).
     """
 
-    def __init__(
-            self,
-            time_axis_pos: int = 0, 
-            terminal_only: bool = False
-    ):
+    def __init__(self, time_axis_pos: int = 0, terminal_only: bool = False):
         super().__init__()
         self.time_axis_pos = time_axis_pos
         self.terminal_only = terminal_only
 
     def step(
-            self,
-            dynamics: SdeDynamics,
-            x0: Tensor,
-            t0: Tensor,
-            dt: Tensor,
-            params: SdeParams,
-            y: Tensor = None,
-            lead_time: Tensor = None
+        self,
+        dynamics: SdeDynamics,
+        x0: Tensor,
+        t0: Tensor,
+        dt: Tensor,
+        params: SdeParams,
+        y: Tensor = None,
+        lead_time: Tensor = None,
     ) -> Tensor:
         """Advances the current state one step forward in time."""
         raise NotImplementedError
 
     def forward(
-            self,
-            dynamics: SdeDynamics,
-            x0: Tensor,
-            tspan: Tensor,
-            params: SdeParams,
-            y: Tensor = None,
-            lead_time: Tensor = None
+        self,
+        dynamics: SdeDynamics,
+        x0: Tensor,
+        tspan: Tensor,
+        params: SdeParams,
+        y: Tensor = None,
+        lead_time: Tensor = None,
     ) -> Tensor:
         """Solves an SDE by iterating the step function."""
-        
+
         if not self.terminal_only:
             # store the entire path
             x_path = [x0]
@@ -148,18 +146,18 @@ class IterativeSdeSolver(nn.Module):
             t_next = tspan[i + 1]
             dt = t_next - t0
             current_state = self.step(
-                dynamics=dynamics, 
-                x0=current_state, 
-                t0=t0, 
-                dt=dt, 
+                dynamics=dynamics,
+                x0=current_state,
+                t0=t0,
+                dt=dt,
                 params=params,
                 y=y,
-                lead_time=lead_time
-            ).detach() # to avoid memory issues!
+                lead_time=lead_time,
+            ).detach()  # to avoid memory issues!
 
             if not self.terminal_only:
                 x_path.append(current_state)
-        
+
         if self.terminal_only:
             return current_state
         else:
@@ -167,20 +165,20 @@ class IterativeSdeSolver(nn.Module):
             if self.time_axis_pos != 0:
                 out = out.movedim(0, self.time_axis_pos)
             return out
-    
+
 
 class EulerMaruyamaStep(nn.Module):
     """The Euler-Maruyama scheme for integrating the Ito SDE"""
 
     def step(
-            self,
-            dynamics: SdeDynamics,
-            x0: Tensor,
-            t0: Tensor,
-            dt: Tensor,
-            params: SdeParams,
-            y: Tensor = None,
-            lead_time: Tensor = None
+        self,
+        dynamics: SdeDynamics,
+        x0: Tensor,
+        t0: Tensor,
+        dt: Tensor,
+        params: SdeParams,
+        y: Tensor = None,
+        lead_time: Tensor = None,
     ) -> Tensor:
         """Makes one Euler-Maruyama integration step in time."""
         _check_sde_params_fields(params)
@@ -191,27 +189,24 @@ class EulerMaruyamaStep(nn.Module):
             y=y,
             t=t0,
             params=params["drift"],
-            lead_time=lead_time
+            lead_time=lead_time,
         )
         diffusion_coeffs = dynamics.diffusion(x0, t0, params["diffusion"])
 
-        noise = torch.randn(
-            size=x0.shape, dtype=x0.dtype, device=x0.device
-        )
+        noise = torch.randn(size=x0.shape, dtype=x0.dtype, device=x0.device)
         return (
-            x0 + 
-            dt * drift_coeffs + 
+            x0
+            + dt * drift_coeffs
+            +
             # abs to enable integration backward in time
             diffusion_coeffs * noise * torch.sqrt(torch.abs(dt))
         )
-    
+
+
 class EulerMaruyama(EulerMaruyamaStep, IterativeSdeSolver):
     """Solver using the Euler-Maruyama with iteration (i.e. looping through time steps)."""
-    def __init__(
-            self,
-            time_axis_pos: int = 0, 
-            terminal_only: bool = False
-        ):
+
+    def __init__(self, time_axis_pos: int = 0, terminal_only: bool = False):
         super().__init__()
         # EulerMaruyamaStep.__init__(self, rng=rng)
         IterativeSdeSolver.__init__(
