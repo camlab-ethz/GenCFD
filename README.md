@@ -175,7 +175,8 @@ For more details, please refer to their original work: [swirl-dynamics](https://
 If you use this code or find it helpful in your research, please cite the following paper:<br>
 @misc{molinaro2024generativeaifastaccurate,<br>
       &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;title={Generative AI for fast and accurate Statistical Computation of Fluids},<br>
-      &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;author={Roberto Molinaro and Samuel Lanthaler and Bogdan Raonić and Tobias Rohner and Victor Armegioiu and Zhong Yi Wan and Fei Sha and Siddhartha Mishra and &Leonardo Zepeda-Núñez},<br>
+      &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;author={Roberto Molinaro and Samuel Lanthaler and Bogdan Raonić and Tobias Rohner and Victor Armegioiu <br>
+      &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;and Zhong Yi Wan and Fei Sha and Siddhartha Mishra and &Leonardo Zepeda-Núñez},<br>
       &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;year={2024},<br>
       &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;eprint={2409.18359},<br>
       &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;archivePrefix={arXiv},<br>
