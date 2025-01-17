@@ -18,7 +18,7 @@
 from typing import Any, Sequence
 import torch
 import torch.nn as nn
-from model.building_blocks.layers.upsample import ChannelToSpace
+from model.building_blocks.layers.upsample import ChannelToSpace, LearnablePixelShuffle3D, TransposeConv3D
 from model.building_blocks.layers.residual import CombineResidualWithSkip
 from model.building_blocks.layers.convolutions import ConvLayer
 from model.building_blocks.blocks.convolution_blocks import ConvBlock
@@ -149,6 +149,7 @@ class UStack(nn.Module):
                             attention_axes=attn_axes,
                             add_position_embedding=self.use_position_encoding,
                             num_heads=self.num_heads,
+                            normalize_qk=self.normalize_qk,
                             dtype=self.dtype,
                             device=self.device
                         )
@@ -214,7 +215,7 @@ class UStack(nn.Module):
 
         for level, channel in enumerate(self.num_channels):
             for block_id in range(self.num_res_blocks[level]):
-                # Residual 
+                # Residual
                 h = self.residual_blocks[level][block_id](residual=h, skip=skips.pop())
                 # Convolution Blocks
                 h = self.conv_blocks[level][block_id](h, emb)

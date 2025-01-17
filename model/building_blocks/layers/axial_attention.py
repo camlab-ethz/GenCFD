@@ -88,6 +88,50 @@ class AddAxialPositionEmbedding(nn.Module):
         return inputs + embedding
 
 
+class SelfAttention(nn.Module):
+    def __init__(self, 
+            dim, 
+            heads, 
+            dim_heads = None,
+            dtype: torch.dtype = torch.float32,
+            device: torch.device = None):
+        super().__init__()
+
+        self.dim_heads = (dim // heads) if dim_heads is None else dim_heads
+        dim_hidden = self.dim_heads * heads
+
+        self.device = device
+        self.dtype = dtype
+
+        self.heads = heads
+        self.to_q = nn.Linear(dim, dim_hidden, bias = False, device=self.device, dtype=self.dtype)
+        self.to_kv = nn.Linear(dim, 2 * dim_hidden, bias = False, device=self.device, dtype=self.dtype)
+        self.to_out = nn.Linear(dim_hidden, dim, device=self.device, dtype=self.dtype)
+
+        # self._initialize_weights()
+
+    def _initialize_weights(self):
+        """Initialize weights using Xavier uniform distribution."""
+        torch.nn.init.xavier_uniform_(self.to_q.weight)
+        torch.nn.init.xavier_uniform_(self.to_kv.weight)
+        torch.nn.init.xavier_uniform_(self.to_out.weight)
+
+    def forward(self, query, kv = None):
+        kv = query if kv is None else kv
+        q, k, v = (self.to_q(query), *self.to_kv(kv).chunk(2, dim=-1))
+
+        b, t, d, h, e = *q.shape, self.heads, self.dim_heads
+        merge_heads = lambda query: query.reshape(b, -1, h, e).transpose(1, 2).reshape(b * h, -1, e)
+        q, k, v = map(merge_heads, (q, k, v))
+        dots = torch.einsum('bie,bje->bij', q, k) * (e ** -0.5)
+        dots = dots.softmax(dim=-1)
+        out = torch.einsum('bij,bje->bie', dots, v)
+
+        out = out.reshape(b, h, -1, e).transpose(1, 2).reshape(b, -1, d)
+        out = self.to_out(out)
+        return out
+
+
 class AxialSelfAttention(nn.Module):
     """Axial self-attention for multidimensional inputs."""
 
@@ -97,8 +141,9 @@ class AxialSelfAttention(nn.Module):
                  attention_axis: int = -2,
                  dropout: float = 0.0,
                  normalize_qk: bool = False,
+                 use_simple_attention: bool = False,
                  dtype: torch.dtype = torch.float32,
-                 device: torch.device = None
+                 device: torch.device | None = None
         ):
         super(AxialSelfAttention, self).__init__()
         self.emb_dim = emb_dim
@@ -109,14 +154,22 @@ class AxialSelfAttention(nn.Module):
         self.dtype = dtype 
         self.device = device
 
-        self.attention = MultiHeadDotProductAttention(
-            emb_dim=self.emb_dim,
-            num_heads=self.num_heads,
-            normalize_qk=self.normalize_qk,
-            dropout=self.dropout,
-            device=self.device,
-            dtype=self.dtype
-        )
+        if use_simple_attention:
+            self.attention = SelfAttention(
+                dim=self.emb_dim,
+                heads=self.num_heads,
+                device=self.device,
+                dtype=self.dtype
+            )
+        else:
+            self.attention = MultiHeadDotProductAttention(
+                emb_dim=self.emb_dim,
+                num_heads=self.num_heads,
+                normalize_qk=self.normalize_qk,
+                dropout=self.dropout,
+                device=self.device,
+                dtype=self.dtype
+            )
 
 
     def forward(self, inputs: Tensor) -> Tensor:

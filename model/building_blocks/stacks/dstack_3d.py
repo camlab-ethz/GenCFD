@@ -143,6 +143,7 @@ class DStack(nn.Module):
                     attention_axes=attn_axes,
                     add_position_embedding=self.use_position_encoding,
                     num_heads=self.num_heads,
+                    normalize_qk=self.normalize_qk,
                     dtype=self.dtype,
                     device=self.device
                 )

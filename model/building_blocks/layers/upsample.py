@@ -22,6 +22,7 @@ import math
 import torch.nn as nn
 import numpy as np
 from typing import Sequence
+from model.building_blocks.layers.convolutions import ConvLayer
 
 from utils.model_utils import reshape_jax_torch
 
@@ -61,11 +62,9 @@ class ChannelToSpace(nn.Module):
     self.block_shape = block_shape
     self.in_channels = in_channels
     self.kernel_dim = kernel_dim
-
     # Since also here a transformation happens from (bs, c, w, h, d) -> (bs, d, h, w, c)
     # Thus for the spatial_resolution: (w, h, d) -> (d, h, w)
     spatial_resolution = spatial_resolution[::-1]
-
     self.spatial_resolution = spatial_resolution
     self.input_dim = kernel_dim + 2 # batch size and channel dimensions are added
 
@@ -109,3 +108,110 @@ class ChannelToSpace(nn.Module):
     reshaped_tensor = torch.reshape(x, self.new_shape)
     
     return reshape_jax_torch(reshaped_tensor, self.kernel_dim)
+
+
+
+class LearnablePixelShuffle3D(nn.Module):
+  """
+  Learnable 3D Pixel Shuffle: Combines deterministic channel-to-space rearrangement
+  with a learnable convolution for added flexibility.
+  """
+  def __init__(
+      self, 
+      in_channels: int, 
+      upscale_factor: int,
+      kernel_dim: int,
+      padding_method: str,
+      dtype: torch.dtype = torch.float32,
+      device: torch.device = None
+    ):
+
+    """
+    Args:
+        in_channels: Number of input channels.
+        upscale_factor: Factor by which to upscale spatial dimensions.
+    """
+    super(LearnablePixelShuffle3D, self).__init__()
+
+    # Check divisibility
+    block_size = upscale_factor**3
+    if in_channels % block_size != 0:
+      raise ValueError(
+        f"Input channels ({in_channels}) must be divisible by "
+        f"block_size ({block_size})."
+      )
+    
+    self.upscale_factor = upscale_factor
+    self.in_channels = in_channels
+    self.block_size = block_size
+
+    self.padding_method = padding_method
+    self.dtype = dtype
+    self.device = device
+    self.kernel_dim = kernel_dim
+
+    # Determine reshaped channels
+    self.reshaped_channels = in_channels // block_size
+
+    # Learnable convolution after reshaping
+    # self.learnable_conv = ConvLayer(
+    #   in_channels=self.reshaped_channels,
+    #   out_channels=self.reshaped_channels,
+    #   kernel_size=self.kernel_dim * (3,),
+    #   padding_mode=self.padding_method,
+    #   padding=1,
+    #   case = self.kernel_dim,
+    #   dtype=self.dtype,
+    #   device=self.device
+    # )
+
+  def forward(self, x):
+      """
+      Args:
+          x: Input tensor of shape (batch, in_channels, depth, height, width).
+      Returns:
+          Tensor after learnable pixel shuffle.
+      """
+      batch_size, c, d, h, w = x.shape
+
+      # Step 1: Reshape channels to spatial dimensions
+      upscale = self.upscale_factor
+
+      reshaped = x.view(
+          batch_size,
+          self.reshaped_channels,
+          upscale, upscale, upscale,
+          d, h, w
+      )
+
+      reshaped = reshaped.permute(0, 1, 5, 2, 6, 3, 7, 4).contiguous()
+
+      reshaped = reshaped.view(
+          batch_size,
+          self.reshaped_channels,
+          d * upscale,
+          h * upscale,
+          w * upscale
+      )
+
+      # Step 2: Learnable convolution
+      # out = self.learnable_conv(reshaped)
+      # return out
+      return reshaped
+
+
+class TransposeConv3D(nn.Module):
+    def __init__(self, in_channels, out_channels, upscale_factor, dtype, device):
+        super().__init__()
+        self.trans_conv = nn.ConvTranspose3d(
+            in_channels=in_channels,
+            out_channels=out_channels,
+            kernel_size=upscale_factor,
+            stride=upscale_factor,
+            padding=0,
+            dtype=dtype,
+            device=device
+        )
+
+    def forward(self, x):
+        return self.trans_conv(x)

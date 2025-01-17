@@ -42,10 +42,13 @@ class MultiHeadDotProductAttention(nn.Module):
                 "Embedding Dimension must be divisible through the number of heads"
                 )
         self.multihead_attention = nn.MultiheadAttention(
-            embed_dim=self.emb_dim, num_heads=self.num_heads, 
-            dropout=dropout, batch_first=True,
-            device=self.device, dtype=self.dtype
-            )
+            embed_dim=self.emb_dim, 
+            num_heads=self.num_heads, 
+            dropout=dropout, 
+            batch_first=True,
+            device=self.device, 
+            dtype=self.dtype
+        )
         
         self._init_weights()
 
@@ -79,7 +82,7 @@ class MultiHeadDotProductAttention(nn.Module):
             value = key
 
         if self.normalize_qk:
-            # normalization across the feature dimension
+            # L2 normalization across the feature dimension
             query = F.normalize(query, p=2, dim=-1)
             key = F.normalize(key, p=2, dim=-1)
 

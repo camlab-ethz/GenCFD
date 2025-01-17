@@ -74,7 +74,7 @@ def summarize_metric_results(
 
     # Compute average Wasserstein distances
     wasserstein_distance_torch = compute_average_wasserstein(
-        num_particles=stats_recorder.num_samples,
+        monte_carlo_samples=stats_recorder.monte_carlo_samples,
         channels=stats_recorder.channels,
         gen_samples=gen_monte_carlo_samples,
         gt_samples=gt_monte_carlo_samples,

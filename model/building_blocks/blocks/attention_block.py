@@ -88,6 +88,7 @@ class AxialSelfAttentionBlock(nn.Module):
             attention_axes: int | Sequence[int] = -2,
             add_position_embedding: bool | Sequence[bool] = True,
             num_heads: int | Sequence[int] = 1,
+            normalize_qk: bool = False,
             dtype: torch.dtype = torch.float32,
             device: torch.device = None
         ):
@@ -97,6 +98,7 @@ class AxialSelfAttentionBlock(nn.Module):
         self.dtype = dtype
         self.device = device
         self.kernel_dim = len(spatial_resolution)
+        self.normalize_qk = normalize_qk
 
         # permute spatial resolution since the following transformation in the 3D case is being done:
         # (bs, c, w, h, d) -> (bs, d, h, w, c) thus the resolution changes (w, h, d) -> (d, h, w)
@@ -141,13 +143,14 @@ class AxialSelfAttentionBlock(nn.Module):
                     dtype=self.dtype
                 )
             )
-
+            
             self.attention_layers.append(
                 AxialSelfAttention(
                     emb_dim=self.in_channels,
                     num_heads=num_head,
                     attention_axis=axis,
                     dropout=0.1,
+                    normalize_qk=self.normalize_qk,
                     dtype=self.dtype,
                     device=self.device
                 )

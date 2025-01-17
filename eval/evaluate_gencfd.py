@@ -29,8 +29,7 @@ from train.train_states import DenoisingModelTrainState
 from train.trainers import DenoisingTrainer
 from utils.parser_utils import inference_args
 from utils.gencfd_utils import (
-    get_dataset_loader, 
-    get_dataset, 
+    get_dataset_loader,
     create_denoiser,
     create_sampler,
     get_latest_checkpoint,
@@ -112,7 +111,6 @@ if __name__=="__main__":
         split=False
     )
 
-    input_shape = dataset.input_shape
     out_shape = dataset.output_shape
     spatial_resolution = dataset.spatial_resolution
 
@@ -126,7 +124,7 @@ if __name__=="__main__":
                 f"spatial_resolution should be {tuple(train_args['spatial_resolution'])} " \
                 f"and not {spatial_resolution}"
             assert out_shape == tuple(train_args['out_shape']), \
-                f"out_shape should be {tuple(train_args['input_shape'])} and not {out_shape}"
+                f"out_shape should be {tuple(train_args['out_shape'])} and not {out_shape}"
     
     # Dummy buffer values, for initialization! Necessary to load the model parameters
     buffer_dict = get_buffer_dict(dataset=dataset, create_dummy=True)
@@ -210,7 +208,6 @@ if __name__=="__main__":
     # Construct the inference function
     denoise_fn = trainer.inference_fn_from_state_dict(
         trained_state, 
-        use_ema=False, # Already handled in restore_from_checkpoint
         denoiser=denoising_model.denoiser, 
         task=args.task,
         lead_time=time_cond
@@ -252,7 +249,7 @@ if __name__=="__main__":
         channels=dataset.output_channel, 
         data_shape=out_shape,
         monte_carlo_samples=args.monte_carlo_samples if args.world_size <= 1 else effective_samples // args.world_size,
-        num_samples= 4, # Choose 1000 random pixel values
+        num_samples= 1000,
         device=device,
         world_size=args.world_size
     )

@@ -21,6 +21,7 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from eval.metrics.stats_recorder import StatsRecorder
+from dataloader.dataset import TrainingSetBase
 from utils.dataloader_utils import normalize, denormalize
 from utils.model_utils import reshape_jax_torch
 from utils.eval_utils import summarize_metric_results
@@ -36,7 +37,7 @@ def run(
     stats_recorder: StatsRecorder,
     # Dataset configs
     dataloader: DataLoader,
-    dataset_module: str,
+    dataset: TrainingSetBase,
     time_cond: bool,
     # Eval configs
     compute_metrics: bool = False,
@@ -61,8 +62,7 @@ def run(
             helping to mitigate computational demand during inference.
         stats_recorder (StatsRecorder): An object for recording evaluation statistics.
         dataloader (DataLoader): Initialized PyTorch DataLoader for batching the dataset.
-        dataset (TrainingSetBase): The dataset class containing input and output channels.
-        dataset_module (str): The name of the dataset module being used.
+        dataset (TrainingSetBase): The dataset class containing input and output channels as well as masking tensors
         time_cond (bool): Flag indicating whether the dataset has a time dependency.
         compute_metrics (bool, optional): If True, performs the Monte Carlo simulation to compute and 
             store metrics in the specified directory. Defaults to False.
@@ -75,14 +75,6 @@ def run(
         None
     """
     batch_size = dataloader.batch_size
-
-    # first check if the correct dataset is used to compute statistics
-    # if dataset_module not in [
-    #     'ConditionalDataIC_Vel', 'ConditionalDataIC_Cloud_Shock_2D',
-    #     'ConditionalDataIC_3D', 'ConditionalDataIC_3D_TG'
-    # ]:
-    #     if (world_size > 1 and local_rank == 0) or world_size == 1:
-    #         raise ValueError(f"To compute statistics use a conditional dataset, not {dataset_module}!")
     
     # To store either visualization or metric results a save_dir needs to be specified
     cwd = os.getcwd()
@@ -106,8 +98,6 @@ def run(
         if (world_size > 1 and local_rank == 0) or world_size == 1:
             progress_bar = tqdm(total=monte_carlo_samples, desc="Evaluating Monte Carlo Samples")
         
-        # for i in range(n_iter):
-        # for i in tqdm(range(n_iter), desc="Evaluating Monte Carlo Samples"):
         for i in range(n_iter):
             # run n_iter number of iterations
             batch = next(dataloader)
@@ -148,6 +138,9 @@ def run(
             )
 
             # solutions are stored with shape (bs, c, z, y, x)
+            # mask = dataset.get_mask().unsqueeze(0).unsqueeze(0).cuda()
+            # u = u * mask
+
             stats_recorder.update_step(u_gen, u)
 
             if (world_size > 1 and local_rank == 0) or world_size == 1:
@@ -163,6 +156,8 @@ def run(
         
         if (world_size > 1 and local_rank == 0) or world_size == 1:
             summarize_metric_results(stats_recorder, save_dir)
+            np.savez("gen_samples.npz", data=stats_recorder.gen_samples.cpu().numpy())
+            np.savez("gt_samples.npz", data=stats_recorder.gt_samples.cpu().numpy())
 
     if visualize or save_gen_samples:
         # Run a single run to visualize results without computing metrics
@@ -203,7 +198,9 @@ def run(
             )
         )
 
-        # Store results
+        # mask = dataset.get_mask().unsqueeze(0).unsqueeze(0).cuda()
+        # u = u * mask
+
         if save_gen_samples and (local_rank == 0 or local_rank == -1):
             # Put results on CPU first before storing them
             u_gen_np = u_gen.cpu().numpy() 
@@ -214,7 +211,6 @@ def run(
             np.savez(save_path, gen_sample=u_gen_np, gt_sample=u_np)
             print(f"Samples drawn from a uniform distribution are stored as {save_path}")
 
-        # Visualize results
         elif visualize and (local_rank == 0 or local_rank == -1):
             # Visualize the results instead!
             ndim = u_gen.ndim
