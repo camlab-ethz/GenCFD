@@ -22,9 +22,9 @@ import math
 import torch.nn as nn
 import numpy as np
 from typing import Sequence
-from model.building_blocks.layers.convolutions import ConvLayer
+from GenCFD.model.building_blocks.layers.convolutions import ConvLayer
 
-from utils.model_utils import reshape_jax_torch
+from GenCFD.utils.model_utils import reshape_jax_torch
 
 Tensor = torch.Tensor
 

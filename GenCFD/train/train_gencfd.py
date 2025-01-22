@@ -25,15 +25,15 @@ from torch.distributed import is_initialized
 from torch import optim
 from torch.utils.tensorboard import SummaryWriter
 
-from train import training_loop
-from utils.gencfd_utils import (
+from GenCFD.train import training_loop
+from GenCFD.utils.gencfd_utils import (
     get_dataset_loader,
     get_buffer_dict,
     create_denoiser,
     create_callbacks,
     save_json_file,
 )
-from utils.parser_utils import train_args
+from GenCFD.utils.parser_utils import train_args
 
 torch.set_float32_matmul_precision("high")  # Better performance on newer GPUs!
 torch.backends.cudnn.benchmark = True

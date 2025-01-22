@@ -18,7 +18,7 @@
 # ********************
 import torch
 from typing import Protocol
-from diffusion import diffusion
+from GenCFD.diffusion import diffusion
 
 Tensor = torch.Tensor
 

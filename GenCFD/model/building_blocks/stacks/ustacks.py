@@ -24,11 +24,11 @@ import torchvision.transforms.functional as TF
 from torchvision.transforms.functional import InterpolationMode
 from torchvision.transforms import ToPILImage, ToTensor
 
-from model.building_blocks.layers.residual import CombineResidualWithSkip
-from model.building_blocks.layers.convolutions import ConvLayer
-from model.building_blocks.blocks.convolution_blocks import ConvBlock, ResConv1x
-from model.building_blocks.blocks.attention_block import AttentionBlock
-from utils.model_utils import reshape_jax_torch, default_init
+from GenCFD.model.building_blocks.layers.residual import CombineResidualWithSkip
+from GenCFD.model.building_blocks.layers.convolutions import ConvLayer
+from GenCFD.model.building_blocks.blocks.convolution_blocks import ConvBlock, ResConv1x
+from GenCFD.model.building_blocks.blocks.attention_block import AttentionBlock
+from GenCFD.utils.model_utils import reshape_jax_torch, default_init
 
 Tensor = torch.Tensor
 

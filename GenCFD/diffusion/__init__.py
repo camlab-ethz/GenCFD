@@ -17,7 +17,7 @@
 # pylint: disable=g-importing-member
 # pylint: disable=g-multiple-import
 
-from diffusion.diffusion import (
+from GenCFD.diffusion.diffusion import (
     Diffusion,
     InvertibleSchedule,
     NoiseLevelSampling,
@@ -33,14 +33,14 @@ from diffusion.diffusion import (
     tangent_noise_schedule,
     time_uniform_sampling,
 )
-from diffusion.guidance import (
+from GenCFD.diffusion.guidance import (
     ClassifierFreeHybrid,
     InfillFromSlices,
     Transform as GuidanceTransform,
 )
-from diffusion.samplers import DenoiseFn, Sampler, ScoreFn, SdeSampler
+from GenCFD.diffusion.samplers import DenoiseFn, Sampler, ScoreFn, SdeSampler
 
-from diffusion.schedulers import (
+from GenCFD.diffusion.schedulers import (
     TimeStepScheduler,
     edm_noise_decay,
     exponential_noise_decay,
@@ -50,4 +50,4 @@ from diffusion.schedulers import (
 # from model.building_blocks.unets.unets import UNet
 # from model.building_blocks.unets.unets import PreconditionedDenoiser as PreconditionedDenoiserUNet
 
-from model.probabilistic_diffusion.denoising_model import DenoisingModel
+from GenCFD.model.probabilistic_diffusion.denoising_model import DenoisingModel

@@ -26,23 +26,23 @@ from torch.utils.data import DataLoader, random_split
 from torch.utils.data.distributed import DistributedSampler
 from torch.nn.parallel import DistributedDataParallel as DDP
 
-from model.building_blocks.unets.unets import UNet, PreconditionedDenoiser
-from model.building_blocks.unets.unets3d import UNet3D, PreconditionedDenoiser3D
-from model.probabilistic_diffusion.denoising_model import DenoisingModel
-from utils.model_utils import get_model_args, get_denoiser_args
-from utils.diffusion_utils import (
+from GenCFD.model.building_blocks.unets.unets import UNet, PreconditionedDenoiser
+from GenCFD.model.building_blocks.unets.unets3d import UNet3D, PreconditionedDenoiser3D
+from GenCFD.model.probabilistic_diffusion.denoising_model import DenoisingModel
+from GenCFD.utils.model_utils import get_model_args, get_denoiser_args
+from GenCFD.utils.diffusion_utils import (
     get_diffusion_scheme,
     get_noise_sampling,
     get_noise_weighting,
     get_sampler_args,
     get_time_step_scheduler,
 )
-from diffusion.diffusion import NoiseLevelSampling, NoiseLossWeighting
-from dataloader.dataset import (
+from GenCFD.diffusion.diffusion import NoiseLevelSampling, NoiseLossWeighting
+from GenCFD.dataloader.dataset import (
     train_test_split,
     TrainingSetBase,
 )
-from dataloader.fluid_flows_3d import (
+from GenCFD.dataloader.fluid_flows_3d import (
     ShearLayer3D,
     TaylorGreen3D,
     Nozzle3D,
@@ -50,10 +50,10 @@ from dataloader.fluid_flows_3d import (
     ConditionalTaylorGreen3D,
     ConditionalNozzle3D,
 )
-from dataloader.metadata import METADATA_CLASSES
-from utils.callbacks import Callback, TqdmProgressBar, TrainStateCheckpoint
-from diffusion.samplers import SdeSampler, Sampler
-from solvers.sde import EulerMaruyama
+from GenCFD.dataloader.metadata import METADATA_CLASSES
+from GenCFD.utils.callbacks import Callback, TqdmProgressBar, TrainStateCheckpoint
+from GenCFD.diffusion.samplers import SdeSampler, Sampler
+from GenCFD.solvers.sde import EulerMaruyama
 
 Tensor = torch.Tensor
 TensorMapping = Dict[str, Tensor]

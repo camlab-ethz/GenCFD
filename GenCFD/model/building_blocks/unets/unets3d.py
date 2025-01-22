@@ -27,11 +27,11 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from utils.model_utils import default_init
-from model.building_blocks.stacks.dstack_3d import DStack
-from model.building_blocks.stacks.ustack_3d import UStack
-from model.building_blocks.embeddings.fourier_emb import FourierEmbedding
-from model.building_blocks.layers.convolutions import ConvLayer
+from GenCFD.utils.model_utils import default_init
+from GenCFD.model.building_blocks.stacks.dstack_3d import DStack
+from GenCFD.model.building_blocks.stacks.ustack_3d import UStack
+from GenCFD.model.building_blocks.embeddings.fourier_emb import FourierEmbedding
+from GenCFD.model.building_blocks.layers.convolutions import ConvLayer
 
 Tensor = torch.Tensor
 

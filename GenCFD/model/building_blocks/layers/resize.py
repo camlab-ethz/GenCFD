@@ -20,7 +20,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from typing import Sequence, Union
 
-from model.building_blocks.layers.convolutions import ConvLayer
+from GenCFD.model.building_blocks.layers.convolutions import ConvLayer
 
 Tensor = torch.Tensor
 

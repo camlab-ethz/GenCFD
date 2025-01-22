@@ -20,12 +20,12 @@ import torch.nn as nn
 import torch.nn.functional as F
 from typing import Any, Sequence
 
-from utils.model_utils import default_init
-from model.building_blocks.stacks.dtstack import DStack
-from model.building_blocks.stacks.ustacks import UpsampleFourierGaussian, UStack
-from model.building_blocks.embeddings.fourier_emb import FourierEmbedding
-from model.building_blocks.layers.residual import CombineResidualWithSkip
-from model.building_blocks.layers.convolutions import ConvLayer
+from GenCFD.utils.model_utils import default_init
+from GenCFD.model.building_blocks.stacks.dtstack import DStack
+from GenCFD.model.building_blocks.stacks.ustacks import UpsampleFourierGaussian, UStack
+from GenCFD.model.building_blocks.embeddings.fourier_emb import FourierEmbedding
+from GenCFD.model.building_blocks.layers.residual import CombineResidualWithSkip
+from GenCFD.model.building_blocks.layers.convolutions import ConvLayer
 
 Tensor = torch.Tensor
 

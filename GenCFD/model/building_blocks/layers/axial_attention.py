@@ -18,7 +18,7 @@
 import torch.nn as nn
 import torch
 
-from model.building_blocks.layers.multihead_attention import (
+from GenCFD.model.building_blocks.layers.multihead_attention import (
     MultiHeadDotProductAttention,
 )
 

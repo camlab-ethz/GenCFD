@@ -18,10 +18,10 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from utils.model_utils import default_init
-from model.building_blocks.layers.convolutions import ConvLayer
-from model.building_blocks.layers.residual import CombineResidualWithSkip
-from model.building_blocks.blocks.adaptive_scaling import AdaptiveScale
+from GenCFD.utils.model_utils import default_init
+from GenCFD.model.building_blocks.layers.convolutions import ConvLayer
+from GenCFD.model.building_blocks.layers.residual import CombineResidualWithSkip
+from GenCFD.model.building_blocks.blocks.adaptive_scaling import AdaptiveScale
 
 Tensor = torch.Tensor
 

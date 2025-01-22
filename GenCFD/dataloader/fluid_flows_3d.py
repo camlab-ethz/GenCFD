@@ -43,7 +43,7 @@ allowing the model to learn dynamics across all possible temporal pairs.
 
 import numpy as np
 import torch
-from dataloader.dataset import TrainingSetBase, ConditionalBase
+from GenCFD.dataloader.dataset import TrainingSetBase, ConditionalBase
 from typing import Union, Tuple, Any, List, Dict
 
 array = np.ndarray

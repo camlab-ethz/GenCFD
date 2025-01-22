@@ -15,9 +15,9 @@
 import os
 import json
 
-from eval.metrics.stats_recorder import StatsRecorder
-from eval.metrics.probabilistic_forecast import relative_L2_norm, absolute_L2_norm
-from eval.metrics.wasserstein import compute_average_wasserstein
+from GenCFD.eval.metrics.stats_recorder import StatsRecorder
+from GenCFD.eval.metrics.probabilistic_forecast import relative_L2_norm, absolute_L2_norm
+from GenCFD.eval.metrics.wasserstein import compute_average_wasserstein
 
 
 def summarize_metric_results(

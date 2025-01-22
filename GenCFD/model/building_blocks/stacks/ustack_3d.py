@@ -18,16 +18,16 @@
 from typing import Any, Sequence
 import torch
 import torch.nn as nn
-from model.building_blocks.layers.upsample import (
+from GenCFD.model.building_blocks.layers.upsample import (
     ChannelToSpace,
     LearnablePixelShuffle3D,
     TransposeConv3D,
 )
-from model.building_blocks.layers.residual import CombineResidualWithSkip
-from model.building_blocks.layers.convolutions import ConvLayer
-from model.building_blocks.blocks.convolution_blocks import ConvBlock
-from model.building_blocks.blocks.attention_block import AxialSelfAttentionBlock
-from utils.model_utils import default_init
+from GenCFD.model.building_blocks.layers.residual import CombineResidualWithSkip
+from GenCFD.model.building_blocks.layers.convolutions import ConvLayer
+from GenCFD.model.building_blocks.blocks.convolution_blocks import ConvBlock
+from GenCFD.model.building_blocks.blocks.attention_block import AxialSelfAttentionBlock
+from GenCFD.utils.model_utils import default_init
 
 Tensor = torch.Tensor
 

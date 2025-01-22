@@ -18,15 +18,15 @@ import torch.nn as nn
 import torch.nn.functional as F
 from typing import Any, Sequence
 
-from model.building_blocks.layers.residual import CombineResidualWithSkip
-from model.building_blocks.layers.multihead_attention import (
+from GenCFD.model.building_blocks.layers.residual import CombineResidualWithSkip
+from GenCFD.model.building_blocks.layers.multihead_attention import (
     MultiHeadDotProductAttention,
 )
-from model.building_blocks.layers.axial_attention import (
+from GenCFD.model.building_blocks.layers.axial_attention import (
     AddAxialPositionEmbedding,
     AxialSelfAttention,
 )
-from utils.model_utils import default_init, reshape_jax_torch
+from GenCFD.utils.model_utils import default_init, reshape_jax_torch
 
 Tensor = torch.Tensor
 

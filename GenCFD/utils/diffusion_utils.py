@@ -14,11 +14,11 @@
 
 from argparse import ArgumentParser
 import torch
-import diffusion.diffusion as dfn_lib
-from diffusion.samplers import DenoiseFn
-from diffusion.schedulers import TimeStepScheduler
-import diffusion.schedulers as schedulers
-from solvers.sde import SdeSolver
+import GenCFD.diffusion.diffusion as dfn_lib
+from GenCFD.diffusion.samplers import DenoiseFn
+from GenCFD.diffusion.schedulers import TimeStepScheduler
+import GenCFD.diffusion.schedulers as schedulers
+from GenCFD.solvers.sde import SdeSolver
 
 
 def get_diffusion_scheme(

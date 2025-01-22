@@ -17,7 +17,7 @@
 # pylint: disable=g-importing-member
 # pylint: disable=g-multiple-import
 
-from solvers.sde import (
+from GenCFD.solvers.sde import (
     EulerMaruyama,
     SdeCoefficientFn,
     SdeDynamics,

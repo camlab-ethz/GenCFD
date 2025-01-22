@@ -20,13 +20,13 @@ import torch.distributed as dist
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-from eval.metrics.stats_recorder import StatsRecorder
-from dataloader.dataset import TrainingSetBase
-from utils.dataloader_utils import normalize, denormalize
-from utils.model_utils import reshape_jax_torch
-from utils.eval_utils import summarize_metric_results
-from utils.visualization_utils import plot_2d_sample, gen_gt_plotter_3d
-from diffusion.samplers import Sampler
+from GenCFD.eval.metrics.stats_recorder import StatsRecorder
+from GenCFD.dataloader.dataset import TrainingSetBase
+from GenCFD.utils.dataloader_utils import normalize, denormalize
+from GenCFD.utils.model_utils import reshape_jax_torch
+from GenCFD.utils.eval_utils import summarize_metric_results
+from GenCFD.utils.visualization_utils import plot_2d_sample, gen_gt_plotter_3d
+from GenCFD.diffusion.samplers import Sampler
 
 
 def run(

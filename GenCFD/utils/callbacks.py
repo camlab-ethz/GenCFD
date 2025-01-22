@@ -24,7 +24,7 @@ import torch
 from torch.utils.tensorboard import SummaryWriter
 import tqdm
 
-from train import trainers
+from GenCFD.train import trainers
 
 Tensor = torch.Tensor
 ComputedMetrics = Mapping[str, Tensor | Mapping[str, Tensor]]

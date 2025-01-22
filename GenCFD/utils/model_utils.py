@@ -16,9 +16,9 @@ import torch
 import torch.nn as nn
 import numpy as np
 from typing import Sequence
-from utils.parser_utils import ArgumentParser
+from GenCFD.utils.parser_utils import ArgumentParser
 
-from diffusion.diffusion import NoiseLevelSampling, NoiseLossWeighting
+from GenCFD.diffusion.diffusion import NoiseLevelSampling, NoiseLossWeighting
 
 Tensor = torch.Tensor
 

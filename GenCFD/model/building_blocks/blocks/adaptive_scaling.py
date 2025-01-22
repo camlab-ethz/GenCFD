@@ -18,7 +18,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from utils.model_utils import default_init
+from GenCFD.utils.model_utils import default_init
 
 Tensor = torch.Tensor
 

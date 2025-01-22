@@ -22,7 +22,7 @@ import torch
 import torch.profiler
 import torch.nn as nn
 import numpy as np
-import diffusion as dfn_lib
+import GenCFD.diffusion as dfn_lib
 
 Tensor = torch.Tensor
 TensorDict = Mapping[str, Tensor]

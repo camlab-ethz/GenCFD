@@ -19,11 +19,11 @@ import torch
 import torch.nn as nn
 from typing import Any, Sequence
 
-from model.building_blocks.layers.convolutions import ConvLayer, DownsampleConv
-from model.building_blocks.blocks.convolution_blocks import ConvBlock, ResConv1x
-from model.building_blocks.blocks.attention_block import AttentionBlock
-from model.building_blocks.embeddings.position_emb import position_embedding
-from utils.model_utils import reshape_jax_torch, default_init
+from GenCFD.model.building_blocks.layers.convolutions import ConvLayer, DownsampleConv
+from GenCFD.model.building_blocks.blocks.convolution_blocks import ConvBlock, ResConv1x
+from GenCFD.model.building_blocks.blocks.attention_block import AttentionBlock
+from GenCFD.model.building_blocks.embeddings.position_emb import position_embedding
+from GenCFD.utils.model_utils import reshape_jax_torch, default_init
 
 Tensor = torch.Tensor
 

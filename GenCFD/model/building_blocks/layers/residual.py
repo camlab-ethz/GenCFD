@@ -21,7 +21,7 @@ import torch.nn.functional as F
 import numpy as np
 import math
 from typing import Any
-from utils.model_utils import reshape_jax_torch
+from GenCFD.utils.model_utils import reshape_jax_torch
 
 Tensor = torch.Tensor
 

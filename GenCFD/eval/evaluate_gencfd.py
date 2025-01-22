@@ -25,10 +25,10 @@ import torch
 import torch.distributed as dist
 from torch import optim
 
-from train.train_states import DenoisingModelTrainState
-from train.trainers import DenoisingTrainer
-from utils.parser_utils import inference_args
-from utils.gencfd_utils import (
+from GenCFD.train.train_states import DenoisingModelTrainState
+from GenCFD.train.trainers import DenoisingTrainer
+from GenCFD.utils.parser_utils import inference_args
+from GenCFD.utils.gencfd_utils import (
     get_dataset_loader,
     create_denoiser,
     create_sampler,
@@ -38,8 +38,8 @@ from utils.gencfd_utils import (
     get_buffer_dict,
     adjust_keys,
 )
-from eval.metrics.stats_recorder import StatsRecorder
-from eval import evaluation_loop
+from GenCFD.eval.metrics.stats_recorder import StatsRecorder
+from GenCFD.eval import evaluation_loop
 
 
 torch.set_float32_matmul_precision("high")  # Better performance on newer GPUs!

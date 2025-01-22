@@ -25,10 +25,10 @@ import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 import numpy as np
 from torchmetrics import MetricCollection, MeanMetric
-from utils.train_utils import StdMetric, compute_memory
+from GenCFD.utils.train_utils import StdMetric, compute_memory
 
-from train import train_states
-import diffusion as dfn_lib
+from GenCFD.train import train_states
+import GenCFD.diffusion as dfn_lib
 
 Tensor = torch.Tensor
 BatchType = Mapping[str, Tensor]

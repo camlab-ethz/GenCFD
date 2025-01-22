@@ -22,8 +22,8 @@ import torch
 from torch.autograd import grad
 import numpy as np
 
-from diffusion import diffusion, guidance
-from solvers import sde
+from GenCFD.diffusion import diffusion, guidance
+from GenCFD.solvers import sde
 
 
 Tensor = torch.Tensor
