@@ -1,46 +1,44 @@
 # Don't store compiled versions of python scripts
 **/__pycache__/
-# ignore data file for the MNIST data used in the demo and the demo itself
-/data
+# ignore the demo
 demo.py
 # ignore data file for the MNIST data used in the demo
-/datasets
+GenCFD/datasets
 # ignore metadata since this is private lab specific information
-/dataloader/metadata.py
+GenCFD/dataloader/metadata.py
 # ignore outputs where the model is stored
-/outputs
+GenCFD/outputs
 # ignore visualization where the visualization results and further analysis is stored
-/visualize
+GenCFD/visualize
 # ignore the dataset folder, data can be stored here
-/dataset
-/dataloader/test.py
-/dataloader/dataset_test.py
+GenCFD/dataloader/test.py
+GenCFD/dataloader/dataset_test.py
 # ignore test file
-/eval/metrics/test_probabilistic_forecast.py
+GenCFD/eval/metrics/test_probabilistic_forecast.py
 # ignore all test files
-/utils/dataloader_utils_test.py
-/utils/model_utils_test.py
-/utils/reshape_utils_test.py
-/utils/train_utils_test.py
-/train/train_states_test.py
-/train/trainers_test.py
-/train/training_loop_test.py
-/solvers/sde_test.py
-/model/building_blocks/blocks/test_all_blocks.py
-/model/building_blocks/embeddings/test_embeddings.py
-/model/building_blocks/layers/axial_attention_test.py
-/model/building_blocks/layers/convolutions_test.py
-/model/building_blocks/layers/multihead_attention_test.py
-/model/building_blocks/layers/residual_test.py
-/model/building_blocks/layers/resize_test.py
-/model/building_blocks/stacks/test_stacks.py
-/model/building_blocks/unets/unets_test.py
-/model/building_blocks/unets/unets3d_test.py
-/model/probabilistic_diffusion/test_models.py
-/diffusion/diffusion_test.py
-/diffusion/guidance_test.py
-/diffusion/samplers_test.py
-/diffusion/schedulers_test.py
+GenCFD/utils/dataloader_utils_test.py
+GenCFD/utils/model_utils_test.py
+GenCFD/utils/reshape_utils_test.py
+GenCFD/utils/train_utils_test.py
+GenCFD/train/train_states_test.py
+GenCFD/train/trainers_test.py
+GenCFD/train/training_loop_test.py
+GenCFD/solvers/sde_test.py
+GenCFD/model/building_blocks/blocks/test_all_blocks.py
+GenCFD/model/building_blocks/embeddings/test_embeddings.py
+GenCFD/model/building_blocks/layers/axial_attention_test.py
+GenCFD/model/building_blocks/layers/convolutions_test.py
+GenCFD/model/building_blocks/layers/multihead_attention_test.py
+GenCFD/model/building_blocks/layers/residual_test.py
+GenCFD/model/building_blocks/layers/resize_test.py
+GenCFD/model/building_blocks/stacks/test_stacks.py
+GenCFD/model/building_blocks/unets/unets_test.py
+GenCFD/model/building_blocks/unets/unets3d_test.py
+GenCFD/model/probabilistic_diffusion/test_models.py
+GenCFD/diffusion/diffusion_test.py
+GenCFD/diffusion/guidance_test.py
+GenCFD/diffusion/samplers_test.py
+GenCFD/diffusion/schedulers_test.py
 # ignore all job scripts
 *.sh
 # ignore all image files
