@@ -36,9 +36,9 @@ pip install git+https://github.com/camlab-ethz/GenCFD.git@main
 
 ## 🏋️ Training
 
-Train a model using:
+Train a model from the root directory by using:
 ```shell
-python3 -m train.train_gencfd \
+python3 -m GenCFD.train.train_gencfd \
 --dataset <DATASET_NAME> \
 --model_type <MODEL_NAME> \
 --save_dir <DIRECTORY_PATH> \
@@ -57,7 +57,7 @@ For a fast training, use a compiled model in parallel:
 
 ```shell
 torchrun --nproc_per_node=<INT> \
--m train.train_gencfd \
+-m GenCFD.train.train_gencfd \
 --world_size <INT> \
 --dataset <DATASET_NAME> \
 --model_type <MODEL_NAME> \
@@ -75,7 +75,7 @@ proper number of workers which can be specified through the flag `--worker`.
 Run inference with:
 
 ```shell
-python3 -m eval.evaluate_gencfd \
+python3 -m GenCFD.eval.evaluate_gencfd \
 --dataset <DATASET_NAME> \
 --model_type <MODEL_NAME> \
 --model_dir <DIRECTORY_PATH> \
@@ -90,7 +90,7 @@ Run inference in parallel:
 
 ```shell
 torchrun --nproc_per_node=<INT> \
--m eval.evaluate_gencfd \
+-m GenCFD.eval.evaluate_gencfd \
 --world_size <INT> \
 --dataset <DATASET_NAME> \
 --model_type <MODEL_NAME> \

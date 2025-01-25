@@ -293,7 +293,7 @@ if __name__ == "__main__":
         stats_recorder=stats_recorder,
         # Dataset configs
         dataloader=dataloader,
-        dataset_module=args.dataset,
+        dataset=dataset,
         time_cond=time_cond,
         # Eval configs
         compute_metrics=args.compute_metrics,

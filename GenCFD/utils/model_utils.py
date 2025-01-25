@@ -151,35 +151,3 @@ def get_model_args(
         args_dict = args_dict_3d
 
     return args_dict
-
-
-# General Denoiser arguments
-def get_denoiser_args(
-    args: ArgumentParser,
-    spatial_resolution: Sequence[int],
-    time_cond: bool,
-    denoiser: nn.Module,
-    noise_sampling: NoiseLevelSampling,
-    noise_weighting: NoiseLossWeighting,
-    device: torch.device = None,
-    dtype: torch.dtype = torch.float32,
-) -> dict:
-    """Return a dictionary of parameters for the DenoisingModel"""
-
-    denoiser_args = {
-        "spatial_resolution": spatial_resolution,
-        "time_cond": time_cond,
-        "denoiser": denoiser,
-        "noise_sampling": noise_sampling,
-        "noise_weighting": noise_weighting,
-        "num_eval_noise_levels": args.num_eval_noise_levels,
-        "num_eval_cases_per_lvl": args.num_eval_cases_per_lvl,
-        "min_eval_noise_lvl": args.min_eval_noise_lvl,
-        "max_eval_noise_lvl": args.max_eval_noise_lvl,
-        "consistent_weight": args.consistent_weight,
-        "device": device,
-        "dtype": dtype,
-        "task": args.task,
-    }
-
-    return denoiser_args

@@ -64,6 +64,7 @@ dependencies = [
     "pytz>=2024.2",
     "pyvista>=0.44.1",
     "requests>=2.32.3",
+    "scipy>=1.15.1",
     "scooby>=0.10.0",
     "six>=1.16.0",
     "sympy>=1.13.2",

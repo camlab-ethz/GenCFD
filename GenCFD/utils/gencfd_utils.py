@@ -29,7 +29,8 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from GenCFD.model.building_blocks.unets.unets import UNet, PreconditionedDenoiser
 from GenCFD.model.building_blocks.unets.unets3d import UNet3D, PreconditionedDenoiser3D
 from GenCFD.model.probabilistic_diffusion.denoising_model import DenoisingModel
-from GenCFD.utils.model_utils import get_model_args, get_denoiser_args
+from GenCFD.utils.model_utils import get_model_args
+from GenCFD.utils.denoiser_utils import get_denoiser_args
 from GenCFD.utils.diffusion_utils import (
     get_diffusion_scheme,
     get_noise_sampling,
