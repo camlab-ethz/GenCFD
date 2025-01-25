@@ -98,7 +98,7 @@ def run(
             trainer.eval(eval_iter, num_steps=1)
 
     for callback in callbacks:
-        callback.metric_writer = metric_writer if (local_rank in {0, -1} and metric_writer) else None
+        callback.metric_writer = metric_writer if (local_rank in [0, -1] and metric_writer) else None
         callback.on_train_begin(trainer)
 
     cur_step = trainer.train_state.int_step
@@ -175,7 +175,7 @@ def run(
                     k: v for k, v in eval_metrics.items() if train_utils.is_scalar(v)
                 }
 
-                if local_rank == 0 or local_rank == -1:
+                if local_rank in [0, -1] and metric_writer:
                     metric_writer.add_scalars("eval", eval_metrics_to_log, cur_step)
 
                 for callback in reversed(callbacks):
@@ -184,5 +184,5 @@ def run(
     for callback in reversed(callbacks):
         callback.on_train_end(trainer)
 
-    if local_rank == 0 or local_rank == -1:
+    if local_rank in [0, -1] and metric_writer:
         metric_writer.flush()

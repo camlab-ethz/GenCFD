@@ -31,7 +31,7 @@ pip install -r requirements.txt
 4) Optional: Install GenCFD as a library
 If you would like to use GenCFD and its functions as a library, you can install it directly from the repository instead of step 3:
 ```shell
-!pip install git+https://github.com/camlab-ethz/GenCFD.git@main
+pip install git+https://github.com/camlab-ethz/GenCFD.git@main
 ```
 
 ## 🏋️ Training
