@@ -47,7 +47,4 @@ from GenCFD.diffusion.schedulers import (
     uniform_time,
 )
 
-# from model.building_blocks.unets.unets import UNet
-# from model.building_blocks.unets.unets import PreconditionedDenoiser as PreconditionedDenoiserUNet
-
 from GenCFD.model.probabilistic_diffusion.denoising_model import DenoisingModel

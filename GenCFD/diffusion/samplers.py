@@ -197,11 +197,6 @@ class Sampler:
                 y=y,
                 lead_time=lead_time,
             )
-            # samples = denoise_fn(
-            #   samples / self.scheme.scale(self.tspan[-1]),
-            #   self.scheme.sigma(self.tspan[-1]),
-            #   cond,
-            # )
 
             if self.return_full_paths:
                 denoised = torch.cat([denoised, samples.unsqueeze(0)], axis=0)

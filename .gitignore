@@ -45,3 +45,6 @@ GenCFD/diffusion/schedulers_test.py
 **/*.jpg
 **/*.npz
 **/*.png
+# ignore colab checkpoints and test function
+colab/checkpoints
+colab/test.py

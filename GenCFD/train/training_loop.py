@@ -97,11 +97,8 @@ def run(
         if run_sanity_eval_batch and not trainer.is_compiled:
             trainer.eval(eval_iter, num_steps=1)
 
-    if metric_writer is None and local_rank in {0, -1}:
-        metric_writer = SummaryWriter(log_dir=workdir)
-
     for callback in callbacks:
-        callback.metric_writer = metric_writer if local_rank in {0, -1} else None
+        callback.metric_writer = metric_writer if (local_rank in {0, -1} and metric_writer) else None
         callback.on_train_begin(trainer)
 
     cur_step = trainer.train_state.int_step
@@ -144,7 +141,7 @@ def run(
         train_metrics = trainer.train(train_iter, num_steps).compute()
         cur_step += num_steps
 
-        if local_rank == 0 or local_rank == -1:
+        if local_rank in [0, -1] and metric_writer:
             metric_writer.add_scalars("train", train_metrics, cur_step)
 
         # At train/eval batch end, callbacks are called in reverse order so that

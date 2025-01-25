@@ -11,3 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+"""Utility library with relevant functions"""
+
+from GenCFD.utils.eval_utils import get_latest_checkpoint, generate_samples_2d
+from GenCFD.utils.visualization_utils import plot_2d_sample

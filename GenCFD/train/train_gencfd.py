@@ -173,7 +173,6 @@ if __name__ == "__main__":
         metric_writer=metric_writer,
         metric_aggregation_steps=args.metric_aggregation_steps,
         # Evaluation configs:
-        # Only do evaluation while training if the model is not compiled
         eval_dataloader=eval_dataloader,
         eval_every_steps=args.eval_every_steps,
         # Other configs
