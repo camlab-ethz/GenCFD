@@ -212,9 +212,3 @@ class EulerMaruyama(EulerMaruyamaStep, IterativeSdeSolver):
         IterativeSdeSolver.__init__(
             self, time_axis_pos=time_axis_pos, terminal_only=terminal_only
         )
-
-
-# def EulerMaruyama(time_axis_pos: int | None = None) -> SdeSolver:
-#     """Factory function to choose between solvers if different ones are implemented"""
-#     time_axis_pos = time_axis_pos or 0
-#     return EulerMaruyamaBase(time_axis_pos)

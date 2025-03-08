@@ -81,15 +81,17 @@ def denoise_fn_output(
     lead_time: Tensor = None,
 ) -> Tensor:
     """Depending on the task 'y' and the 'lead_time' compute the result of the
-    denoise_fn
+    denoise_fn. Note that whenever lead_time is a Tensor there can not be None 
+    values. Thus it's enough to check whether lead_time is an instance of a Tensor
     """
-    if y is None and lead_time is None:
+  
+    if y is None and not isinstance(lead_time, Tensor):
         return denoise_fn(x, sigma, cond)
 
-    elif y is not None and lead_time is None:
+    elif y is not None and not isinstance(lead_time, Tensor):
         return denoise_fn(x, sigma, y, cond)
 
-    elif y is not None and lead_time is not None:
+    elif y is not None and isinstance(lead_time, Tensor):
         return denoise_fn(x, sigma, y, lead_time, cond)
 
 

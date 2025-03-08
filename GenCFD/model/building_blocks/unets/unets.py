@@ -58,15 +58,9 @@ class UNet(nn.Module):
         num_heads: int = 8,
         normalize_qk: bool = False,
         dtype: torch.dtype = torch.float32,
-        device: Any | None = None,
-        buffer_dict: dict = None,
+        device: Any | None = None
     ):
         super(UNet, self).__init__()
-
-        if buffer_dict:
-            # Store normalization parameters as buffers for all datasets!
-            for name, tensor in buffer_dict.items():
-                self.register_buffer(name, tensor)
 
         self.in_channels = in_channels
         self.out_channels = out_channels
@@ -264,7 +258,6 @@ class PreconditionedDenoiser(UNet):
         normalize_qk: bool = False,
         dtype: torch.dtype = torch.float32,
         device: Any | None = None,
-        buffer_dict: dict = None,
         sigma_data: float = 1.0,
     ):
         super().__init__(
@@ -287,8 +280,7 @@ class PreconditionedDenoiser(UNet):
             num_heads=num_heads,
             normalize_qk=normalize_qk,
             dtype=dtype,
-            device=device,
-            buffer_dict=buffer_dict,
+            device=device
         )
 
         self.sigma_data = sigma_data

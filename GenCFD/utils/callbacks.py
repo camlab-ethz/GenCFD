@@ -17,8 +17,7 @@
 
 from collections.abc import Mapping, Sequence
 import os
-import time
-from typing import Any, Optional
+from typing import Optional
 
 import torch
 from torch.utils.tensorboard import SummaryWriter

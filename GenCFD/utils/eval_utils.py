@@ -19,7 +19,6 @@ import torch
 from torch.utils.data import DataLoader
 from typing import Dict, Any, Callable
 
-from GenCFD.utils.dataloader_utils import normalize, denormalize
 from GenCFD. utils.model_utils import reshape_jax_torch
 
 from GenCFD.eval.metrics.stats_recorder import StatsRecorder
@@ -27,73 +26,6 @@ from GenCFD.eval.metrics.probabilistic_forecast import relative_L2_norm, absolut
 from GenCFD.eval.metrics.wasserstein import compute_average_wasserstein
 
 Tensor = torch.Tensor
-
-
-def get_latest_checkpoint(folder_path: str):
-    """By specifying a folder path where all the checkpoints are stored
-    the latest model can be found!
-
-    argument: folder_path passed as a string
-    return: model path to the latest model
-    """
-
-    checkpoint_models = [f for f in os.listdir(folder_path)]
-
-    if not checkpoint_models:
-        return None
-
-    latest_checkpoint = max(
-        checkpoint_models, key=lambda f: int(re.search(r"(\d+)", f).group())
-    )
-
-    return os.path.join(folder_path, latest_checkpoint)
-
-
-def generate_samples_2d(
-        dataloader: DataLoader, 
-        time_cond: bool, 
-        stats_buffers: dict,
-        sampler: Callable[[Dict[str, Any]], Dict[str, Any]],
-        device: torch.device | None = None
-    ) -> Tensor:
-
-    
-    batch = next(iter(dataloader))  # uniform random distribution
-    batch = {k: v.to(device, non_blocking=True) for k, v in batch.items()}
-    u0 = batch["initial_cond"]
-    u = batch["target_cond"]
-
-    # No lead_time required since model wasn't conditioned on time
-    lead_time = [None] * dataloader.batch_size
-
-    # normalize inputs (initial conditions) and outputs (solutions)
-    u0_norm = reshape_jax_torch(
-        normalize(
-            reshape_jax_torch(u0),
-            mean=stats_buffers["mean_training_input"],
-            std=stats_buffers["std_training_input"],
-        )
-    )
-
-    gen_batch = torch.empty(u.shape, device=device)
-    for batch in range(dataloader.batch_size):
-        gen_sample = sampler.generate(
-            num_samples=1,
-            y=u0_norm[batch, ...].unsqueeze(0),
-            lead_time=lead_time[batch],
-        ).detach()
-
-        gen_batch[batch] = gen_sample.squeeze(0)
-    # update relevant metrics and denormalize the generated results
-    u_gen = reshape_jax_torch(
-        denormalize(
-            reshape_jax_torch(gen_batch),
-            mean=stats_buffers["mean_training_output"],
-            std=stats_buffers["std_training_output"],
-        )
-    )
-    return u_gen, u
-
 
 
 def summarize_metric_results(

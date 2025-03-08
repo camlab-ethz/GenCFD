@@ -12,12 +12,35 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import os
+import re
 import torch
 import torch.nn as nn
 from typing import Sequence
 
 from GenCFD.diffusion.diffusion import NoiseLevelSampling, NoiseLossWeighting
 from GenCFD.utils.parser_utils import ArgumentParser
+
+
+def get_latest_checkpoint(folder_path: str):
+    """By specifying a folder path where all the checkpoints are stored
+    the latest model can be found!
+
+    argument: folder_path passed as a string
+    return: model path to the latest model
+    """
+
+    checkpoint_models = [f for f in os.listdir(folder_path)]
+
+    if not checkpoint_models:
+        return None
+
+    latest_checkpoint = max(
+        checkpoint_models, key=lambda f: int(re.search(r"(\d+)", f).group())
+    )
+
+    return os.path.join(folder_path, latest_checkpoint)
+
 
 # General Denoiser arguments
 def get_denoiser_args(

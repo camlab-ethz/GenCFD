@@ -141,8 +141,10 @@ class DenoisingModel(BaseModel):
     device: Any | None = None
     dtype: torch.dtype = torch.float32
 
-    task: str = "solver"
     time_cond: bool = False
+
+    # tspan_method: str = 'exponential_noise_decay'
+    # compute_crps: bool = False
 
     def initialize(
         self,
@@ -158,7 +160,6 @@ class DenoisingModel(BaseModel):
             dtype=self.dtype,
             device=self.device,
         )  # Target condition
-
         y = torch.ones(
             (batch_size,) + (input_channels,) + self.spatial_resolution,
             dtype=self.dtype,
@@ -286,7 +287,6 @@ class DenoisingModel(BaseModel):
 
         denoise_fn = self.inference_fn(
             denoiser=self.denoiser,
-            task=self.task,
             lead_time=False if time is None else True,
         )
 
@@ -320,14 +320,11 @@ class DenoisingModel(BaseModel):
 
     @staticmethod
     def inference_fn(
-        denoiser: nn.Module, task: str = "solver", lead_time: bool = False
+        denoiser: nn.Module, lead_time: bool = False
     ) -> Tensor:
         """Returns the inference denoising function.
         Args:
           denoiser: Neural Network (NN) Module for the forward pass
-          task: defines what the NN model should be used for as an N to N model
-            or as a superresolver. Where the superresolver task setting can also
-            be used for a model which runs without any conditioning
           lead_time: If set to True it can be used for datasets which have time
             included. This time value can then be used for conditioning. Commonly
             done for an All2All training strategy.
@@ -336,20 +333,7 @@ class DenoisingModel(BaseModel):
           _denoise: corresponding denoise function
         """
 
-        if task == "superresolver":
-
-            def _denoise(
-                x: Tensor,
-                sigma: float | Tensor,
-                cond: Mapping[str, Tensor] | None = None,
-            ) -> Tensor:
-
-                if not torch.is_tensor(sigma):
-                    sigma = sigma * torch.ones((x.shape[0],))
-
-                return denoiser.forward(x=x, sigma=sigma)
-
-        elif task == "solver" and lead_time == False:
+        if lead_time == False:
 
             def _denoise(
                 x: Tensor,
@@ -363,7 +347,7 @@ class DenoisingModel(BaseModel):
 
                 return denoiser.forward(x=x, sigma=sigma, y=y)
 
-        elif task == "solver" and lead_time == True:
+        elif lead_time == True:
 
             def _denoise(
                 x: Tensor,
@@ -383,7 +367,7 @@ class DenoisingModel(BaseModel):
 
         else:
             raise ValueError(
-                "model can either be used as a 'superresolver' or a 'solver'"
+                "Lead Time needs to be a boolean, if a time condition is required"
             )
 
         return _denoise

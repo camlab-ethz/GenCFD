@@ -39,6 +39,8 @@ GenCFD/diffusion/diffusion_test.py
 GenCFD/diffusion/guidance_test.py
 GenCFD/diffusion/samplers_test.py
 GenCFD/diffusion/schedulers_test.py
+# ignore scaling stduy
+GenCFD/scaling_study
 # ignore all job scripts
 *.sh
 # ignore all image files

@@ -103,14 +103,8 @@ class UNet3D(nn.Module):
         normalize_qk: bool = False,
         dtype: torch.dtype = torch.float32,
         device: torch.device = None,
-        buffer_dict: dict = None,
     ):
         super(UNet3D, self).__init__()
-
-        if buffer_dict:
-            # Store normalization parameters as buffers for all datasets!
-            for name, tensor in buffer_dict.items():
-                self.register_buffer(name, tensor)
 
         self.in_channels = in_channels
         self.out_channels = out_channels
@@ -306,7 +300,6 @@ class PreconditionedDenoiser3D(UNet3D, nn.Module):
         normalize_qk: bool = False,
         dtype: torch.dtype = torch.float32,
         device: torch.device = None,
-        buffer_dict: dict = None,
         sigma_data: float = 1.0,
     ):
         super().__init__(
@@ -327,8 +320,7 @@ class PreconditionedDenoiser3D(UNet3D, nn.Module):
             num_heads=num_heads,
             normalize_qk=normalize_qk,
             dtype=dtype,
-            device=device,
-            buffer_dict=buffer_dict,
+            device=device
         )
 
         self.sigma_data = sigma_data

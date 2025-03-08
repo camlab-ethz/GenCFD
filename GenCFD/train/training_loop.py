@@ -21,6 +21,7 @@ import torch
 import torch.distributed as dist
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
+
 from GenCFD.utils import callbacks as cb
 from GenCFD.train import trainers
 from GenCFD.utils import train_utils

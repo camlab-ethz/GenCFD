@@ -16,6 +16,6 @@
 from GenCFD.train.trainers import DenoisingTrainer
 from GenCFD.train.training_loop import run as run_training
 from GenCFD.train.training_loop import cb as callbacks
-from GenCFD.train import train_states
+from GenCFD.train.train_states import DenoisingModelTrainState as TrainState
 
 __all__ = ['DenoisingTrainer', 'run_training', 'callbacks', 'train_states']

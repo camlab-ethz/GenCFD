@@ -181,13 +181,13 @@ For more details, please refer to their original work: [swirl-dynamics](https://
 If you use this code or find it helpful in your research, please cite the following paper:
 
 ```bibtex
-@misc{gencfd,
-      title={Generative AI for fast and accurate Statistical Computation of Fluids},
-      author={Roberto Molinaro and Samuel Lanthaler and Bogdan Raonić and Tobias Rohner and Victor Armegioiu and Zhong Yi Wan and Fei Sha and Siddhartha Mishra and &Leonardo Zepeda-Núñez},
-      year={2024},
+@misc{molinaro2025generativeaifastaccurate,
+      title={Generative AI for fast and accurate statistical computation of fluids}, 
+      author={Roberto Molinaro and Samuel Lanthaler and Bogdan Raonić and Tobias Rohner and Victor Armegioiu and Stephan Simonis and Dana Grund and Yannick Ramic and Zhong Yi Wan and Fei Sha and Siddhartha Mishra and Leonardo Zepeda-Núñez},
+      year={2025},
       eprint={2409.18359},
       archivePrefix={arXiv},
       primaryClass={cs.LG},
-      url={https://arxiv.org/abs/2409.18359},
+      url={https://arxiv.org/abs/2409.18359}, 
 }
 ```

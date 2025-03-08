@@ -16,7 +16,7 @@ import torch
 import torch.nn as nn
 import numpy as np
 from typing import Sequence
-from GenCFD.utils.parser_utils import ArgumentParser
+from argparse import ArgumentParser
 
 from GenCFD.diffusion.diffusion import NoiseLevelSampling, NoiseLossWeighting
 
@@ -87,7 +87,6 @@ def get_model_args(
     spatial_resolution: Sequence[int],
     time_cond: bool,
     device: torch.device = None,
-    buffer_dict: dict = None,
     dtype: torch.dtype = torch.float32,
 ) -> dict:
     """Return a dictionary of model parameters for the UNet architecture"""
@@ -115,7 +114,6 @@ def get_model_args(
             "normalize_qk": args.normalize_qk,
             "dtype": dtype,
             "device": device,
-            "buffer_dict": buffer_dict,
         }
         if args.model_type == "PreconditionedDenoiser":
             args_dict_2d.update({"sigma_data": args.sigma_data})
@@ -143,7 +141,6 @@ def get_model_args(
             "normalize_qk": args.normalize_qk,
             "dtype": dtype,
             "device": device,
-            "buffer_dict": buffer_dict,
         }
         if args.model_type == "PreconditionedDenoiser3D":
             args_dict_3d.update({"sigma_data": args.sigma_data})
@@ -151,3 +148,34 @@ def get_model_args(
         args_dict = args_dict_3d
 
     return args_dict
+
+
+# General Denoiser arguments
+def get_denoiser_args(
+    args: ArgumentParser,
+    spatial_resolution: Sequence[int],
+    time_cond: bool,
+    denoiser: nn.Module,
+    noise_sampling: NoiseLevelSampling,
+    noise_weighting: NoiseLossWeighting,
+    device: torch.device = None,
+    dtype: torch.dtype = torch.float32,
+) -> dict:
+    """Return a dictionary of parameters for the DenoisingModel"""
+
+    denoiser_args = {
+        "spatial_resolution": spatial_resolution,
+        "time_cond": time_cond,
+        "denoiser": denoiser,
+        "noise_sampling": noise_sampling,
+        "noise_weighting": noise_weighting,
+        "num_eval_noise_levels": args.num_eval_noise_levels,
+        "num_eval_cases_per_lvl": args.num_eval_cases_per_lvl,
+        "min_eval_noise_lvl": args.min_eval_noise_lvl,
+        "max_eval_noise_lvl": args.max_eval_noise_lvl,
+        "consistent_weight": args.consistent_weight,
+        "device": device,
+        "dtype": dtype
+    }
+
+    return denoiser_args

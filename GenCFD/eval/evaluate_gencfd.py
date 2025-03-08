@@ -20,23 +20,18 @@ Options are to compute statistical metrics or visualize results.
 import time
 import os
 import sys
-import matplotlib.pyplot as plt
 import torch
 import torch.distributed as dist
-from torch import optim
 
 from GenCFD.train.train_states import DenoisingModelTrainState
-from GenCFD.train.trainers import DenoisingTrainer
 from GenCFD.utils.parser_utils import inference_args
-from GenCFD.utils.gencfd_utils import (
-    get_dataset_loader,
+from GenCFD.utils.dataloader_builder import get_dataset_loader, get_dataset
+from GenCFD.utils.gencfd_builder import (
     create_denoiser,
     create_sampler,
     get_latest_checkpoint,
     load_json_file,
     replace_args,
-    get_buffer_dict,
-    adjust_keys,
 )
 from GenCFD.eval.metrics.stats_recorder import StatsRecorder
 from GenCFD.eval import evaluation_loop
@@ -133,8 +128,6 @@ if __name__ == "__main__":
                 train_args["out_shape"]
             ), f"out_shape should be {tuple(train_args['out_shape'])} and not {out_shape}"
 
-    # Dummy buffer values, for initialization! Necessary to load the model parameters
-    buffer_dict = get_buffer_dict(dataset=dataset, create_dummy=True)
 
     # the compute_dtype needs to be the same as used for the trained model!
     denoising_model = create_denoiser(
@@ -145,7 +138,6 @@ if __name__ == "__main__":
         time_cond=time_cond,
         device=device,
         dtype=args.dtype,
-        buffer_dict=buffer_dict,
         use_ddp_wrapper=False,
     )
 
@@ -166,24 +158,6 @@ if __name__ == "__main__":
         print(f"Total number of model parameters: {model_params}")
         print(" ")
 
-    # Rebuild the trainer used for training
-    trainer = DenoisingTrainer(
-        model=denoising_model,
-        optimizer=optim.AdamW(
-            denoising_model.denoiser.parameters(),
-            lr=args.peak_lr,
-            weight_decay=args.weight_decay,
-        ),
-        device=device,
-        ema_decay=args.ema_decay,
-        store_ema=False,
-        track_memory=False,
-        use_mixed_precision=args.use_mixed_precision,
-        is_compiled=args.compile,
-        world_size=args.world_size,
-        local_rank=args.local_rank,
-    )
-
     latest_model_path = get_latest_checkpoint(model_dir)
 
     if (args.world_size > 1 and args.local_rank == 0) or args.world_size == 1:
@@ -194,35 +168,19 @@ if __name__ == "__main__":
     trained_state = DenoisingModelTrainState.restore_from_checkpoint(
         latest_model_path,
         model=denoising_model.denoiser,
-        optimizer=trainer.optimizer,
-        is_compiled=trainer.is_compiled,
+        is_compiled=args.compile,
         is_parallelized=False,
-        use_ema=True,  # load ema parameters instead
+        use_ema=True,
+        # return only the model without the optimizer
+        only_model=True,
         device=device,
     )
 
-    # Retrieve the normalization buffer (mean and std tensors)
-    buffers = dict(denoising_model.denoiser.named_buffers())
-    for key, tensor in buffers.items():
-        if tensor is not None:  # put tensor on same device!
-            buffers[key] = tensor.to(device=device)
-
-    # If model is compiled or evaluated in parallel adjust the keyword name
-    buffers = adjust_keys(
-        buffers,
-        is_compiled=args.compile,
-        is_parallelized=True if args.world_size > 1 else False,
-        use_ddp_wrapper=False,
-    )
-
-    # Construct the inference function
-    denoise_fn = trainer.inference_fn_from_state_dict(
-        trained_state,
+    denoise_fn = denoising_model.inference_fn(
         denoiser=denoising_model.denoiser,
-        task=args.task,
-        lead_time=time_cond,
+        lead_time=time_cond
     )
-
+    
     # Create Sampler
     sampler = create_sampler(
         args=args, input_shape=out_shape, denoise_fn=denoise_fn, device=device
@@ -286,7 +244,6 @@ if __name__ == "__main__":
 
     evaluation_loop.run(
         sampler=sampler,
-        buffers=buffers,
         monte_carlo_samples=(
             args.monte_carlo_samples if args.world_size <= 1 else effective_samples
         ),
@@ -294,6 +251,7 @@ if __name__ == "__main__":
         # Dataset configs
         dataloader=dataloader,
         dataset=dataset,
+        dataset_module=args.dataset,
         time_cond=time_cond,
         # Eval configs
         compute_metrics=args.compute_metrics,

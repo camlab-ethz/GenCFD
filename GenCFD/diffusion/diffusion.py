@@ -13,7 +13,17 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Modules for diffusion models."""
+"""Modules for diffusion models.
+
+File Contains:
+    Diffusion Scheme
+    Noise Scheduler Methods
+    Noise Sampling Methods
+    Noise Weighting Methods
+
+Time step Schedulers relevant for the sampler can be found in
+    scheduler.py
+"""
 
 from __future__ import annotations
 import dataclasses
@@ -159,6 +169,8 @@ class Diffusion:
             sigma.inverse(y / data_std), device=device
         )
         scaled_sigma = InvertibleSchedule(scaled_forward, scaled_inverse)
+        # TODO: Check if it still works: changed th.ones_like to th.ones_like(...)
+        # return cls(scale=th.ones_like, sigma=scaled_sigma)
         return cls(
             scale=lambda s: th.as_tensor(s / s, device=device), sigma=scaled_sigma
         )
@@ -191,6 +203,9 @@ def _linear_rescale(
     inv = lambda y: in_min + (y - out_min) / out_range * in_range
     return InvertibleSchedule(fwd, inv)
 
+# ********************
+# Noise schedulers
+# ********************
 
 def tangent_noise_schedule(
     clip_max: float = 100.0,

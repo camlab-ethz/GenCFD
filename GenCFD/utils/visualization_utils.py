@@ -78,6 +78,7 @@ def plot_2d_sample(
     axis: int = 0,
     save: bool = True,
     save_dir: str = None,
+    name: str | None = None
 ):
     """Plots the 2D results"""
 
@@ -101,7 +102,10 @@ def plot_2d_sample(
     plt.tight_layout()
 
     if save:
-        save_path = os.path.join(save_dir, "gen_gt_sample.png")
+        if not name:
+            save_path = os.path.join(save_dir, "gen_gt_sample.png")
+        else:
+            save_path = os.path.join(save_dir, name)
         plt.savefig(save_path)
     else:
         plt.show()
@@ -143,14 +147,6 @@ def gen_gt_plotter_3d(
 
     gt_sample = reshape_to_numpy(gt_sample)
     gen_sample = reshape_to_numpy(gen_sample)
-
-    # Absolute values:
-    # gt_sample = np.abs(gt_sample)
-    # gen_sample = np.abs(gen_sample)
-
-    # threshold = 1e-3
-    # gen_sample = np.where(gen_sample < threshold, 0, gen_sample)
-    # gt_sample = np.where(gt_sample < threshold, 0, gt_sample)
 
     volume_gen = pv.wrap(gen_sample[..., axis])
     volume_gt = pv.wrap(gt_sample[..., axis])

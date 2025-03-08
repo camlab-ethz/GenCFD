@@ -25,8 +25,8 @@ import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 import numpy as np
 from torchmetrics import MetricCollection, MeanMetric
-from GenCFD.utils.train_utils import StdMetric, compute_memory
 
+from GenCFD.utils.train_utils import StdMetric, compute_memory
 from GenCFD.train import train_states
 import GenCFD.diffusion as dfn_lib
 
@@ -363,7 +363,6 @@ class DenoisingTrainer(BasicTrainer[M, SD]):
         denoiser: nn.Module,
         *args,
         use_ema: bool = False,
-        task: str = "solver",
         lead_time: bool = False,
         **kwargs,
     ):
@@ -376,5 +375,5 @@ class DenoisingTrainer(BasicTrainer[M, SD]):
                 raise ValueError("EMA model is None or not initialized")
 
         return dfn_lib.DenoisingModel.inference_fn(
-            denoiser, task, lead_time, *args, **kwargs
+            denoiser, lead_time, *args, **kwargs
         )

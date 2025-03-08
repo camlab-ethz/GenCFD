@@ -131,21 +131,23 @@ class BasicTrainState(TrainState):
         cls,
         ckpt_path: str,
         model: nn.Module,
-        optimizer: torch.optim.Optimizer,
         is_compiled: bool,
         is_parallelized: bool,
         use_ema: bool = False,
-        device: torch.device = None,
+        only_model: bool = False,
+        optimizer: torch.optim.Optimizer | None = None,
+        device: torch.device | None = None,
     ) -> TrainState:
 
         # if model was trained on gpu but is evaluated on the cpu 'map_location' is necessary
         checkpoint = torch.load(ckpt_path, weights_only=True, map_location=device)
 
-        opt_state = (
-            checkpoint["opt_state"]
-            if "opt_state" in checkpoint.keys()
-            else checkpoint["optimizer_state_dict"]
-        )
+        if not only_model:
+            opt_state = (
+                checkpoint["opt_state"]
+                if "opt_state" in checkpoint.keys()
+                else checkpoint["optimizer_state_dict"]
+            )
 
         if use_ema:
             params = (
@@ -191,16 +193,23 @@ class BasicTrainState(TrainState):
             # stored model was not trained in parallel but current model is
             params = {keyword_ddp + key: value for key, value in params.items()}
 
-        model.load_state_dict(params)
-        optimizer.load_state_dict(opt_state)
+        model.load_state_dict(params, strict=False) # TODO delete strict!
+        if not only_model:
+            optimizer.load_state_dict(opt_state)
+        
+        if only_model:
+            return cls(
+                model=model
+            )
+        else:
+            return cls(
+                model=model,
+                optimizer=optimizer,
+                params=params,
+                opt_state=opt_state,
+                step=checkpoint.get("step", 0),
+            )
 
-        return cls(
-            model=model,
-            optimizer=optimizer,
-            params=params,
-            opt_state=opt_state,
-            step=checkpoint.get("step", 0),
-        )
 
     def state_dict(self) -> Dict[str, Any]:
         "Extend base state_dict to include model and optimizer states"

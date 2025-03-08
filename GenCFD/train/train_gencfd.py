@@ -16,6 +16,7 @@
 
 import time
 import os
+import math
 
 # Set the cache size and debugging for torch.compile before importing torch
 # os.environ["TORCH_LOGS"] = "all"  # or any of the valid log settings
@@ -26,9 +27,8 @@ from torch import optim
 from torch.utils.tensorboard import SummaryWriter
 
 from GenCFD.train import training_loop
-from GenCFD.utils.gencfd_utils import (
-    get_dataset_loader,
-    get_buffer_dict,
+from GenCFD.utils.dataloader_builder import get_dataset_loader
+from GenCFD.utils.gencfd_builder import (
     create_denoiser,
     create_callbacks,
     save_json_file,
@@ -99,15 +99,12 @@ if __name__ == "__main__":
         split_ratio=0.99,
     )
 
-    # Create a buffer dictionary to store normalization parameters in the NN
-    buffer_dict = get_buffer_dict(dataset=dataset, device=device)
-
     if (args.world_size > 1 and args.local_rank == 0) or args.world_size == 1:
         # Save parameters in a JSON File
         save_json_file(
             args=args,
             time_cond=time_cond,
-            split_ratio=0.99,
+            split_ratio=0.8,
             out_shape=dataset.output_shape,  # output shape of the prediction
             input_channel=dataset.input_channel,
             output_channel=dataset.output_channel,
@@ -124,7 +121,6 @@ if __name__ == "__main__":
         time_cond=time_cond,
         device=device,
         dtype=args.dtype,
-        buffer_dict=buffer_dict,
         use_ddp_wrapper=True,
     )
 
@@ -137,13 +133,16 @@ if __name__ == "__main__":
         print(f"Total number of model parameters: {model_params}")
         print(" ")
 
+    # Initialize optimizer
+    optimizer = optim.AdamW(
+        denoising_model.denoiser.parameters(),
+        lr=args.peak_lr,
+        weight_decay=args.weight_decay,
+    )
+
     trainer = training_loop.trainers.DenoisingTrainer(
         model=denoising_model,
-        optimizer=optim.AdamW(
-            denoising_model.denoiser.parameters(),
-            lr=args.peak_lr,
-            weight_decay=args.weight_decay,
-        ),
+        optimizer=optimizer,
         device=device,
         ema_decay=args.ema_decay,
         store_ema=True,  # Store ema model as well
