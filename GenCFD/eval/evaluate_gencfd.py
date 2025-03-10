@@ -25,14 +25,14 @@ import torch.distributed as dist
 
 from GenCFD.train.train_states import DenoisingModelTrainState
 from GenCFD.utils.parser_utils import inference_args
-from GenCFD.utils.dataloader_builder import get_dataset_loader, get_dataset
+from GenCFD.utils.dataloader_builder import get_dataset_loader
 from GenCFD.utils.gencfd_builder import (
     create_denoiser,
     create_sampler,
-    get_latest_checkpoint,
     load_json_file,
     replace_args,
 )
+from GenCFD.utils.denoiser_utils import get_latest_checkpoint
 from GenCFD.eval.metrics.stats_recorder import StatsRecorder
 from GenCFD.eval import evaluation_loop
 

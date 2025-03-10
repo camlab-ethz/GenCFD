@@ -40,11 +40,10 @@ of timesteps moving forward from the initial condition.
   - `RichtmyerMeshkov2D` 
   - There is no seperate Conditional Dataset
 """
-import os
 import numpy as np
 import torch
-from dataloader.dataset import TrainingSetBase, ConditionalBase
-from typing import Union, Tuple, Any, List, Dict
+from GenCFD.dataloader.dataset import TrainingSetBase, ConditionalBase
+from typing import Tuple, Any, List, Dict
 
 array = np.ndarray
 

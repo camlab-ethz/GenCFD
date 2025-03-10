@@ -120,7 +120,7 @@ def run(
             u0 = batch["initial_cond"]
             u = batch["target_cond"]
             if time_cond:
-                lead_time = batch["lead_time"].reshape(-1, 1)
+                lead_time = batch["lead_time"]
             else:
                 lead_time = [None] * batch_size
 
