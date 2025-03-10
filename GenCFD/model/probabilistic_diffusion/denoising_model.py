@@ -332,6 +332,8 @@ class DenoisingModel(BaseModel):
         Return:
           _denoise: corresponding denoise function
         """
+        
+        denoiser.eval()
 
         if lead_time == False:
 
