@@ -145,6 +145,8 @@ def get_dataset_loader(
     # is_time_dependent passes the bool time_cond and tells if the problem is time
     # dependent or not
     dataset, time_cond = get_dataset(name=name, is_time_dependent=True)
+    use_persistent_workers = num_worker > 0
+    prefetch = prefetch_factor if num_worker > 0 else None
 
     if args.world_size > 1:
         dist_sampler = get_distributed_sampler(args, dataset)
@@ -162,8 +164,9 @@ def get_dataset_loader(
             batch_size=batch_size,
             shuffle=True if args.world_size == 1 else False,
             pin_memory=True,
+            persistent_workers=use_persistent_workers,
             num_workers=num_worker,
-            prefetch_factor=prefetch_factor,
+            prefetch_factor=prefetch,
             sampler=train_sampler if args.world_size > 1 else None,
         )
         eval_dataloader = DataLoader(
@@ -171,8 +174,9 @@ def get_dataset_loader(
             batch_size=batch_size,
             shuffle=True if args.world_size == 1 else False,
             pin_memory=True,
+            persistent_workers=use_persistent_workers,
             num_workers=num_worker,
-            prefetch_factor=prefetch_factor,
+            prefetch_factor=prefetch,
             sampler=eval_sampler if args.world_size > 1 else None,
         )
         return (train_dataloader, eval_dataloader, dataset, time_cond)
@@ -187,8 +191,9 @@ def get_dataset_loader(
             # shuffle=True if args.world_size == 1 else False,
             shuffle=True,
             pin_memory=True,
+            persistent_workers=use_persistent_workers,
             num_workers=num_worker,
-            prefetch_factor=prefetch_factor,
+            prefetch_factor=prefetch,
             sampler=sampler if args.world_size > 1 else None,
         )
         return (dataloader, dataset, time_cond)
