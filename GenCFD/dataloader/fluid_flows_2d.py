@@ -188,8 +188,8 @@ class ShearLayer2D(IncompressibleFlows2D):
         self,
         metadata: Dict[str, Any],
         start=0,
-        move_to_local_scratch: bool = True,
-        retrieve_stats_from_file: bool = True,
+        move_to_local_scratch: bool = False,
+        retrieve_stats_from_file: bool = False,
         input_channel: int = 2,
         output_channel: int = 2,
         spatial_resolution: Tuple[int, ...] = (128, 128),
@@ -226,13 +226,17 @@ class CloudShock2D(IncompressibleFlows2D):
         metadata: Dict[str, Any],
         start=0,
         move_to_local_scratch: bool = False,
-        retrieve_stats_from_file: bool = True,
+        retrieve_stats_from_file: bool = False,
         input_channel: int = 4,
         output_channel: int = 4,
         spatial_resolution: Tuple[int, ...] = (128, 128),
         input_shape: Tuple[int, ...] = (8, 128, 128),
         output_shape: Tuple[int, ...] = (4, 128, 128),
         variable_names: List["str"] = ["data"],
+        mean_training_input: array = np.array([1.6308324e+00,  2.2193029e+00, -7.3468456e-16,  3.6186913e+01]),
+        mean_training_output: array = np.array([4.2250075e+00,  4.1400085e+01, -3.4726902e-03,  5.9366187e+02]),
+        std_training_input: array = np.array([5.3733552e-01, 3.6503599e+00, 3.9603324e-14, 5.5409000e+01]),
+        std_training_output: array = np.array([1.5385458, 10.00513  , 3.885837 , 63.43266])
     ):
 
         self.class_name = self.__class__.__name__
@@ -248,6 +252,10 @@ class CloudShock2D(IncompressibleFlows2D):
             start=start,
             move_to_local_scratch=move_to_local_scratch,
             retrieve_stats_from_file=retrieve_stats_from_file,
+            mean_training_input=mean_training_input,
+            std_training_input=std_training_input,
+            mean_training_output=mean_training_output,
+            std_training_output=std_training_output,
         )
 
 
@@ -257,14 +265,18 @@ class RichtmyerMeshkov2D(IncompressibleFlows2D):
         metadata: Dict[str, Any],
         start=0,
         file=None,
-        move_to_local_scratch: bool = True,
-        retrieve_stats_from_file: bool = True,
+        move_to_local_scratch: bool = False,
+        retrieve_stats_from_file: bool = False,
         input_channel: int = 4,
         output_channel: int = 4,
         spatial_resolution: Tuple[int, ...] = (128, 128),
         input_shape: Tuple[int, ...] = (8, 128, 128),
         output_shape: Tuple[int, ...] = (4, 128, 128),
         variable_names: List["str"] = ["rho", "E", "mx", "my"],
+        mean_training_input: array = np.array([1.19643337, 3.99017382, 0., 0.]),
+        mean_training_output: array = np.array([ 1.19643338e+00,  3.99017382e+00, -1.34351425e-09,  3.37138772e-11]),
+        std_training_input: array = np.array([0.39482422, 8.16406155, 0., 0.]),
+        std_training_output: array = np.array([0.56974495, 1.66372766, 0.25579005, 0.25579102])
     ):
 
         self.class_name = self.__class__.__name__
@@ -281,6 +293,10 @@ class RichtmyerMeshkov2D(IncompressibleFlows2D):
             move_to_local_scratch=move_to_local_scratch,
             retrieve_stats_from_file=retrieve_stats_from_file,
             get_values=True,
+            mean_training_input=mean_training_input,
+            std_training_input=std_training_input,
+            mean_training_output=mean_training_output,
+            std_training_output=std_training_output,
         )
 
 
@@ -334,7 +350,7 @@ class ConditionalCloudShock2D(ConditionalBase):
     def __init__(
         self,
         metadata: Dict[str, Any],
-        move_to_local_scratch: bool = True,
+        move_to_local_scratch: bool = False,
         input_channel: int = 4,
         output_channel: int = 4,
         spatial_resolution: Tuple[int, ...] = (128, 128),

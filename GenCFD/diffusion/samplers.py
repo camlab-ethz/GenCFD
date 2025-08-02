@@ -16,14 +16,14 @@
 """Diffusion samplers."""
 
 # from collections.abc import Mapping, Sequence
-from typing import Any, Protocol, Sequence, Mapping
+from typing import Any, Protocol, Sequence, Mapping, Optional
 
 import torch
 from torch.autograd import grad
 import numpy as np
 
 from GenCFD.diffusion import diffusion, guidance
-from GenCFD.solvers import sde
+from GenCFD.solvers import sde, ode
 
 
 Tensor = torch.Tensor
@@ -368,3 +368,124 @@ class SdeSampler(Sampler):
             return torch.sqrt(dsquare_sigma_dt) * self.scheme.scale(t)
 
         return sde.SdeDynamics(_drift, _diffusion)
+
+
+class OdeSampler(Sampler):
+    """Use a probability flow ODE to generate samples or compute log likelihood.
+
+    Attributes:
+        integrator: The ODE solver for solving the sampling ODE.
+        num_probes: The number of probes to use for Hutchinson's trace estimator
+        when computing the log likelihood of samples. If `None`, the trace is
+        computed exactly.
+    """
+
+    def __init__(
+        self,
+        input_shape: tuple[int, ...],
+        scheme: diffusion.Diffusion,
+        denoise_fn: DenoiseFn,
+        tspan: Tensor,
+        guidance_transforms: Sequence[guidance.Transform] = (),
+        apply_denoise_at_end: bool = True,
+        return_full_paths: bool = False,
+        integrator: ode.OdeSolver = ode.HeunsMethod(),
+        num_probes: int | None = None,
+        device: torch.device = None,
+        dtype: torch.dtype = torch.float32
+    ):
+        super().__init__(
+            input_shape=input_shape,
+            scheme=scheme,
+            denoise_fn=denoise_fn,
+            tspan=tspan,
+            guidance_transforms=guidance_transforms,
+            apply_denoise_at_end=apply_denoise_at_end,
+            return_full_paths=return_full_paths,
+            device=device,
+            dtype=dtype,
+        )
+
+        self.integrator = integrator
+        self.num_probes = num_probes
+
+    def denoise(
+        self,
+        noisy: Tensor,
+        tspan: Tensor,
+        y: Optional[Tensor] = None,
+        lead_time: Optional[Tensor] = None,
+        cond: TensorMapping | None = None,
+        guidance_inputs: TensorMapping | None = None,
+    ) -> Tensor:
+        """Applies iterative denoising to given noisy states."""
+
+        if self.integrator is None:
+            self.integrator = ode.HeunsMethod()
+
+
+        if self.integrator.terminal_only and self.return_full_paths:
+            raise ValueError(
+                f"Integrator type `{type(self.integrator)}` does not support"
+                " returning full paths."
+            )
+
+        params = dict(cond=cond, guidance_inputs=guidance_inputs)
+        # The lead axis should always be time.
+        denoised = self.integrator(
+            func=self.dynamics, 
+            x0=noisy, 
+            tspan=tspan, 
+            params=params,
+            y=y,
+            lead_time=lead_time
+        )
+        # ODE solvers may return either the full paths or the terminal state only.
+        # If the former, the lead axis should be time.
+        samples = denoised if self.integrator.terminal_only else denoised[-1]
+        return denoised if self.return_full_paths else samples
+
+    @property
+    def dynamics(self) -> ode.OdeDynamics:
+        """The right-hand side function of the sampling ODE.
+
+        In score function (eq. 3 in Karras et al. https://arxiv.org/abs/2206.00364):
+
+        dx = [ṡ(t)/s(t) x - s(t)² σ̇(t)σ(t) ∇pₜ(x)] dt,
+
+        or, in terms of denoise function (eq. 81):
+
+        dx = [σ̇(t)/σ(t) + ṡ(t)/s(t)] x - [s(t)σ̇(t)/σ(t)] D(x/s(t), σ(t)) dt
+
+        where s(t), σ(t) are the scale and noise schedule of the diffusion scheme.
+        """
+
+        def _dynamics(
+            x: Tensor, 
+            t: Tensor, 
+            params: Params,
+            y: Optional[Tensor] = None,
+            lead_time: Optional[Tensor] = None
+        ) -> Tensor:
+            assert t.ndim == 0, "`t` must be a scalar."
+            denoise_fn = self.get_guided_denoise_fn(
+                guidance_inputs=params["guidance_inputs"]
+            )
+            s, sigma = self.scheme.scale(t), self.scheme.sigma(t)
+            x_hat = x / s
+            if not t.requires_grad:
+                t.requires_grad_(True)
+            dlog_sigma_dt = dlog_dt(self.scheme.sigma)(t)
+            dlog_s_dt = dlog_dt(self.scheme.scale)(t)
+
+            denoiser_output = denoise_fn_output(
+                denoise_fn=denoise_fn,
+                x=x_hat, 
+                sigma=sigma, 
+                cond=params["cond"],
+                y=y,
+                lead_time=lead_time
+            )
+            return (dlog_sigma_dt + dlog_s_dt) * x - dlog_sigma_dt * s * denoiser_output
+
+        return _dynamics

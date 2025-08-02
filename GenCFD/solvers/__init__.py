@@ -23,3 +23,12 @@ from GenCFD.solvers.sde import (
     SdeDynamics,
     SdeSolver,
 )
+
+from GenCFD.solvers.ode import (
+    OdeDynamics,
+    OdeSolver,
+    ExplicitEuler,
+    HeunsMethod,
+    RungeKutta4,
+    OneStepDirect
+)
