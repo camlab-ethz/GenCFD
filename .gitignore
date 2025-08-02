@@ -14,7 +14,8 @@ GenCFD/visualize
 GenCFD/dataloader/test.py
 GenCFD/dataloader/dataset_test.py
 # ignore test file
-GenCFD/eval/metrics/test_probabilistic_forecast.py
+GenCFD/eval/metrics/probabilistic_forecast_test.py
+GenCFD/eval/metrics/leray_projection_test.py
 # ignore all test files
 GenCFD/utils/dataloader_utils_test.py
 GenCFD/utils/model_utils_test.py
