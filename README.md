@@ -1,9 +1,9 @@
-# GenCFD: Generative AI for CFD
+# GenCFD: Generative AI for CFD 
 
 [![DOI](https://zenodo.org/badge/855833274.svg)](https://doi.org/10.5281/zenodo.20744139)
 
 This is the PyTorch based source code for the paper 
-[Generative AI for fast and accurate Statistical Computation of Fluids](https://arxiv.org/abs/2409.18359).
+[Generative AI for fast and accurate Statistical Computation of Fluids](https://www.nature.com/articles/s41467-026-76390-x) 
 
 ### Overview
 
